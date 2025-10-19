@@ -2,12 +2,12 @@
 export const dynamic = "force-dynamic";
 import type React from "react";
 import Image from "next/image";
-import Logo from  "../../../assets/logo.png";
+import Logo from "../../../assets/logo.png";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import Link from "next/link";
-
+import Logo1 from "../../../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +30,11 @@ export default function UpdatePasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [errors, setErrors] = useState<{ password?: string; confirm?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{
+    password?: string;
+    confirm?: string;
+    general?: string;
+  }>({});
   const [isLoading, setIsLoading] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -42,7 +46,10 @@ export default function UpdatePasswordPage() {
       if (!mounted) return;
 
       if (!data.session) {
-        setErrors({ general: "Recovery link is invalid or expired. Please request a new reset email." });
+        setErrors({
+          general:
+            "Recovery link is invalid or expired. Please request a new reset email.",
+        });
       }
       setReady(true);
     })();
@@ -55,7 +62,8 @@ export default function UpdatePasswordPage() {
   const validate = () => {
     const next: typeof errors = {};
     if (!password) next.password = "Password is required";
-    else if (password.length < 8) next.password = "Password must be at least 8 characters";
+    else if (password.length < 8)
+      next.password = "Password must be at least 8 characters";
     if (!confirm) next.confirm = "Please confirm your password";
     else if (password !== confirm) next.confirm = "Passwords do not match";
     setErrors(next);
@@ -74,12 +82,16 @@ export default function UpdatePasswordPage() {
 
       toast({
         title: "Password updated",
-        description: "Your password has been reset successfully. Please sign in.",
+        description:
+          "Your password has been reset successfully. Please sign in.",
       });
 
       router.replace("/auth/login");
     } catch (err: any) {
-      setErrors((prev) => ({ ...prev, general: err?.message ?? "Something went wrong." }));
+      setErrors((prev) => ({
+        ...prev,
+        general: err?.message ?? "Something went wrong.",
+      }));
     } finally {
       setIsLoading(false);
     }
@@ -91,26 +103,30 @@ export default function UpdatePasswordPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="relative mb-3">
-            <div className="relative inline-flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-background ring-1 ring-border shadow-sm overflow-hidden">
-              <Image
-                src={Logo}
-                alt="MK INVOICING Logo"
-                width={80}
-                height={80}
-                className="object-contain w-24 h-24 md:w-24 md:h-24"
-                priority
-              />
-            </div>
+            <Image
+              src={Logo}
+              alt="MK INVOICING Logo"
+              width={80}
+              height={80}
+              className="object-contain w-24 h-24 md:w-24 md:h-24"
+              priority
+            />
           </div>
-          <CardTitle className="text-2xl font-bold">Set a new password</CardTitle>
-          <CardDescription>Enter and confirm your new password to continue</CardDescription>
+          <CardTitle className="text-2xl font-bold">
+            Set a new password
+          </CardTitle>
+          <CardDescription>
+            Enter and confirm your new password to continue
+          </CardDescription>
         </div>
       </CardHeader>
 
       <form onSubmit={handleSubmit} noValidate>
         <CardContent className="space-y-4">
           {!ready ? (
-            <p className="text-sm text-muted-foreground">Checking recovery session…</p>
+            <p className="text-sm text-muted-foreground">
+              Checking recovery session…
+            </p>
           ) : errors.general ? (
             <div className="text-sm text-destructive">{errors.general}</div>
           ) : (
@@ -124,7 +140,9 @@ export default function UpdatePasswordPage() {
                     placeholder="At least 8 characters"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className={errors.password ? "border-destructive pr-10" : "pr-10"}
+                    className={
+                      errors.password ? "border-destructive pr-10" : "pr-10"
+                    }
                     autoComplete="new-password"
                   />
                   <button
@@ -133,10 +151,16 @@ export default function UpdatePasswordPage() {
                     className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
                     onClick={() => setShowPwd((s) => !s)}
                   >
-                    {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showPwd ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
                   </button>
                 </div>
-                {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
+                {errors.password && (
+                  <p className="text-sm text-destructive">{errors.password}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -148,7 +172,9 @@ export default function UpdatePasswordPage() {
                     placeholder="Re-enter your new password"
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
-                    className={errors.confirm ? "border-destructive pr-10" : "pr-10"}
+                    className={
+                      errors.confirm ? "border-destructive pr-10" : "pr-10"
+                    }
                     autoComplete="new-password"
                   />
                   <button
@@ -157,17 +183,27 @@ export default function UpdatePasswordPage() {
                     className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
                     onClick={() => setShowConfirm((s) => !s)}
                   >
-                    {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showConfirm ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
                   </button>
                 </div>
-                {errors.confirm && <p className="text-sm text-destructive">{errors.confirm}</p>}
+                {errors.confirm && (
+                  <p className="text-sm text-destructive">{errors.confirm}</p>
+                )}
               </div>
             </>
           )}
         </CardContent>
 
         <CardFooter className="flex flex-col space-y-4 mt-3">
-          <Button type="submit" className="w-full" disabled={isLoading || !!errors.general || !ready}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={isLoading || !!errors.general || !ready}
+          >
             {isLoading ? "Updating..." : "Update password"}
           </Button>
 
@@ -180,6 +216,16 @@ export default function UpdatePasswordPage() {
           </Link>
         </CardFooter>
       </form>
+      <div className="flex flex-col items-center justify-center mt-4 mb-2">
+        <span className="text-xs text-muted-foreground mb-1">Powered by</span>
+        <Image
+          src={Logo1} // replace if needed
+          alt="Powered By Logo"
+          width={80}
+          height={80}
+          className="object-contain"
+        />
+      </div>
     </Card>
   );
 }

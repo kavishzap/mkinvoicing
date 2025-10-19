@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type React from "react";
 import Image from "next/image";
 import Logo from "../../../assets/logo.png";
+import Logo1 from "../../../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -59,7 +60,8 @@ export default function ForgotPasswordPage() {
 
       toast({
         title: "Reset link sent",
-        description: "If this email exists, we've sent a reset link to your inbox.",
+        description:
+          "If this email exists, we've sent a reset link to your inbox.",
       });
 
       router.push("/auth/login");
@@ -80,16 +82,14 @@ export default function ForgotPasswordPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="relative mb-3">
-            <div className="relative inline-flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-background ring-1 ring-border shadow-sm overflow-hidden">
-              <Image
-                src={Logo}
-                alt="MK INVOICING Logo"
-                width={80}
-                height={80}
-                className="object-contain w-24 h-24 md:w-24 md:h-24"
-                priority
-              />
-            </div>
+            <Image
+              src={Logo}
+              alt="MK INVOICING Logo"
+              width={80}
+              height={80}
+              className="object-contain w-24 h-24 md:w-24 md:h-24"
+              priority
+            />
           </div>
           <CardTitle className="text-2xl font-bold">Forgot password?</CardTitle>
           <CardDescription>
@@ -129,6 +129,16 @@ export default function ForgotPasswordPage() {
           </Link>
         </CardFooter>
       </form>
+      <div className="flex flex-col items-center justify-center mt-4 mb-2">
+        <span className="text-xs text-muted-foreground mb-1">Powered by</span>
+        <Image
+          src={Logo1} // replace if needed
+          alt="Powered By Logo"
+          width={80}
+          height={80}
+          className="object-contain"
+        />
+      </div>
     </Card>
   );
 }

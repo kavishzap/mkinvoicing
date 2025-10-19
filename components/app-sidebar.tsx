@@ -7,7 +7,7 @@ import { FileText, Settings, Users, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Logo from "../assets/logo.png";
 import { toast } from "@/hooks/use-toast";
-
+import Logo1 from "../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
 type SidebarProps = {
   className?: string;
   onNavigate?: () => void;
@@ -99,6 +99,16 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
           Logout
         </button>
       </nav>
+      <div className="flex flex-col items-center justify-center mt-4 mb-2">
+        <span className="text-xs text-muted-foreground mb-1">Powered by</span>
+        <Image
+          src={Logo1} // replace if needed
+          alt="Powered By Logo"
+          width={80}
+          height={80}
+          className="object-contain"
+        />
+      </div>
     </aside>
   );
 }

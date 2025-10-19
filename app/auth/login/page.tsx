@@ -2,7 +2,8 @@
 export const dynamic = "force-dynamic";
 import type React from "react";
 import Image from "next/image";
-import Logo from  "../../../assets/logo.png";
+import Logo from "../../../assets/logo.png";
+import Logo1 from "../../../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -63,10 +64,9 @@ export default function LoginPage() {
       });
 
       if (error) {
-        const msg =
-          error.message?.toLowerCase().includes("email not confirmed")
-            ? "Please confirm your email before signing in."
-            : error.message;
+        const msg = error.message?.toLowerCase().includes("email not confirmed")
+          ? "Please confirm your email before signing in."
+          : error.message;
         throw new Error(msg);
       }
 
@@ -93,16 +93,14 @@ export default function LoginPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="relative mb-3">
-            <div className="relative inline-flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-background ring-1 ring-border shadow-sm overflow-hidden">
-              <Image
-                src={Logo}
-                alt="MK INVOICING Logo"
-                width={80}
-                height={80}
-                className="object-contain w-24 h-24 md:w-24 md:h-24"
-                priority
-              />
-            </div>
+            <Image
+              src={Logo}
+              alt="MK INVOICING Logo"
+              width={80}
+              height={80}
+              className="object-contain w-24 h-24 md:w-24 md:h-24"
+              priority
+            />
           </div>
           <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
           <CardDescription>
@@ -140,7 +138,9 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onBlur={validateForm}
-                className={errors.password ? "border-destructive pr-10" : "pr-10"}
+                className={
+                  errors.password ? "border-destructive pr-10" : "pr-10"
+                }
                 autoComplete="current-password"
               />
               <button
@@ -149,7 +149,11 @@ export default function LoginPage() {
                 className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
                 onClick={() => setShowPwd((s) => !s)} // ✅ toggle logic
               >
-                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPwd ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
               </button>
             </div>
             {errors.password && (
@@ -182,6 +186,16 @@ export default function LoginPage() {
           </p>
         </CardFooter>
       </form>
+      <div className="flex flex-col items-center justify-center mt-4 mb-2">
+        <span className="text-xs text-muted-foreground mb-1">Powered by</span>
+        <Image
+          src={Logo1} // replace if needed
+          alt="Powered By Logo"
+          width={80}
+          height={80}
+          className="object-contain"
+        />
+      </div>
     </Card>
   );
 }

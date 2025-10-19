@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type React from "react";
 import Image from "next/image";
 import Logo from "../../../assets/logo.png";
+import Logo1 from "../../../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -39,7 +40,8 @@ export default function RegisterPage() {
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.firstName.trim()) newErrors.firstName = "First name is required";
+    if (!formData.firstName.trim())
+      newErrors.firstName = "First name is required";
     if (!formData.lastName.trim()) newErrors.lastName = "Last name is required";
 
     if (!formData.email) newErrors.email = "Email is required";
@@ -50,7 +52,8 @@ export default function RegisterPage() {
     else if (formData.password.length < 8)
       newErrors.password = "Password must be at least 8 characters";
 
-    if (!formData.confirmPassword) newErrors.confirmPassword = "Please confirm your password";
+    if (!formData.confirmPassword)
+      newErrors.confirmPassword = "Please confirm your password";
     else if (formData.password !== formData.confirmPassword)
       newErrors.confirmPassword = "Passwords do not match";
 
@@ -96,7 +99,8 @@ export default function RegisterPage() {
     } catch (err: any) {
       toast({
         title: "Registration failed",
-        description: err?.message ?? "Something went wrong while creating your account.",
+        description:
+          err?.message ?? "Something went wrong while creating your account.",
         variant: "destructive",
       });
     } finally {
@@ -114,20 +118,19 @@ export default function RegisterPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="relative mb-3">
-            <div className="relative inline-flex h-16 w-16 md:h-20 md:w-20 items-center justify-center rounded-2xl bg-background ring-1 ring-border shadow-sm overflow-hidden">
-              <Image
-                src={Logo}
-                alt="MK INVOICING Logo"
-                width={80}
-                height={80}
-                className="object-contain w-24 h-24 md:w-24 md:h-24"
-                priority
-              />
-            </div>
+            <Image
+              src={Logo}
+              alt="MK INVOICING Logo"
+              width={80}
+              height={80}
+              className="object-contain w-24 h-24 md:w-24 md:h-24"
+              priority
+            />
           </div>
           <CardTitle className="text-2xl font-bold">Create account</CardTitle>
           <CardDescription className="max-w-sm">
-            <span className="text-foreground/80 font-medium">MK INVOICING</span> : Modern invoicing made simple
+            <span className="text-foreground/80 font-medium">MK INVOICING</span>{" "}
+            : Modern invoicing made simple
           </CardDescription>
         </div>
       </CardHeader>
@@ -192,7 +195,9 @@ export default function RegisterPage() {
                 value={formData.password}
                 onChange={(e) => handleChange("password", e.target.value)}
                 onBlur={validateForm}
-                className={errors.password ? "border-destructive pr-10" : "pr-10"}
+                className={
+                  errors.password ? "border-destructive pr-10" : "pr-10"
+                }
                 autoComplete="new-password"
               />
               <button
@@ -201,7 +206,11 @@ export default function RegisterPage() {
                 className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
                 onClick={() => setShowPwd((s) => !s)}
               >
-                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPwd ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
               </button>
             </div>
             {errors.password && (
@@ -217,9 +226,13 @@ export default function RegisterPage() {
                 type={showConfirmPwd ? "text" : "password"}
                 placeholder="Confirm your password"
                 value={formData.confirmPassword}
-                onChange={(e) => handleChange("confirmPassword", e.target.value)}
+                onChange={(e) =>
+                  handleChange("confirmPassword", e.target.value)
+                }
                 onBlur={validateForm}
-                className={errors.confirmPassword ? "border-destructive pr-10" : "pr-10"}
+                className={
+                  errors.confirmPassword ? "border-destructive pr-10" : "pr-10"
+                }
                 autoComplete="new-password"
               />
               <button
@@ -228,11 +241,17 @@ export default function RegisterPage() {
                 className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
                 onClick={() => setShowConfirmPwd((s) => !s)}
               >
-                {showConfirmPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showConfirmPwd ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
               </button>
             </div>
             {errors.confirmPassword && (
-              <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+              <p className="text-sm text-destructive">
+                {errors.confirmPassword}
+              </p>
             )}
           </div>
         </CardContent>
@@ -243,12 +262,25 @@ export default function RegisterPage() {
           </Button>
           <p className="text-sm text-center text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/auth/login" className="text-primary hover:underline font-medium">
+            <Link
+              href="/auth/login"
+              className="text-primary hover:underline font-medium"
+            >
               Sign in
             </Link>
           </p>
         </CardFooter>
       </form>
+      <div className="flex flex-col items-center justify-center mt-4 mb-2">
+        <span className="text-xs text-muted-foreground mb-1">Powered by</span>
+        <Image
+          src={Logo1} // replace if needed
+          alt="Powered By Logo"
+          width={80}
+          height={80}
+          className="object-contain"
+        />
+      </div>
     </Card>
   );
 }
