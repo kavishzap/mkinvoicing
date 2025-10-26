@@ -13,9 +13,9 @@ export type LineItemPayload = {
 
 export type CreateInvoicePayload = {
   issue_date: string; // "YYYY-MM-DD"
-  due_date: string;   // "YYYY-MM-DD"
+  due_date: string; // "YYYY-MM-DD"
   status: "unpaid" | "paid"; // only two statuses now
-  currency: string;   // e.g. "MUR"
+  currency: string; // e.g. "MUR"
   discount_type: "value" | "percent";
   discount_amount: number;
   shipping_amount?: number;
@@ -35,6 +35,8 @@ export type CreateInvoicePayload = {
     city?: string | null;
     postal?: string | null;
     country?: string | null;
+    address_line_1?: string | null;
+    address_line_2?: string | null;
   } | null;
 
   items: LineItemPayload[];
@@ -153,15 +155,13 @@ export async function listInvoices(opts?: {
   const sortColumn = sortFieldMap[sortByKey] ?? "issue_date";
   const ascending = (opts?.sort ?? "desc") === "asc";
 
-  let q = supabase
-    .from("invoices")
-    .select(
-      `
+  let q = supabase.from("invoices").select(
+    `
       id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at,
       invoice_items ( quantity, unit_price, tax_percent )
     `,
-      { count: "exact" }
-    );
+    { count: "exact" }
+  );
 
   // Filters
   if (opts?.status && opts.status !== "all") {

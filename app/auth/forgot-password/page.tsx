@@ -2,8 +2,8 @@
 export const dynamic = "force-dynamic";
 import type React from "react";
 import Image from "next/image";
-import Logo from "../../../assets/logo.png";
-import Logo1 from "../../../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
+import Logo from "../../../assets/semilogo.png";
+import Logo1 from "../../../assets/finalogo.png";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -81,13 +81,13 @@ export default function ForgotPasswordPage() {
       {/* ✅ Logo/Header */}
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
-          <div className="relative mb-3">
+          <div className="-mt-8">
             <Image
               src={Logo}
               alt="MK INVOICING Logo"
               width={80}
               height={80}
-              className="object-contain w-24 h-24 md:w-24 md:h-24"
+              className="object-contain w-24 h-24 md:w-48 md:h-48"
               priority
             />
           </div>

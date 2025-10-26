@@ -1,22 +1,46 @@
 "use client";
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import {
-  Plus, Search, MoreVertical, Pencil, Trash2, Building2, User, Users, Lock, Unlock
+  Plus,
+  Search,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  Building2,
+  User,
+  Users,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import {
-  addCustomer, deleteCustomer, listCustomers, setCustomerActive, updateCustomer,
-  type CustomerRow, type CustomerPayload
+  addCustomer,
+  deleteCustomer,
+  listCustomers,
+  setCustomerActive,
+  updateCustomer,
+  type CustomerRow,
+  type CustomerPayload,
 } from "@/lib/customers-service";
 
 type FormData = {
@@ -30,6 +54,8 @@ type FormData = {
   city: string;
   postal: string;
   country: string;
+  address_line_1: string;
+  address_line_2: string;
 };
 
 export default function CustomersPage() {
@@ -46,10 +72,14 @@ export default function CustomersPage() {
   const [pageSize, setPageSize] = useState(10);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<CustomerRow | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState<CustomerRow | null>(
+    null
+  );
 
   const [formData, setFormData] = useState<FormData>(emptyForm("company"));
-  const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>(
+    {}
+  );
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,7 +99,11 @@ export default function CustomersPage() {
         setCustomers(rows);
         setTotal(total);
       } catch (e: any) {
-        toast({ title: "Failed to load customers", description: e?.message ?? "Please try again.", variant: "destructive" });
+        toast({
+          title: "Failed to load customers",
+          description: e?.message ?? "Please try again.",
+          variant: "destructive",
+        });
       } finally {
         setLoading(false);
       }
@@ -95,6 +129,8 @@ export default function CustomersPage() {
         city: customer.city || "",
         postal: customer.postal || "",
         country: customer.country || "",
+         address_line_1: customer.address_line_1 || "",
+        address_line_2: customer.address_line_2 || "",
       });
     } else {
       setEditingCustomer(null);
@@ -111,15 +147,25 @@ export default function CustomersPage() {
       setSaving(true);
       if (editingCustomer) {
         await updateCustomer(editingCustomer.id, mapFormToPayload(formData));
-        toast({ title: "Customer updated", description: "Customer information has been updated successfully." });
+        toast({
+          title: "Customer updated",
+          description: "Customer information has been updated successfully.",
+        });
       } else {
         await addCustomer(mapFormToPayload(formData));
-        toast({ title: "Customer added", description: "New customer has been added successfully." });
+        toast({
+          title: "Customer added",
+          description: "New customer has been added successfully.",
+        });
       }
       await reload();
       setIsDialogOpen(false);
     } catch (e: any) {
-      toast({ title: "Save failed", description: e?.message ?? "Please try again.", variant: "destructive" });
+      toast({
+        title: "Save failed",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
@@ -138,17 +184,29 @@ export default function CustomersPage() {
 
   function validate() {
     const next: Partial<Record<keyof FormData, string>> = {};
-    const requiredCommon: (keyof FormData)[] = ["email", "phone", "street", "city", "postal", "country"];
-    const requiredCompany: (keyof FormData)[] = ["companyName", ...requiredCommon];
-    const requiredIndividual: (keyof FormData)[] = ["fullName", ...requiredCommon];
+    const requiredCommon: (keyof FormData)[] = [
+      "email",
+      "phone",
+      "address_line_1",
+    ];
+    const requiredCompany: (keyof FormData)[] = [
+      "companyName",
+      ...requiredCommon,
+    ];
+    const requiredIndividual: (keyof FormData)[] = [
+      "fullName",
+      ...requiredCommon,
+    ];
 
-    const required = formData.type === "company" ? requiredCompany : requiredIndividual;
+    const required =
+      formData.type === "company" ? requiredCompany : requiredIndividual;
 
     for (const k of required) {
       const v = formData[k];
       if (!v || String(v).trim() === "") next[k] = "Required";
     }
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) next.email = "Invalid email";
+    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email))
+      next.email = "Invalid email";
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -159,20 +217,33 @@ export default function CustomersPage() {
       await setCustomerActive(c.id, !c.isActive);
       toast({
         title: c.isActive ? "Customer set inactive" : "Customer activated",
-        description: c.isActive ? "They will be hidden from default lists." : "They are visible in lists again.",
+        description: c.isActive
+          ? "They will be hidden from default lists."
+          : "They are visible in lists again.",
       });
       await reload();
     } catch (e: any) {
-      toast({ title: "Update failed", description: e?.message ?? "Please try again.", variant: "destructive" });
+      toast({
+        title: "Update failed",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
     }
   }
 
   async function handleDelete(id: string) {
     try {
       await deleteCustomer(id);
-      toast({ title: "Customer deleted", description: "Customer has been removed successfully." });
+      toast({
+        title: "Customer deleted",
+        description: "Customer has been removed successfully.",
+      });
     } catch (e: any) {
-      toast({ title: "Delete failed", description: e?.message ?? "Please try again.", variant: "destructive" });
+      toast({
+        title: "Delete failed",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
     } finally {
       // If last item on last page deleted, move back a page otherwise reload
       if (customers.length === 1 && page > 1) setPage((p) => p - 1);
@@ -193,7 +264,9 @@ export default function CustomersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
-          <p className="text-muted-foreground mt-1">Manage your customer database</p>
+          <p className="text-muted-foreground mt-1">
+            Manage your customer database
+          </p>
         </div>
         <Button onClick={() => handleOpenDialog()} className="gap-2">
           <Plus className="h-4 w-4" />
@@ -254,7 +327,7 @@ export default function CustomersPage() {
                 <th className="text-left p-3">Name</th>
                 <th className="text-left p-3">Email</th>
                 <th className="text-left p-3">Phone</th>
-                <th className="text-left p-3">City</th>
+                <th className="text-left p-3">Address</th>
                 <th className="text-left p-3">Status</th>
                 <th className="text-right p-3">Actions</th>
               </tr>
@@ -264,19 +337,33 @@ export default function CustomersPage() {
                 <tr key={c.id} className="border-t">
                   <td className="p-3">
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-                      {c.type === "company" ? <Building2 className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+                      {c.type === "company" ? (
+                        <Building2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <User className="h-3.5 w-3.5" />
+                      )}
                       {c.type}
                     </span>
                   </td>
-                  <td className="p-3 font-medium">{c.type === "company" ? c.companyName : c.fullName}</td>
+                  <td className="p-3 font-medium">
+                    {c.type === "company" ? c.companyName : c.fullName}
+                  </td>
                   <td className="p-3">{c.email}</td>
                   <td className="p-3">{c.phone}</td>
-                  <td className="p-3">{c.city}</td>
+                  <td className="p-3">
+                    {c.address_line_1}
+                    {c.address_line_2 ? `, ${c.address_line_2}` : ""}
+                  </td>
+
                   <td className="p-3">
                     {c.isActive ? (
-                      <span className="inline-flex px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-xs">Active</span>
+                      <span className="inline-flex px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-xs">
+                        Active
+                      </span>
                     ) : (
-                      <span className="inline-flex px-2 py-1 rounded-full bg-muted text-muted-foreground text-xs">Inactive</span>
+                      <span className="inline-flex px-2 py-1 rounded-full bg-muted text-muted-foreground text-xs">
+                        Inactive
+                      </span>
                     )}
                   </td>
                   <td className="p-3 text-right">
@@ -318,10 +405,15 @@ export default function CustomersPage() {
               ))}
               {customers.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                  <td
+                    colSpan={7}
+                    className="p-8 text-center text-muted-foreground"
+                  >
                     <div className="flex flex-col items-center gap-2">
                       <Users className="h-10 w-10" />
-                      {searchQuery ? "No matches. Try a different search." : "No customers yet. Add your first one!"}
+                      {searchQuery
+                        ? "No matches. Try a different search."
+                        : "No customers yet. Add your first one!"}
                     </div>
                   </td>
                 </tr>
@@ -337,7 +429,8 @@ export default function CustomersPage() {
       ) : (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <div>
-            Showing <span className="font-medium text-foreground">{start || 0}</span>–
+            Showing{" "}
+            <span className="font-medium text-foreground">{start || 0}</span>–
             <span className="font-medium text-foreground">{end || 0}</span> of{" "}
             <span className="font-medium text-foreground">{total}</span>
           </div>
@@ -351,12 +444,17 @@ export default function CustomersPage() {
               Previous
             </Button>
             <span>
-              Page <span className="font-medium text-foreground">{page}</span> / {Math.max(1, Math.ceil(total / pageSize))}
+              Page <span className="font-medium text-foreground">{page}</span> /{" "}
+              {Math.max(1, Math.ceil(total / pageSize))}
             </span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setPage((p) => Math.min(Math.max(1, Math.ceil(total / pageSize)), p + 1))}
+              onClick={() =>
+                setPage((p) =>
+                  Math.min(Math.max(1, Math.ceil(total / pageSize)), p + 1)
+                )
+              }
               disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
             >
               Next
@@ -369,9 +467,13 @@ export default function CustomersPage() {
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingCustomer ? "Edit Customer" : "Add New Customer"}</DialogTitle>
+            <DialogTitle>
+              {editingCustomer ? "Edit Customer" : "Add New Customer"}
+            </DialogTitle>
             <DialogDescription>
-              {editingCustomer ? "Update customer information" : "Fill in the details to add a new customer"}
+              {editingCustomer
+                ? "Update customer information"
+                : "Fill in the details to add a new customer"}
             </DialogDescription>
           </DialogHeader>
 
@@ -387,26 +489,34 @@ export default function CustomersPage() {
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : editingCustomer ? "Update" : "Add"} Customer
+              {saving ? "Saving..." : editingCustomer ? "Update" : "Add"}{" "}
+              Customer
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={!!confirmDeleteId} onOpenChange={() => setConfirmDeleteId(null)}>
+      <Dialog
+        open={!!confirmDeleteId}
+        onOpenChange={() => setConfirmDeleteId(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delete Customer</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this customer? This action cannot be undone.
+              Are you sure you want to delete this customer? This action cannot
+              be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}>
+            <Button
+              variant="destructive"
+              onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+            >
               Delete
             </Button>
           </DialogFooter>
@@ -418,7 +528,10 @@ export default function CustomersPage() {
 
 /* ----------------- Form subcomponent ----------------- */
 function CustomerFormBody({
-  formData, setFormData, errors, editing,
+  formData,
+  setFormData,
+  errors,
+  editing,
 }: {
   formData: FormData;
   setFormData: React.Dispatch<React.SetStateAction<FormData>>;
@@ -451,7 +564,11 @@ function CustomerFormBody({
           <Label>Type</Label>
           <div className="mt-1">
             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-              {formData.type === "company" ? <Building2 className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+              {formData.type === "company" ? (
+                <Building2 className="h-3.5 w-3.5" />
+              ) : (
+                <User className="h-3.5 w-3.5" />
+              )}
               {formData.type}
             </span>
           </div>
@@ -507,42 +624,22 @@ function CustomerFormBody({
           placeholder="+230 5xx xx xx"
         />
       </div>
-
       <Field
-        label="Street Address *"
-        id="street"
-        value={formData.street}
-        onChange={(v) => setFormData({ ...formData, street: v })}
-        error={errors.street}
-        placeholder="123 Main St"
+        label="Address Line 1 *"
+        id="address_line_1"
+        value={formData.address_line_1}
+        onChange={(v) => setFormData({ ...formData, address_line_1: v })}
+        error={errors.address_line_1}
+        placeholder="e.g. 123 Main St, Port Louis"
       />
-
-      <div className="grid grid-cols-3 gap-4">
-        <Field
-          label="City *"
-          id="city"
-          value={formData.city}
-          onChange={(v) => setFormData({ ...formData, city: v })}
-          error={errors.city}
-          placeholder="Port Louis"
-        />
-        <Field
-          label="Postal *"
-          id="postal"
-          value={formData.postal}
-          onChange={(v) => setFormData({ ...formData, postal: v })}
-          error={errors.postal}
-          placeholder="742CU001"
-        />
-        <Field
-          label="Country *"
-          id="country"
-          value={formData.country}
-          onChange={(v) => setFormData({ ...formData, country: v })}
-          error={errors.country}
-          placeholder="Mauritius"
-        />
-      </div>
+      <Field
+        label="Address Line 2"
+        id="address_line_2"
+        value={formData.address_line_2}
+        onChange={(v) => setFormData({ ...formData, address_line_2: v })}
+        error={errors.address_line_2}
+        placeholder="Apartment, suite, building, etc."
+      />
     </div>
   );
 }
@@ -560,6 +657,8 @@ function emptyForm(type: "company" | "individual"): FormData {
     city: "",
     postal: "",
     country: "",
+    address_line_1: "",
+    address_line_2: "",
   };
 }
 
@@ -575,6 +674,8 @@ function mapFormToPayload(f: FormData): CustomerPayload {
     city: f.city,
     postal: f.postal,
     country: f.country,
+    address_line_1: f.address_line_1,
+    address_line_2: f.address_line_2 || undefined,
   };
 }
 
@@ -588,7 +689,15 @@ function Field(props: {
   error?: string;
   required?: boolean;
 }) {
-  const { label, id, value, onChange, placeholder, type = "text", error } = props;
+  const {
+    label,
+    id,
+    value,
+    onChange,
+    placeholder,
+    type = "text",
+    error,
+  } = props;
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
@@ -632,7 +741,7 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
             <th className="text-left p-3">Name</th>
             <th className="text-left p-3">Email</th>
             <th className="text-left p-3">Phone</th>
-            <th className="text-left p-3">City</th>
+            <th className="text-left p-3">Address</th>
             <th className="text-left p-3">Status</th>
             <th className="text-right p-3">Actions</th>
           </tr>
@@ -640,13 +749,27 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
         <tbody>
           {Array.from({ length: rows }).map((_, i) => (
             <tr key={i} className="border-t">
-              <td className="p-3"><div className="h-5 w-16 bg-muted rounded animate-pulse" /></td>
-              <td className="p-3"><div className="h-5 w-40 bg-muted rounded animate-pulse" /></td>
-              <td className="p-3"><div className="h-5 w-48 bg-muted rounded animate-pulse" /></td>
-              <td className="p-3"><div className="h-5 w-28 bg-muted rounded animate-pulse" /></td>
-              <td className="p-3"><div className="h-5 w-24 bg-muted rounded animate-pulse" /></td>
-              <td className="p-3"><div className="h-5 w-16 bg-muted rounded animate-pulse" /></td>
-              <td className="p-3 text-right"><div className="h-8 w-8 bg-muted rounded-md ml-auto animate-pulse" /></td>
+              <td className="p-3">
+                <div className="h-5 w-16 bg-muted rounded animate-pulse" />
+              </td>
+              <td className="p-3">
+                <div className="h-5 w-40 bg-muted rounded animate-pulse" />
+              </td>
+              <td className="p-3">
+                <div className="h-5 w-48 bg-muted rounded animate-pulse" />
+              </td>
+              <td className="p-3">
+                <div className="h-5 w-28 bg-muted rounded animate-pulse" />
+              </td>
+              <td className="p-3">
+                <div className="h-5 w-24 bg-muted rounded animate-pulse" />
+              </td>
+              <td className="p-3">
+                <div className="h-5 w-16 bg-muted rounded animate-pulse" />
+              </td>
+              <td className="p-3 text-right">
+                <div className="h-8 w-8 bg-muted rounded-md ml-auto animate-pulse" />
+              </td>
             </tr>
           ))}
         </tbody>

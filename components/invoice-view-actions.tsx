@@ -80,7 +80,7 @@ function buildFromLines(inv: InvoiceDetail, prof: Profile | null | undefined, br
   const fromSnap: any = inv.from_snapshot ?? {};
   const acctType = (prof as any)?.accountType ?? "individual";
 
-  // name/email
+  // Primary identity
   const senderName =
     branding.companyName ||
     (fromSnap?.type === "company" ? fromSnap?.company_name : fromSnap?.full_name) ||
@@ -90,39 +90,40 @@ function buildFromLines(inv: InvoiceDetail, prof: Profile | null | undefined, br
   const senderEmail =
     fromSnap?.email || (prof as any)?.email || branding.email || "";
 
-  // contact/address fields
-  const bAddr1 = branding.address1;
-  const bAddr2 = branding.address2;
-  const fsStreet = fromSnap?.street;
-  const fsCity = fromSnap?.city;
-  const fsPostal = fromSnap?.postal;
-  const fsCountry = fromSnap?.country;
+  // Address preference: branding first, then snapshot, then profile
+  const addr1 =
+    branding.address1 ||
+    fromSnap?.address_line_1 ||
+    (prof as any)?.address_line_1 ||
+    "";
+  const addr2 =
+    branding.address2 ||
+    fromSnap?.address_line_2 ||
+    (prof as any)?.address_line_2 ||
+    "";
 
-  const phone = branding.phone || fromSnap?.phone || (prof as any)?.phone || "";
+  const phone =
+    branding.phone || fromSnap?.phone || (prof as any)?.phone || "";
+
+  // Bank info from profile (if present)
+  const bankName = (prof as any)?.bank_name || "";
+  const bankAcc = (prof as any)?.bank_acc_num || "";
+
   const website = branding.website || (prof as any)?.website || "";
 
-  // compose lines
   const lines: string[] = [];
   lines.push(String(senderName));
   if (senderEmail) lines.push(String(senderEmail));
-
-  // Prefer branding address if present; otherwise snapshot
-  if (bAddr1) lines.push(String(bAddr1));
-  if (bAddr2) lines.push(String(bAddr2));
-
-  const cityPostal = [fsCity, fsPostal].filter(Boolean).join(", ");
-
-  if (!bAddr1 && !bAddr2) {
-    if (fsStreet) lines.push(String(fsStreet));
-    if (cityPostal) lines.push(cityPostal);
-    if (fsCountry) lines.push(String(fsCountry));
-  }
-
+  if (addr1) lines.push(String(addr1));
+  if (addr2) lines.push(String(addr2));
   if (phone) lines.push(String(phone));
+  if (bankName) lines.push(`Bank: ${bankName}`);
+  if (bankAcc) lines.push(`Account: ${bankAcc}`);
   if (website) lines.push(String(website));
 
   return lines.length ? lines : ["—"];
 }
+
 
 export function InvoiceViewActions({
   invoiceId,

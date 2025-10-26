@@ -5,9 +5,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import Image from "next/image";
 
@@ -21,18 +33,24 @@ import {
 } from "@/lib/settings-service";
 import { supabase } from "@/lib/supabaseClient";
 
-type FieldErrors = Partial<Record<
-  | "companyName"
-  | "registrationId"
-  | "fullName"
-  | "taxId"
-  | "email"
-  | "phone"
-  | "street"
-  | "city"
-  | "postal"
-  | "country"
-, string>>;
+type FieldErrors = Partial<
+  Record<
+    | "companyName"
+    | "registrationId"
+    | "fullName"
+    | "taxId"
+    | "email"
+    | "phone"
+    | "street"
+    | "city"
+    | "postal"
+    | "address_line_1"
+    | "address_line_2"
+    | "bank_name"
+    | "bank_acc_num",
+    string
+  >
+>;
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -56,6 +74,10 @@ export default function SettingsPage() {
     city: "",
     postal: "",
     country: "",
+    address_line_1: "",
+    address_line_2: "",
+    bank_name: "",
+    bank_acc_num: "",
   });
 
   const [preferences, setPreferences] = useState<Preferences>({
@@ -79,7 +101,10 @@ export default function SettingsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [p, prefs] = await Promise.all([fetchProfile(), fetchPreferences()]);
+        const [p, prefs] = await Promise.all([
+          fetchProfile(),
+          fetchPreferences(),
+        ]);
         setProfile(p);
         setPreferences(prefs);
         setLogoPreview(p.logoUrl || null);
@@ -97,8 +122,14 @@ export default function SettingsPage() {
 
   const requiredFields = useMemo(() => {
     return profile.accountType === "company"
-      ? ["companyName", "registrationId", "email", "phone", "street", "city", "postal", "country"] as const
-      : ["fullName", "taxId", "email", "phone", "street", "city", "postal", "country"] as const;
+      ? ([
+          "companyName",
+          "registrationId",
+          "email",
+          "phone",
+          "address_line_1",
+        ] as const)
+      : (["fullName", "taxId", "email", "phone", "address_line_1"] as const);
   }, [profile.accountType]);
 
   const validateProfile = (): boolean => {
@@ -136,7 +167,9 @@ export default function SettingsPage() {
 
     if (upErr) throw upErr;
 
-    const { data: urlData } = supabase.storage.from("public-assets").getPublicUrl(objectPath);
+    const { data: urlData } = supabase.storage
+      .from("public-assets")
+      .getPublicUrl(objectPath);
     return urlData.publicUrl;
   };
 
@@ -222,13 +255,15 @@ export default function SettingsPage() {
     );
   }
 
-  const err = (k: keyof FieldErrors) => errors[k] ? "border-destructive" : "";
+  const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground mt-1">Manage your account and invoice preferences</p>
+        <p className="text-muted-foreground mt-1">
+          Manage your account and invoice preferences
+        </p>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
@@ -242,20 +277,30 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Account Type</CardTitle>
-              <CardDescription>Choose whether you're invoicing as a company or individual</CardDescription>
+              <CardDescription>
+                Choose whether you're invoicing as a company or individual
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex gap-2">
                 <Button
-                  variant={profile.accountType === "company" ? "default" : "outline"}
-                  onClick={() => setProfile({ ...profile, accountType: "company" })}
+                  variant={
+                    profile.accountType === "company" ? "default" : "outline"
+                  }
+                  onClick={() =>
+                    setProfile({ ...profile, accountType: "company" })
+                  }
                   className="flex-1"
                 >
                   Company
                 </Button>
                 <Button
-                  variant={profile.accountType === "individual" ? "default" : "outline"}
-                  onClick={() => setProfile({ ...profile, accountType: "individual" })}
+                  variant={
+                    profile.accountType === "individual" ? "default" : "outline"
+                  }
+                  onClick={() =>
+                    setProfile({ ...profile, accountType: "individual" })
+                  }
                   className="flex-1"
                 >
                   Individual
@@ -268,7 +313,9 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Company Information</CardTitle>
-                <CardDescription>This information will appear on your invoices</CardDescription>
+                <CardDescription>
+                  This information will appear on your invoices
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -276,11 +323,17 @@ export default function SettingsPage() {
                   <Input
                     id="companyName"
                     value={profile.companyName}
-                    onChange={(e) => setProfile({ ...profile, companyName: e.target.value })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, companyName: e.target.value })
+                    }
                     placeholder="Acme Corporation"
                     className={err("companyName")}
                   />
-                  {errors.companyName && <p className="text-xs text-destructive">{errors.companyName}</p>}
+                  {errors.companyName && (
+                    <p className="text-xs text-destructive">
+                      {errors.companyName}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -288,9 +341,17 @@ export default function SettingsPage() {
                   <div className="flex items-start gap-4">
                     <div className="w-20 h-20 rounded border bg-muted overflow-hidden flex items-center justify-center">
                       {logoPreview ? (
-                        <Image src={logoPreview} alt="Logo preview" width={80} height={80} className="object-contain" />
+                        <Image
+                          src={logoPreview}
+                          alt="Logo preview"
+                          width={80}
+                          height={80}
+                          className="object-contain"
+                        />
                       ) : (
-                        <span className="text-xs text-muted-foreground">No logo</span>
+                        <span className="text-xs text-muted-foreground">
+                          No logo
+                        </span>
                       )}
                     </div>
                     <div className="flex-1 space-y-2">
@@ -312,15 +373,21 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="registrationId">Registration / Tax ID *</Label>
+                  <Label htmlFor="registrationId">Registration (BRN)*</Label>
                   <Input
                     id="registrationId"
                     value={profile.registrationId}
-                    onChange={(e) => setProfile({ ...profile, registrationId: e.target.value })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, registrationId: e.target.value })
+                    }
                     placeholder="123456789"
                     className={err("registrationId")}
                   />
-                  {errors.registrationId && <p className="text-xs text-destructive">{errors.registrationId}</p>}
+                  {errors.registrationId && (
+                    <p className="text-xs text-destructive">
+                      {errors.registrationId}
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -328,7 +395,9 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Personal Information</CardTitle>
-                <CardDescription>This information will appear on your invoices</CardDescription>
+                <CardDescription>
+                  This information will appear on your invoices
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -336,11 +405,17 @@ export default function SettingsPage() {
                   <Input
                     id="fullName"
                     value={profile.fullName}
-                    onChange={(e) => setProfile({ ...profile, fullName: e.target.value })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, fullName: e.target.value })
+                    }
                     placeholder="John Doe"
                     className={err("fullName")}
                   />
-                  {errors.fullName && <p className="text-xs text-destructive">{errors.fullName}</p>}
+                  {errors.fullName && (
+                    <p className="text-xs text-destructive">
+                      {errors.fullName}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -348,11 +423,15 @@ export default function SettingsPage() {
                   <Input
                     id="taxId"
                     value={profile.taxId}
-                    onChange={(e) => setProfile({ ...profile, taxId: e.target.value })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, taxId: e.target.value })
+                    }
                     placeholder="123456789"
                     className={err("taxId")}
                   />
-                  {errors.taxId && <p className="text-xs text-destructive">{errors.taxId}</p>}
+                  {errors.taxId && (
+                    <p className="text-xs text-destructive">{errors.taxId}</p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -360,9 +439,17 @@ export default function SettingsPage() {
                   <div className="flex items-start gap-4">
                     <div className="w-20 h-20 rounded border bg-muted overflow-hidden flex items-center justify-center">
                       {logoPreview ? (
-                        <Image src={logoPreview} alt="Logo preview" width={80} height={80} className="object-contain" />
+                        <Image
+                          src={logoPreview}
+                          alt="Logo preview"
+                          width={80}
+                          height={80}
+                          className="object-contain"
+                        />
                       ) : (
-                        <span className="text-xs text-muted-foreground">No logo</span>
+                        <span className="text-xs text-muted-foreground">
+                          No logo
+                        </span>
                       )}
                     </div>
                     <div className="flex-1 space-y-2">
@@ -399,22 +486,30 @@ export default function SettingsPage() {
                     id="email"
                     type="email"
                     value={profile.email}
-                    onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, email: e.target.value })
+                    }
                     placeholder="hello@example.com"
                     className={err("email")}
                   />
-                  {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
+                  {errors.email && (
+                    <p className="text-xs text-destructive">{errors.email}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">Phone *</Label>
                   <Input
                     id="phone"
                     value={profile.phone}
-                    onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                    onChange={(e) =>
+                      setProfile({ ...profile, phone: e.target.value })
+                    }
                     placeholder="+230 5xx xx xx"
                     className={err("phone")}
                   />
-                  {errors.phone && <p className="text-xs text-destructive">{errors.phone}</p>}
+                  {errors.phone && (
+                    <p className="text-xs text-destructive">{errors.phone}</p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -423,60 +518,102 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Address</CardTitle>
-              <CardDescription>Your business or personal address</CardDescription>
+              <CardDescription>
+                Your business or personal address
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="street">Street Address *</Label>
+                <Label htmlFor="address_line_1">Address Line 1 *</Label>
                 <Input
-                  id="street"
-                  value={profile.street}
-                  onChange={(e) => setProfile({ ...profile, street: e.target.value })}
-                  placeholder="123 Business Street"
-                  className={err("street")}
+                  id="address_line_1"
+                  value={profile.address_line_1}
+                  onChange={(e) =>
+                    setProfile({ ...profile, address_line_1: e.target.value })
+                  }
+                  placeholder="e.g. 123 Business Street, Port Louis"
+                  className={err("address_line_1")}
                 />
-                {errors.street && <p className="text-xs text-destructive">{errors.street}</p>}
+                {errors.address_line_1 && (
+                  <p className="text-xs text-destructive">
+                    {errors.address_line_1}
+                  </p>
+                )}
               </div>
-              <div className="grid sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="address_line_2">
+                  Address Line 2 (optional)
+                </Label>
+                <Input
+                  id="address_line_2"
+                  value={profile.address_line_2 ?? ""}
+                  onChange={(e) =>
+                    setProfile({ ...profile, address_line_2: e.target.value })
+                  }
+                  placeholder="Apartment, suite, building, etc."
+                  className={err("address_line_2")}
+                />
+                {errors.address_line_2 && (
+                  <p className="text-xs text-destructive">
+                    {errors.address_line_2}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Bank Information</CardTitle>
+              <CardDescription>
+                Shown on invoices for client payments
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="city">City *</Label>
+                  <Label htmlFor="bank_name">Bank Name</Label>
                   <Input
-                    id="city"
-                    value={profile.city}
-                    onChange={(e) => setProfile({ ...profile, city: e.target.value })}
-                    placeholder="Port Louis"
-                    className={err("city")}
+                    id="bank_name"
+                    value={profile.bank_name ?? ""}
+                    onChange={(e) =>
+                      setProfile({ ...profile, bank_name: e.target.value })
+                    }
+                    placeholder="e.g. MCB"
+                    className={err("bank_name")}
                   />
-                  {errors.city && <p className="text-xs text-destructive">{errors.city}</p>}
+                  {errors.bank_name && (
+                    <p className="text-xs text-destructive">
+                      {errors.bank_name}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="postal">Postal Code *</Label>
+                  <Label htmlFor="bank_acc_num">Bank Account Number</Label>
                   <Input
-                    id="postal"
-                    value={profile.postal}
-                    onChange={(e) => setProfile({ ...profile, postal: e.target.value })}
-                    placeholder="742CU001"
-                    className={err("postal")}
+                    id="bank_acc_num"
+                    value={profile.bank_acc_num ?? ""}
+                    onChange={(e) =>
+                      setProfile({ ...profile, bank_acc_num: e.target.value })
+                    }
+                    placeholder="e.g. 000123456789"
+                    className={err("bank_acc_num")}
                   />
-                  {errors.postal && <p className="text-xs text-destructive">{errors.postal}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="country">Country *</Label>
-                  <Input
-                    id="country"
-                    value={profile.country}
-                    onChange={(e) => setProfile({ ...profile, country: e.target.value })}
-                    placeholder="Mauritius"
-                    className={err("country")}
-                  />
-                  {errors.country && <p className="text-xs text-destructive">{errors.country}</p>}
+                  {errors.bank_acc_num && (
+                    <p className="text-xs text-destructive">
+                      {errors.bank_acc_num}
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
           </Card>
 
           <div className="flex justify-end">
-            <Button onClick={handleSaveProfile} size="lg" disabled={savingProfile}>
+            <Button
+              onClick={handleSaveProfile}
+              size="lg"
+              disabled={savingProfile}
+            >
               {savingProfile ? "Saving..." : "Save Profile"}
             </Button>
           </div>
@@ -487,7 +624,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Currency & Format</CardTitle>
-              <CardDescription>Set your default currency and date format</CardDescription>
+              <CardDescription>
+                Set your default currency and date format
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid sm:grid-cols-2 gap-4">
@@ -495,7 +634,9 @@ export default function SettingsPage() {
                   <Label htmlFor="currency">Currency</Label>
                   <Select
                     value={preferences.currency}
-                    onValueChange={(v) => setPreferences({ ...preferences, currency: v })}
+                    onValueChange={(v) =>
+                      setPreferences({ ...preferences, currency: v })
+                    }
                   >
                     <SelectTrigger id="currency">
                       <SelectValue />
@@ -506,7 +647,9 @@ export default function SettingsPage() {
                       <SelectItem value="GBP">GBP - British Pound</SelectItem>
                       <SelectItem value="MUR">MUR - Mauritian Rupee</SelectItem>
                       <SelectItem value="CAD">CAD - Canadian Dollar</SelectItem>
-                      <SelectItem value="AUD">AUD - Australian Dollar</SelectItem>
+                      <SelectItem value="AUD">
+                        AUD - Australian Dollar
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -517,7 +660,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Invoice Numbering</CardTitle>
-              <CardDescription>Configure how your invoices are numbered</CardDescription>
+              <CardDescription>
+                Configure how your invoices are numbered
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid sm:grid-cols-3 gap-4">
@@ -526,7 +671,12 @@ export default function SettingsPage() {
                   <Input
                     id="numberPrefix"
                     value={preferences.numberPrefix}
-                    onChange={(e) => setPreferences({ ...preferences, numberPrefix: e.target.value })}
+                    onChange={(e) =>
+                      setPreferences({
+                        ...preferences,
+                        numberPrefix: e.target.value,
+                      })
+                    }
                     placeholder="INV"
                   />
                 </div>
@@ -534,7 +684,12 @@ export default function SettingsPage() {
                   <Label htmlFor="numberPadding">Padding</Label>
                   <Select
                     value={preferences.numberPadding.toString()}
-                    onValueChange={(v) => setPreferences({ ...preferences, numberPadding: Number(v) })}
+                    onValueChange={(v) =>
+                      setPreferences({
+                        ...preferences,
+                        numberPadding: Number(v),
+                      })
+                    }
                   >
                     <SelectTrigger id="numberPadding">
                       <SelectValue />
@@ -550,7 +705,10 @@ export default function SettingsPage() {
               <div className="rounded-lg bg-muted p-4">
                 <p className="text-sm text-muted-foreground">Preview:</p>
                 <p className="text-lg font-semibold mt-1">
-                  {preferences.numberPrefix}-{preferences.nextNumber.toString().padStart(preferences.numberPadding, "0")}
+                  {preferences.numberPrefix}-
+                  {preferences.nextNumber
+                    .toString()
+                    .padStart(preferences.numberPadding, "0")}
                 </p>
               </div>
             </CardContent>
@@ -559,14 +717,18 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Payment Terms</CardTitle>
-              <CardDescription>Default payment terms for new invoices</CardDescription>
+              <CardDescription>
+                Default payment terms for new invoices
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
                 <Label htmlFor="paymentTerms">Default Payment Terms</Label>
                 <Select
                   value={preferences.paymentTerms.toString()}
-                  onValueChange={(v) => setPreferences({ ...preferences, paymentTerms: Number(v) })}
+                  onValueChange={(v) =>
+                    setPreferences({ ...preferences, paymentTerms: Number(v) })
+                  }
                 >
                   <SelectTrigger id="paymentTerms">
                     <SelectValue />
@@ -585,7 +747,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Default Notes & Terms</CardTitle>
-              <CardDescription>These will be pre-filled when creating new invoices</CardDescription>
+              <CardDescription>
+                These will be pre-filled when creating new invoices
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -593,7 +757,12 @@ export default function SettingsPage() {
                 <Textarea
                   id="defaultNotes"
                   value={preferences.defaultNotes}
-                  onChange={(e) => setPreferences({ ...preferences, defaultNotes: e.target.value })}
+                  onChange={(e) =>
+                    setPreferences({
+                      ...preferences,
+                      defaultNotes: e.target.value,
+                    })
+                  }
                   placeholder="Thank you for your business!"
                   rows={3}
                 />
@@ -603,7 +772,12 @@ export default function SettingsPage() {
                 <Textarea
                   id="defaultTerms"
                   value={preferences.defaultTerms}
-                  onChange={(e) => setPreferences({ ...preferences, defaultTerms: e.target.value })}
+                  onChange={(e) =>
+                    setPreferences({
+                      ...preferences,
+                      defaultTerms: e.target.value,
+                    })
+                  }
                   placeholder="Payment is due within 14 days..."
                   rows={3}
                 />
@@ -612,7 +786,11 @@ export default function SettingsPage() {
           </Card>
 
           <div className="flex justify-end">
-            <Button onClick={handleSavePreferences} size="lg" disabled={savingPrefs}>
+            <Button
+              onClick={handleSavePreferences}
+              size="lg"
+              disabled={savingPrefs}
+            >
               {savingPrefs ? "Saving..." : "Save Preferences"}
             </Button>
           </div>

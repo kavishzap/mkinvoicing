@@ -63,6 +63,8 @@ type ClientInfo = {
   city: string;
   postal: string;
   country: string;
+  address_line_1: string;
+  address_line_2: string;
 };
 
 type FieldErrors = Partial<
@@ -75,6 +77,7 @@ type FieldErrors = Partial<
     | "city"
     | "postal"
     | "country"
+    | "address_line_1"
     | "lineItems"
     | `item_${string}`
     | `qty_${string}`
@@ -113,6 +116,8 @@ export default function NewInvoicePage() {
     city: "",
     postal: "",
     country: "",
+    address_line_1: "",
+    address_line_2: "",
   });
 
   // ===== Invoice meta
@@ -279,6 +284,8 @@ export default function NewInvoicePage() {
       city: c.city ?? "",
       postal: c.postal ?? "",
       country: c.country ?? "",
+      address_line_1: c.address_line_1 ?? "",
+      address_line_2: c.address_line_2 ?? "",
     });
     setIsCustomerDialogOpen(false);
     toast({
@@ -305,11 +312,10 @@ export default function NewInvoicePage() {
     else if (!emailRx.test(clientInfo.email)) next.email = "Invalid email";
 
     if (!clientInfo.phone.trim()) next.phone = "Phone is required";
-    if (!clientInfo.street.trim()) next.street = "Street is required";
-    if (!clientInfo.city.trim()) next.city = "City is required";
-    if (!clientInfo.postal.trim()) next.postal = "Postal code is required";
-    if (!clientInfo.country.trim()) next.country = "Country is required";
-
+    if (!clientInfo.address_line_1.trim())
+      next.companyName ? null : (next.companyName = next.companyName); // no-op line to keep type happy in diff viewers
+    if (!clientInfo.address_line_1.trim())
+      (next as any).address_line_1 = "Address line 1 is required";
     // Line items validation
     if (lineItems.length === 0) {
       next.lineItems = "At least one line item is required";
@@ -375,6 +381,8 @@ export default function NewInvoicePage() {
               city: clientInfo.city || null,
               postal: clientInfo.postal || null,
               country: clientInfo.country || null,
+              address_line_1: clientInfo.address_line_1 || null,
+              address_line_2: clientInfo.address_line_2 || null,
             },
         items: itemsPayload,
       });
@@ -492,12 +500,22 @@ export default function NewInvoicePage() {
             )}
             <p className="text-muted-foreground">{profile?.email}</p>
             <p className="text-muted-foreground">{profile?.phone}</p>
-            <p className="text-muted-foreground">
-              {profile?.street}, {profile?.city}
-            </p>
-            <p className="text-muted-foreground">
-              {profile?.postal}, {profile?.country}
-            </p>
+            {profile?.address_line_1 && (
+              <p className="text-muted-foreground">{profile.address_line_1}</p>
+            )}
+            {profile?.address_line_2 && (
+              <p className="text-muted-foreground">{profile.address_line_2}</p>
+            )}
+            {(profile as any)?.bank_name && (
+              <p className="text-muted-foreground">
+                Bank: {(profile as any).bank_name}
+              </p>
+            )}
+            {(profile as any)?.bank_acc_num && (
+              <p className="text-muted-foreground">
+                Account: {(profile as any).bank_acc_num}
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -631,69 +649,39 @@ export default function NewInvoicePage() {
                 )}
               </div>
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="clientStreet">Street Address *</Label>
+              <Label htmlFor="clientAddress1">Address Line 1 *</Label>
               <Input
-                id="clientStreet"
-                className={err("street")}
-                value={clientInfo.street}
+                id="clientAddress1"
+                className={err("address_line_1")}
+                value={clientInfo.address_line_1}
                 onChange={(e) =>
-                  setClientInfo({ ...clientInfo, street: e.target.value })
+                  setClientInfo({
+                    ...clientInfo,
+                    address_line_1: e.target.value,
+                  })
                 }
-                placeholder="123 Main St"
+                placeholder="e.g. 123 Main St, Port Louis"
               />
-              {errors.street && (
-                <p className="text-xs text-destructive">{errors.street}</p>
+              {errors.address_line_1 && (
+                <p className="text-xs text-destructive">
+                  {errors.address_line_1}
+                </p>
               )}
             </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="clientCity">City *</Label>
-                <Input
-                  id="clientCity"
-                  className={err("city")}
-                  value={clientInfo.city}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, city: e.target.value })
-                  }
-                  placeholder="Port Louis"
-                />
-                {errors.city && (
-                  <p className="text-xs text-destructive">{errors.city}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clientPostal">Postal *</Label>
-                <Input
-                  id="clientPostal"
-                  className={err("postal")}
-                  value={clientInfo.postal}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, postal: e.target.value })
-                  }
-                  placeholder="742CU001"
-                />
-                {errors.postal && (
-                  <p className="text-xs text-destructive">{errors.postal}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clientCountry">Country *</Label>
-                <Input
-                  id="clientCountry"
-                  className={err("country")}
-                  value={clientInfo.country}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, country: e.target.value })
-                  }
-                  placeholder="Mauritius"
-                />
-                {errors.country && (
-                  <p className="text-xs text-destructive">{errors.country}</p>
-                )}
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientAddress2">Address Line 2</Label>
+              <Input
+                id="clientAddress2"
+                value={clientInfo.address_line_2}
+                onChange={(e) =>
+                  setClientInfo({
+                    ...clientInfo,
+                    address_line_2: e.target.value,
+                  })
+                }
+                placeholder="Apartment, suite, building, etc."
+              />
             </div>
           </CardContent>
         </Card>
@@ -1065,7 +1053,8 @@ export default function NewInvoicePage() {
                     {c.email}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    {c.city}, {c.country}
+                    {c.address_line_1}
+                    {c.address_line_2 ? `, ${c.address_line_2}` : ""}
                   </div>
                 </button>
               ))}

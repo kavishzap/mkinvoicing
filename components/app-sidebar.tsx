@@ -5,9 +5,9 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { FileText, Settings, Users, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Logo from "../assets/logo.png";
+import Logo from "../assets/semilogo.png";
 import { toast } from "@/hooks/use-toast";
-import Logo1 from "../assets//ChatGPT Image Oct 19, 2025, 10_00_33 PM.png";
+import Logo1 from "../assets/finalogo.png";
 type SidebarProps = {
   className?: string;
   onNavigate?: () => void;
@@ -60,14 +60,14 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
             alt="PayMoBill Logo"
             width={96}
             height={96}
-            className="object-contain w-24 h-24"
+            className="object-contain w-48 h-48"
             priority
           />
         </Link>
       </div>
 
       {/* ✅ Menus and Logout grouped together */}
-      <nav className="px-3 pb-3 space-y-1">
+      <nav className="px-3 pb-3 space-y-1 -mt-10">
         {navItems.map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + "/");

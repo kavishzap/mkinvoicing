@@ -9,12 +9,12 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "MK INVOICING",
+  title: "INVOICE PILOT",
   description: "Invoice Generator & Manager",
   icons: {
-    icon: "/logo.png", // Main favicon
-    shortcut: "/logo.png", // For older browsers
-    apple: "/logo.png", // For iOS devices
+    icon: "/ChatGPT Image Oct 26, 2025, 11_14_55 PM.png", // Main favicon
+    shortcut: "/ChatGPT Image Oct 26, 2025, 11_14_55 PM.png", // For older browsers
+    apple: "/ChatGPT Image Oct 26, 2025, 11_14_55 PM.png", // For iOS devices
   },
 };
 

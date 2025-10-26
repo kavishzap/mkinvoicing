@@ -12,12 +12,15 @@ export type CustomerPayload = {
   postal?: string;
   country?: string;
   isActive?: boolean;
+  address_line_1?: string;
+  address_line_2?: string;
 };
 
 export type CustomerRow = CustomerPayload & {
   id: string;
   created_at: string;
   updated_at: string;
+  isActive?: boolean;
 };
 
 async function getUserId() {
@@ -27,7 +30,7 @@ async function getUserId() {
 }
 
 const COLUMNS =
-  "id,type,company_name,contact_name,full_name,email,phone,street,city,postal,country,is_active,created_at,updated_at";
+  "id,type,company_name,contact_name,full_name,email,phone,address_line_1,address_line_2,is_active,created_at,updated_at";
 
 /**
  * Paged list with optional search & includeInactive.
@@ -36,8 +39,8 @@ const COLUMNS =
 export async function listCustomers(opts?: {
   search?: string;
   includeInactive?: boolean;
-  page?: number;       // 1-based
-  pageSize?: number;   // default 10
+  page?: number; // 1-based
+  pageSize?: number; // default 10
 }): Promise<{ rows: CustomerRow[]; total: number }> {
   const userId = await getUserId();
   const page = Math.max(1, opts?.page ?? 1);
@@ -65,7 +68,7 @@ export async function listCustomers(opts?: {
         `company_name.ilike.${s}`,
         `full_name.ilike.${s}`,
         `email.ilike.${s}`,
-      ].join(","),
+      ].join(",")
     );
   }
 
@@ -79,7 +82,9 @@ export async function listCustomers(opts?: {
 }
 
 /** Create customer */
-export async function addCustomer(payload: CustomerPayload): Promise<CustomerRow> {
+export async function addCustomer(
+  payload: CustomerPayload
+): Promise<CustomerRow> {
   const userId = await getUserId();
   const insert = {
     user_id: userId,
@@ -93,6 +98,8 @@ export async function addCustomer(payload: CustomerPayload): Promise<CustomerRow
     city: payload.city || null,
     postal: payload.postal || null,
     country: payload.country || null,
+    address_line_1: payload.address_line_1 || null,
+    address_line_2: payload.address_line_2 || null,
     is_active: payload.isActive ?? true,
   };
 
@@ -107,20 +114,30 @@ export async function addCustomer(payload: CustomerPayload): Promise<CustomerRow
 }
 
 /** Update customer by id */
-export async function updateCustomer(id: string, payload: Partial<CustomerPayload>): Promise<CustomerRow> {
+export async function updateCustomer(
+  id: string,
+  payload: Partial<CustomerPayload>
+): Promise<CustomerRow> {
   await getUserId(); // ensure auth
 
   const update: Record<string, any> = {};
   if (payload.type) update.type = payload.type;
-  if ("companyName" in payload) update.company_name = payload.companyName ?? null;
-  if ("contactName" in payload) update.contact_name = payload.contactName ?? null;
+  if ("companyName" in payload)
+    update.company_name = payload.companyName ?? null;
+  if ("contactName" in payload)
+    update.contact_name = payload.contactName ?? null;
   if ("fullName" in payload) update.full_name = payload.fullName ?? null;
-  if ("email" in payload) update.email = payload.email ? payload.email.toLowerCase() : null;
+  if ("email" in payload)
+    update.email = payload.email ? payload.email.toLowerCase() : null;
   if ("phone" in payload) update.phone = payload.phone ?? null;
   if ("street" in payload) update.street = payload.street ?? null;
   if ("city" in payload) update.city = payload.city ?? null;
   if ("postal" in payload) update.postal = payload.postal ?? null;
   if ("country" in payload) update.country = payload.country ?? null;
+  if ("address_line_1" in payload)
+    update.address_line_1 = payload.address_line_1 ?? null;
+  if ("address_line_2" in payload)
+    update.address_line_2 = payload.address_line_2 ?? null;
   if ("isActive" in payload) update.is_active = payload.isActive;
 
   // Return updated row; if RLS blocks or id not found, data will be null.
@@ -137,7 +154,10 @@ export async function updateCustomer(id: string, payload: Partial<CustomerPayloa
 }
 
 /** Toggle active */
-export async function setCustomerActive(id: string, active: boolean): Promise<CustomerRow> {
+export async function setCustomerActive(
+  id: string,
+  active: boolean
+): Promise<CustomerRow> {
   await getUserId();
 
   const { data, error } = await supabase
@@ -156,10 +176,7 @@ export async function setCustomerActive(id: string, active: boolean): Promise<Cu
 export async function deleteCustomer(id: string): Promise<void> {
   await getUserId();
 
-  const { error } = await supabase
-    .from("customers")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("customers").delete().eq("id", id);
 
   if (error) throw error;
 }
@@ -177,6 +194,8 @@ function mapRow(r: any): CustomerRow {
     city: r.city ?? "",
     postal: r.postal ?? "",
     country: r.country ?? "",
+    address_line_1: r.address_line_1 ?? "",
+    address_line_2: r.address_line_2 ?? "",
     isActive: !!r.is_active,
     created_at: r.created_at,
     updated_at: r.updated_at,

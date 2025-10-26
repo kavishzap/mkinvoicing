@@ -13,6 +13,10 @@ export type Profile = {
   city?: string;
   postal?: string;
   country?: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  bank_name?: string;
+  bank_acc_num?: string;
 };
 
 export type Preferences = {
@@ -55,6 +59,10 @@ export async function fetchProfile(): Promise<Profile> {
     city: row.city ?? "",
     postal: row.postal ?? "",
     country: row.country ?? "",
+    address_line_1: row.address_line_1 ?? "",
+    address_line_2: row.address_line_2 ?? "",
+    bank_name: row.bank_name ?? "",
+    bank_acc_num: row.bank_acc_num ?? "",
   };
 }
 
@@ -74,9 +82,15 @@ export async function upsertProfile(profile: Profile) {
     city: profile.city || null,
     postal: profile.postal || null,
     country: profile.country || null,
+    address_line_1: profile.address_line_1 || null,
+    address_line_2: profile.address_line_2 || null,
+    bank_name: profile.bank_name || null,
+    bank_acc_num: profile.bank_acc_num || null,
   };
 
-  const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+  const { error } = await supabase
+    .from("profiles")
+    .upsert(payload, { onConflict: "id" });
   if (error) throw error;
 }
 
@@ -115,6 +129,8 @@ export async function upsertPreferences(prefs: Preferences) {
     default_terms: prefs.defaultTerms || null,
   };
 
-  const { error } = await supabase.from("user_settings").upsert(payload, { onConflict: "user_id" });
+  const { error } = await supabase
+    .from("user_settings")
+    .upsert(payload, { onConflict: "user_id" });
   if (error) throw error;
 }
