@@ -79,6 +79,7 @@ type FieldErrors = Partial<
     | "country"
     | "address_line_1"
     | "lineItems"
+    | "amountPaid"
     | `item_${string}`
     | `qty_${string}`
     | `price_${string}`,
@@ -140,6 +141,8 @@ export default function NewInvoicePage() {
   });
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Card Payment" | "Credit Facilities" | null>(null);
+  const [amountPaid, setAmountPaid] = useState(0);
 
   // Errors
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -329,6 +332,26 @@ export default function NewInvoicePage() {
       });
     }
 
+    // Amount paid validation
+    if (amountPaid < 0) {
+      next.amountPaid = "Amount paid cannot be negative";
+    } else {
+      // Calculate total to validate against
+      const itemsTotal = lineItems.reduce(
+        (sum, li) => sum + li.quantity * li.unitPrice * (1 + li.tax / 100),
+        0
+      );
+      const discountAmount =
+        discount.type === "percent"
+          ? (itemsTotal * discount.amount) / 100
+          : discount.amount;
+      const calculatedTotal = itemsTotal - discountAmount;
+      
+      if (amountPaid > calculatedTotal) {
+        next.amountPaid = `Amount paid cannot exceed invoice total of ${preferences?.currency || ""} ${calculatedTotal.toFixed(2)}`;
+      }
+    }
+
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -358,15 +381,21 @@ export default function NewInvoicePage() {
       // IMPORTANT:
       // - status is "unpaid" only (you're restricting statuses to unpaid/paid)
       // - invoiceNumber is read-only UI; still passed along if your RPC expects it.
+      // Calculate amount due: total - amount_paid (minimum 0)
+      const calculatedAmountDue = Math.max(0, total - amountPaid);
+      
       const invoiceId = await createInvoice({
         issue_date: issueDate,
         due_date: dueDate,
-        status: "unpaid" as "unpaid", // <- only unpaid|paid allowed now
+        status: amountPaid >= total ? "paid" : "unpaid",
         currency: preferences.currency,
         discount_type: discount.type,
         discount_amount: discount.amount,
         notes,
         terms,
+        payment_method: paymentMethod,
+        amount_paid: amountPaid,
+        amount_due: calculatedAmountDue,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
         client_snapshot: selectedCustomer
           ? null
@@ -431,26 +460,19 @@ export default function NewInvoicePage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/app/invoices">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Create Invoice
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Fill in the details to create a new invoice
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={doCreateUnpaid} disabled={saving}>
-            {saving ? "Saving..." : "Save & View"}
+      <div className="flex items-center gap-4">
+        <Link href="/app/invoices">
+          <Button variant="ghost" size="icon">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
+        </Link>
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Create Invoice
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Fill in the details to create a new invoice
+          </p>
         </div>
       </div>
 
@@ -492,6 +514,11 @@ export default function NewInvoicePage() {
                 {profile?.registrationId && (
                   <p className="text-muted-foreground">
                     Reg: {profile.registrationId}
+                  </p>
+                )}
+                {profile?.vatNumber && (
+                  <p className="text-muted-foreground">
+                    VAT: {profile.vatNumber}
                   </p>
                 )}
               </>
@@ -690,19 +717,7 @@ export default function NewInvoicePage() {
       {/* Invoice Meta */}
       <Card>
         <CardContent className="pt-6">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="invoiceNumber">Invoice #</Label>
-              <Input
-                id="invoiceNumber"
-                value={invoiceNumber}
-                readOnly
-                className="bg-muted/60 cursor-not-allowed"
-              />
-              <p className="text-xs text-muted-foreground">
-                Auto-generated from your settings (uneditable).
-              </p>
-            </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="issueDate">Issue Date</Label>
               <Input
@@ -1009,9 +1024,70 @@ export default function NewInvoicePage() {
                   {preferences?.currency} {total.toFixed(2)}
                 </span>
               </div>
+              <Separator />
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="paymentMethod">Payment Method</Label>
+                  <Select
+                    value={paymentMethod || ""}
+                    onValueChange={(v) =>
+                      setPaymentMethod(
+                        v === "" ? null : (v as "Cash" | "Card Payment" | "Credit Facilities")
+                      )
+                    }
+                  >
+                    <SelectTrigger id="paymentMethod">
+                      <SelectValue placeholder="Select payment method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Cash">Cash</SelectItem>
+                      <SelectItem value="Card Payment">Card Payment</SelectItem>
+                      <SelectItem value="Credit Facilities">Credit Facilities</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amountPaid">Amount Paid</Label>
+                  <Input
+                    id="amountPaid"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    max={total}
+                    value={amountPaid}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const newValue = val >= 0 ? Math.min(val, total) : 0;
+                      setAmountPaid(newValue);
+                    }}
+                    placeholder="0.00"
+                    className={errors.amountPaid ? "border-destructive" : ""}
+                  />
+                  {errors.amountPaid ? (
+                    <p className="text-xs text-destructive">{errors.amountPaid}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Maximum: {preferences?.currency} {total.toFixed(2)}
+                    </p>
+                  )}
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Amount Due</span>
+                  <span className="font-semibold">
+                    {preferences?.currency} {Math.max(0, total - amountPaid).toFixed(2)}
+                  </span>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Save Button */}
+      <div className="flex justify-end gap-2 pt-4">
+        <Button onClick={doCreateUnpaid} disabled={saving} size="lg">
+          {saving ? "Saving..." : "Save & View"}
+        </Button>
       </div>
 
       {/* Customer Selection Dialog (Supabase-powered) */}

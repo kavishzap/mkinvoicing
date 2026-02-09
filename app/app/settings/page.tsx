@@ -66,6 +66,7 @@ export default function SettingsPage() {
     companyName: "",
     logoUrl: "",
     registrationId: "",
+    vatNumber: "",
     fullName: "",
     taxId: "",
     email: "",
@@ -389,6 +390,18 @@ export default function SettingsPage() {
                     </p>
                   )}
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="vatNumber">VAT Number</Label>
+                  <Input
+                    id="vatNumber"
+                    value={profile.vatNumber || ""}
+                    onChange={(e) =>
+                      setProfile({ ...profile, vatNumber: e.target.value })
+                    }
+                    placeholder="VAT123456789"
+                  />
+                </div>
               </CardContent>
             </Card>
           ) : (
@@ -657,7 +670,8 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          {/* Invoice Numbering - Commented out for later use */}
+          {/* <Card>
             <CardHeader>
               <CardTitle>Invoice Numbering</CardTitle>
               <CardDescription>
@@ -712,7 +726,7 @@ export default function SettingsPage() {
                 </p>
               </div>
             </CardContent>
-          </Card>
+          </Card> */}
 
           <Card>
             <CardHeader>

@@ -1,16 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Menu, Plus, Search } from "lucide-react";
+import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { AppSidebar } from "./app-sidebar";
 
 export function AppTopbar() {
-  const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -31,22 +27,6 @@ export function AppTopbar() {
             />
           </SheetContent>
         </Sheet>
-
-        {/* Search */}
-        <div className="flex-1 max-w-md">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input type="search" placeholder="Search invoices..." className="pl-9 bg-background" />
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          <Button onClick={() => router.push("/app/invoices/new")} className="gap-2">
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">Create Invoice</span>
-          </Button>
-        </div>
       </div>
     </header>
   );

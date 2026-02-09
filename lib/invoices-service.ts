@@ -21,6 +21,9 @@ export type CreateInvoicePayload = {
   shipping_amount?: number;
   notes?: string;
   terms?: string;
+  payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
+  amount_paid?: number;
+  amount_due?: number;
 
   // Either link an existing customer or pass a client snapshot
   customer_id: string | null;
@@ -69,6 +72,9 @@ export async function createInvoice(
       shipping_amount: inv.shipping_amount ?? 0,
       notes: inv.notes ?? null,
       terms: inv.terms ?? null,
+      payment_method: inv.payment_method ?? null,
+      amount_paid: inv.amount_paid ?? 0,
+      amount_due: inv.amount_due !== undefined && inv.amount_due !== null ? inv.amount_due : null, // Will be calculated if null
       customer_id: inv.customer_id,
       client_snapshot: inv.client_snapshot, // or null if using customer_id
     },
@@ -85,12 +91,51 @@ export async function createInvoice(
 
   // Function should return the uuid directly (text)
   // But if it ever returns an object, handle that too.
-  if (typeof data === "string") return data;
-  if (data && typeof data === "object" && "invoice_id" in data) {
-    return (data as any).invoice_id as string;
+  let invoiceId: string;
+  if (typeof data === "string") {
+    invoiceId = data;
+  } else if (data && typeof data === "object" && "invoice_id" in data) {
+    invoiceId = (data as any).invoice_id as string;
+  } else {
+    throw new Error("Unexpected response from create_invoice RPC");
   }
 
-  throw new Error("Unexpected response from create_invoice RPC");
+  // Update payment fields if provided (database function may not handle them)
+  // Always update payment fields to ensure they are saved correctly
+  try {
+    const updatePayload: {
+      payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
+      amount_paid?: number;
+      amount_due?: number | null;
+    } = {};
+    
+    if (inv.payment_method !== undefined) {
+      updatePayload.payment_method = inv.payment_method ?? null;
+    }
+    if (inv.amount_paid !== undefined) {
+      updatePayload.amount_paid = inv.amount_paid ?? 0;
+    }
+    if (inv.amount_due !== undefined) {
+      updatePayload.amount_due = inv.amount_due !== null ? inv.amount_due : null;
+    }
+    
+    if (Object.keys(updatePayload).length > 0) {
+      const { error: updateError } = await supabase
+        .from("invoices")
+        .update(updatePayload)
+        .eq("id", invoiceId);
+      
+      if (updateError) {
+        // Log but don't fail - invoice was created successfully
+        console.warn("Failed to update payment fields after invoice creation:", updateError);
+      }
+    }
+  } catch (updateError) {
+    // Log but don't fail - invoice was created successfully
+    console.warn("Failed to update payment fields after invoice creation:", updateError);
+  }
+
+  return invoiceId;
 }
 
 /* -------------------- List -------------------- */
@@ -243,6 +288,9 @@ export type InvoiceDetail = {
   discount_amount: number;
   notes: string | null;
   terms: string | null;
+  payment_method: "Cash" | "Card Payment" | "Credit Facilities" | null;
+  amount_paid: number;
+  amount_due: number;
   items: InvoiceItemRow[];
 };
 
@@ -278,6 +326,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
       from_snapshot, bill_to_snapshot,
       discount_type, discount_amount,
       notes, terms,
+      payment_method, amount_paid, amount_due,
       invoice_items ( item, description, quantity, unit_price, tax_percent )
     `
     )
@@ -287,6 +336,33 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
   if (error) {
     return null;
   }
+
+  // Calculate totals to determine correct amount_due
+  const items = (data.invoice_items ?? []) as InvoiceItemRow[];
+  const subtotal = items.reduce(
+    (s, it) => s + Number(it.quantity) * Number(it.unit_price),
+    0
+  );
+  const taxTotal = items.reduce((s, it) => {
+    const line = Number(it.quantity) * Number(it.unit_price);
+    return s + line * (Number(it.tax_percent) / 100);
+  }, 0);
+  const discount =
+    data.discount_type === "percent"
+      ? (subtotal * Number(data.discount_amount || 0)) / 100
+      : Number(data.discount_amount || 0);
+  const total = subtotal + taxTotal - discount;
+  
+  const amountPaid = Number(data.amount_paid || 0);
+  // Calculate amount_due: use stored value if valid, otherwise calculate from total - amount_paid
+  const storedAmountDue = data.amount_due !== null && data.amount_due !== undefined 
+    ? Number(data.amount_due) 
+    : null;
+  const calculatedAmountDue = Math.max(0, total - amountPaid);
+  // Use stored value if it's reasonable (>= 0 and <= total), otherwise use calculated
+  const amountDue = storedAmountDue !== null && storedAmountDue >= 0 && storedAmountDue <= total
+    ? storedAmountDue
+    : calculatedAmountDue;
 
   return {
     id: data.id,
@@ -301,7 +377,10 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     discount_amount: Number(data.discount_amount || 0),
     notes: data.notes,
     terms: data.terms,
-    items: (data.invoice_items ?? []) as InvoiceItemRow[],
+    payment_method: data.payment_method as "Cash" | "Card Payment" | "Credit Facilities" | null,
+    amount_paid: amountPaid,
+    amount_due: amountDue,
+    items: items,
   };
 }
 
@@ -309,6 +388,23 @@ export async function markInvoicePaid(id: string): Promise<void> {
   const { error } = await supabase
     .from("invoices")
     .update({ status: "paid" })
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+export async function updateInvoicePayment(
+  id: string,
+  payment: {
+    payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
+    amount_paid?: number;
+    amount_due?: number;
+    status?: "unpaid" | "paid";
+  }
+): Promise<void> {
+  const { error } = await supabase
+    .from("invoices")
+    .update(payment)
     .eq("id", id);
 
   if (error) throw error;

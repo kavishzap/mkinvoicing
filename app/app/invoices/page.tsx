@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Search, MoreHorizontal, Eye } from "lucide-react";
+import { Plus, Search, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -21,12 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
 import { InvoiceEmptyState } from "@/components/invoice-empty-state";
 import { InvoiceTableSkeleton } from "@/components/invoice-table-skeleton";
@@ -36,7 +30,6 @@ import {
   listInvoices,
   type InvoiceListRow,
   type InvoiceStatus,
-  markInvoicePaid, // ⬅️ NEW
 } from "@/lib/invoices-service";
 
 export default function InvoicesPage() {
@@ -161,19 +154,6 @@ export default function InvoicesPage() {
       year: "numeric",
     });
 
-  async function onMarkPaid(id: string) {
-    try {
-      await markInvoicePaid(id);
-      toast({ title: "Marked as paid" });
-      await load(); // refresh the list so status/option updates
-    } catch (e: any) {
-      toast({
-        title: "Failed to mark as paid",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    }
-  }
 
   // UI skeletons/empty
   if (isLoading && rows.length === 0) {
@@ -360,28 +340,6 @@ export default function InvoicesPage() {
                           <span className="hidden sm:inline">View</span>
                         </Button>
 
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                              <span className="sr-only">More actions</span>
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {/* Hide "Mark as Paid" if already paid */}
-                            {inv.status !== "paid" && (
-                              <DropdownMenuItem
-                                onClick={() => onMarkPaid(inv.id)}
-                              >
-                                Mark as Paid
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>

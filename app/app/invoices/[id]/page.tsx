@@ -29,48 +29,49 @@ export default function InvoiceViewPage() {
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const loadInvoiceData = async () => {
+    if (!id) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      const [inv, prof] = await Promise.allSettled([
+        getInvoice(id),
+        fetchProfile(),
+      ]);
+
+      if (inv.status === "fulfilled") {
+        setInvoice(inv.value);
+      } else {
+        setInvoice(null);
+        setError(inv.reason?.message ?? "Failed to load invoice.");
+      }
+
+      if (prof.status === "fulfilled") {
+        setProfile(prof.value);
+      } else {
+        setProfile(null);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Something went wrong.");
+      setInvoice(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     if (!id) return;
 
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const [inv, prof] = await Promise.allSettled([
-          getInvoice(id),
-          fetchProfile(),
-        ]);
-
-        if (cancelled) return;
-
-        if (inv.status === "fulfilled") {
-          setInvoice(inv.value);
-        } else {
-          setInvoice(null);
-          setError(inv.reason?.message ?? "Failed to load invoice.");
-        }
-
-        if (prof.status === "fulfilled") {
-          setProfile(prof.value);
-        } else {
-          setProfile(null);
-        }
-      } catch (e: any) {
-        if (!cancelled) {
-          setError(e?.message ?? "Something went wrong.");
-          setInvoice(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+    loadInvoiceData();
 
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, refreshKey]);
 
   const fmtDate = (d: string) =>
     new Date(d).toLocaleDateString("en-GB", {
@@ -121,6 +122,10 @@ export default function InvoiceViewPage() {
   const { subtotal, taxTotal, discount, total } = computeTotals(invoice);
   const bill = invoice.bill_to_snapshot || {};
   const from = invoice.from_snapshot || {};
+  
+  // Calculate amount due: always calculate from total - amount_paid to ensure accuracy
+  const amountPaid = invoice.amount_paid || 0;
+  const amountDue = Math.max(0, total - amountPaid);
 
   const billName =
     bill?.type === "company" ? bill?.company_name : bill?.full_name;
@@ -143,8 +148,8 @@ export default function InvoiceViewPage() {
 
   const fromEmail = from?.email || safeProfile.email;
 
-  // Resolve a logo URL in order: from_snapshot -> profile -> /logo.png
-  const logoSrc = (from as any)?.logoUrl || safeProfile.logoUrl || "/logo.png";
+  // Resolve a logo URL in order: from_snapshot -> profile -> /kredence.png
+  const logoSrc = (from as any)?.logoUrl || safeProfile.logoUrl || "/kredence.png";
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -177,6 +182,10 @@ export default function InvoiceViewPage() {
             setInvoice((prev) =>
               prev ? ({ ...prev, status: "paid" } as InvoiceDetail) : prev
             );
+          }}
+          onRefresh={() => {
+            // Refresh invoice data
+            setRefreshKey((prev) => prev + 1);
           }}
         />
       </div>
@@ -211,6 +220,16 @@ export default function InvoiceViewPage() {
                   {fromEmail && (
                     <p className="text-sm text-muted-foreground mt-1">
                       {fromEmail}
+                    </p>
+                  )}
+                  {from?.type === "company" && from?.registration_id && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Reg: {from.registration_id}
+                    </p>
+                  )}
+                  {from?.type === "company" && from?.vat_number && (
+                    <p className="text-sm text-muted-foreground">
+                      VAT: {from.vat_number}
                     </p>
                   )}
                 </div>
@@ -280,6 +299,32 @@ export default function InvoiceViewPage() {
                     </p>
                     <div className="mt-1">
                       <InvoiceStatusBadge status={invoice.status} />
+                    </div>
+                  </div>
+                  <Separator />
+                  <div>
+                    <p className="text-sm font-semibold text-muted-foreground mb-2">
+                      Payment Information
+                    </p>
+                    <div className="space-y-2">
+                      {invoice.payment_method && (
+                        <div>
+                          <p className="text-xs text-muted-foreground">Payment Method</p>
+                          <p className="font-medium text-sm">{invoice.payment_method}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs text-muted-foreground">Amount Paid</p>
+                        <p className="font-medium text-sm">
+                          {invoice.currency} {amountPaid.toFixed(2)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Amount Due</p>
+                        <p className={`font-semibold text-sm ${amountDue > 0 ? "text-destructive" : "text-green-600"}`}>
+                          {invoice.currency} {amountDue.toFixed(2)}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -390,6 +435,35 @@ export default function InvoiceViewPage() {
                           currency: invoice.currency,
                         }).format(total)}
                       </span>
+                    </div>
+                    <Separator />
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Amount Paid</span>
+                        <span className="font-medium">
+                          {new Intl.NumberFormat("en-US", {
+                            style: "currency",
+                            currency: invoice.currency,
+                          }).format(amountPaid)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm font-semibold">
+                        <span className={amountDue > 0 ? "text-destructive" : "text-green-600"}>
+                          Amount Due
+                        </span>
+                        <span className={amountDue > 0 ? "text-destructive" : "text-green-600"}>
+                          {new Intl.NumberFormat("en-US", {
+                            style: "currency",
+                            currency: invoice.currency,
+                          }).format(amountDue)}
+                        </span>
+                      </div>
+                      {invoice.payment_method && (
+                        <div className="flex justify-between text-sm pt-2 border-t">
+                          <span className="text-muted-foreground">Payment Method:</span>
+                          <span className="font-medium">{invoice.payment_method}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
