@@ -11,7 +11,7 @@ import { getReportData, type ReportData } from "@/lib/report-service";
 import { getCustomersByMonthForRange } from "@/lib/customers-service";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import html2canvas from "html2canvas";
+import html2canvas from "html2canvas-pro";
 import {
   ChartContainer,
   ChartTooltip,
