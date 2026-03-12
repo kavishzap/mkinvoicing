@@ -14,7 +14,7 @@ export type LineItemPayload = {
 export type CreateInvoicePayload = {
   issue_date: string; // "YYYY-MM-DD"
   due_date: string; // "YYYY-MM-DD"
-  status: "unpaid" | "paid"; // only two statuses now
+  status: "unpaid" | "paid" | "cancelled";
   currency: string; // e.g. "MUR"
   discount_type: "value" | "percent";
   discount_amount: number;
@@ -140,7 +140,7 @@ export async function createInvoice(
 
 /* -------------------- List -------------------- */
 
-export type InvoiceStatus = "unpaid" | "paid";
+export type InvoiceStatus = "unpaid" | "paid" | "cancelled";
 
 export type InvoiceListRow = {
   id: string;
@@ -280,7 +280,7 @@ export type InvoiceDetail = {
   number: string;
   issue_date: string;
   due_date: string;
-  status: "unpaid" | "paid";
+  status: "unpaid" | "paid" | "cancelled";
   currency: string;
   from_snapshot: any;
   bill_to_snapshot: any;
@@ -369,7 +369,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     number: data.number,
     issue_date: data.issue_date,
     due_date: data.due_date,
-    status: data.status as "unpaid" | "paid",
+    status: data.status as "unpaid" | "paid" | "cancelled",
     currency: data.currency,
     from_snapshot: data.from_snapshot,
     bill_to_snapshot: data.bill_to_snapshot,
@@ -393,13 +393,23 @@ export async function markInvoicePaid(id: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Cancel invoice: sets status to cancelled and amount_paid to 0 so it does not count in total paid or overdue */
+export async function cancelInvoice(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("invoices")
+    .update({ status: "cancelled", amount_paid: 0, amount_due: 0 })
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
 export async function updateInvoicePayment(
   id: string,
   payment: {
     payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
     amount_paid?: number;
     amount_due?: number;
-    status?: "unpaid" | "paid";
+    status?: "unpaid" | "paid" | "cancelled";
   }
 ): Promise<void> {
   const { error } = await supabase

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,12 +36,20 @@ import { useToast } from "@/hooks/use-toast";
 import {
   addCustomer,
   deleteCustomer,
+  getCustomersByMonth,
   listCustomers,
   setCustomerActive,
   updateCustomer,
   type CustomerRow,
   type CustomerPayload,
 } from "@/lib/customers-service";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 type FormData = {
   type: "company" | "individual";
@@ -84,6 +92,22 @@ export default function CustomersPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [chartData, setChartData] = useState<{ month: string; label: string; count: number }[]>([]);
+
+  const chartConfig = { count: { label: "Customers", color: "hsl(217, 91%, 60%)" } } satisfies ChartConfig;
+
+  async function loadChart() {
+    try {
+      const data = await getCustomersByMonth();
+      setChartData(data);
+    } catch {
+      setChartData([]);
+    }
+  }
+
+  useEffect(() => {
+    loadChart();
+  }, []);
 
   // Load
   useEffect(() => {
@@ -159,6 +183,7 @@ export default function CustomersPage() {
         });
       }
       await reload();
+      loadChart();
       setIsDialogOpen(false);
     } catch (e: any) {
       toast({
@@ -248,6 +273,7 @@ export default function CustomersPage() {
       // If last item on last page deleted, move back a page otherwise reload
       if (customers.length === 1 && page > 1) setPage((p) => p - 1);
       else reload();
+      loadChart();
       setConfirmDeleteId(null);
     }
   }
@@ -462,6 +488,56 @@ export default function CustomersPage() {
           </div>
         </div>
       )}
+
+      {/* Customers per month chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Customers per Month</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            New customers by month (current year, by created date)
+          </p>
+        </CardHeader>
+        <CardContent>
+          {chartData.length > 0 ? (
+            <ChartContainer config={chartConfig} className="h-[280px] w-full">
+              <AreaChart data={chartData} margin={{ left: 0, right: 16 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  allowDecimals={false}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      formatter={(value) => [String(value), "Customers"]}
+                    />
+                  }
+                />
+                <Area
+                  type="monotone"
+                  dataKey="count"
+                  stroke="hsl(217, 91%, 60%)"
+                  fill="hsl(217, 91%, 60%)"
+                  fillOpacity={0.4}
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ChartContainer>
+          ) : (
+            <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+              No customer data yet
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

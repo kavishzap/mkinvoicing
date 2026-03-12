@@ -1,21 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { FileText, Settings, Users, LogOut } from "lucide-react";
+import { FileText, LayoutDashboard, Settings, Users, LogOut, Receipt, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import Logo from "../assets/semilogo.png";
 import { toast } from "@/hooks/use-toast";
-import Logo1 from "../assets/finalogo.png";
 type SidebarProps = {
   className?: string;
   onNavigate?: () => void;
 };
 
 const navItems = [
+  { title: "Dashboard", href: "/app", icon: LayoutDashboard },
   { title: "Invoices", href: "/app/invoices", icon: FileText },
   { title: "Customers", href: "/app/customers", icon: Users },
+  { title: "Expenses", href: "/app/expenses", icon: Receipt },
+  { title: "Reports", href: "/app/reports", icon: BarChart3 },
   { title: "Settings", href: "/app/settings", icon: Settings },
 ] as const;
 
@@ -49,28 +49,23 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
         className
       )}
     >
-      <div className="p-6 shrink-0">
+      <div className="p-6 pb-4 shrink-0">
         <Link
-          href="/app/invoices"
-          className="flex items-center gap-2"
+          href="/app"
+          className="flex items-center justify-center"
           onClick={onNavigate}
         >
-          <Image
-            src={Logo}
-            alt="PayMoBill Logo"
-            width={96}
-            height={96}
-            className="object-contain w-48 h-48"
-            priority
-          />
+          <span className="text-xl font-bold tracking-tight">PocketLedger</span>
         </Link>
       </div>
 
-      {/* ✅ Menus and Logout grouped together */}
-      <nav className="px-3 pb-3 space-y-1 -mt-10">
+      {/* Menus and Logout */}
+      <nav className="px-3 pb-3 space-y-1 flex-1">
         {navItems.map((item) => {
           const isActive =
-            pathname === item.href || pathname.startsWith(item.href + "/");
+            item.href === "/app"
+              ? pathname === "/app"
+              : pathname === item.href || pathname.startsWith(item.href + "/");
 
           return (
             <Link
@@ -100,14 +95,9 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
         </button>
       </nav>
       <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground mb-1">Powered by</span>
-        <Image
-          src={Logo1} // replace if needed
-          alt="Powered By Logo"
-          width={80}
-          height={80}
-          className="object-contain"
-        />
+        <span className="text-xs text-muted-foreground">
+          © {new Date().getFullYear()} Mojhoa Automations
+        </span>
       </div>
     </aside>
   );

@@ -183,8 +183,12 @@ export default function InvoiceViewPage() {
               prev ? ({ ...prev, status: "paid" } as InvoiceDetail) : prev
             );
           }}
+          onCancelled={() => {
+            setInvoice((prev) =>
+              prev ? ({ ...prev, status: "cancelled" } as InvoiceDetail) : prev
+            );
+          }}
           onRefresh={() => {
-            // Refresh invoice data
             setRefreshKey((prev) => prev + 1);
           }}
         />

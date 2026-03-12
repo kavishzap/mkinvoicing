@@ -1,12 +1,14 @@
 import type { InvoiceStatus } from "@/lib/invoice-store";
 import { Badge } from "@/components/ui/badge";
 
+type StatusWithCancelled = InvoiceStatus | "cancelled";
+
 interface InvoiceStatusBadgeProps {
-  status: InvoiceStatus;
+  status: StatusWithCancelled;
 }
 
 export function InvoiceStatusBadge({ status }: InvoiceStatusBadgeProps) {
-  const variants: Record<InvoiceStatus, { label: string; className: string }> =
+  const variants: Record<StatusWithCancelled, { label: string; className: string }> =
     {
       draft: {
         label: "Draft",
@@ -31,6 +33,11 @@ export function InvoiceStatusBadge({ status }: InvoiceStatusBadgeProps) {
         label: "Overdue",
         className:
           "bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-950 dark:text-red-300",
+      },
+      cancelled: {
+        label: "Cancelled",
+        className:
+          "bg-gray-100 text-gray-700 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300",
       },
     };
 

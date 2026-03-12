@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Download, CheckCircle2, Edit, Printer } from "lucide-react";
+import { Download, CheckCircle2, Edit, Printer, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,10 +25,10 @@ import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import {
+  cancelInvoice,
   computeTotals,
   getInvoice,
   type InvoiceDetail,
-  markInvoicePaid,
   updateInvoicePayment,
 } from "@/lib/invoices-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
@@ -40,6 +40,8 @@ interface InvoiceViewActionsProps {
   logoSrc?: string;
   // Optional: parent can flip local UI instantly after mark-as-paid
   onPaid?: () => void;
+  // Optional: parent can flip local state after cancel
+  onCancelled?: () => void;
   // Optional: callback to refresh invoice data
   onRefresh?: () => void;
 }
@@ -157,6 +159,7 @@ export function InvoiceViewActions({
   profile,
   logoSrc,
   onPaid,
+  onCancelled,
   onRefresh,
 }: InvoiceViewActionsProps) {
   const router = useRouter();
@@ -362,7 +365,7 @@ export function InvoiceViewActions({
           doc.setFontSize(8);
           doc.setTextColor("#94A3B8");
           // Powered by text (centered)
-          doc.text("Powered by MOJHOA AUTOMATIONS", pageW / 2, pageH - 35, { align: "center" });
+          doc.text("Powered by PocketLedger", pageW / 2, pageH - 35, { align: "center" });
           // Page number (right aligned)
           doc.setFontSize(9);
           doc.setTextColor("#64748B");
@@ -662,7 +665,7 @@ export function InvoiceViewActions({
           doc.setFontSize(8);
           doc.setTextColor("#94A3B8");
           // Powered by text (centered)
-          doc.text("Powered by MOJHOA AUTOMATIONS", pageW / 2, pageH - 35, { align: "center" });
+          doc.text("Powered by PocketLedger", pageW / 2, pageH - 35, { align: "center" });
           // Page number (right aligned)
           doc.setFontSize(9);
           doc.setTextColor("#64748B");
@@ -799,26 +802,6 @@ export function InvoiceViewActions({
     }
   };
 
-  // Persist "paid" then refresh UI; button hidden when already paid
-  const handleMarkAsPaid = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await markInvoicePaid(invoiceId);
-      toast({ title: "Marked as paid" });
-      onPaid?.(); // let parent flip local state instantly if desired
-      router.replace(`/app/invoices/${invoiceId}`); // force fresh mount
-    } catch (e: any) {
-      toast({
-        title: "Failed to mark as paid",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleUpdatePayment = async () => {
     if (busy) return;
     
@@ -875,6 +858,27 @@ export function InvoiceViewActions({
     }
   };
 
+  const handleCancelInvoice = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await cancelInvoice(invoiceId);
+      toast({ title: "Invoice cancelled" });
+      onCancelled?.();
+      onRefresh?.();
+      router.refresh();
+      setTimeout(() => router.replace(`/app/invoices/${invoiceId}`), 100);
+    } catch (e: any) {
+      toast({
+        title: "Failed to cancel invoice",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="flex items-center gap-2 flex-nowrap">
@@ -893,7 +897,7 @@ export function InvoiceViewActions({
           Print
         </Button>
 
-        {invoice?.status !== "paid" && (
+        {invoice?.status !== "paid" && invoice?.status !== "cancelled" && (
           <Button 
             variant="outline" 
             onClick={() => {
@@ -912,10 +916,35 @@ export function InvoiceViewActions({
           </Button>
         )}
 
-        {!isPaid && (
-          <Button variant="outline" onClick={handleMarkAsPaid} className="gap-2" disabled={busy}>
+        {!isPaid && invoice?.status !== "cancelled" && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              // Open update payment modal pre-filled to mark as paid
+              if (invoice) {
+                setPaymentMethod(invoice.payment_method || "Cash");
+                setAmountPaid(totals.total);
+                setAmountPaidError(null);
+                setIsPaymentDialogOpen(true);
+              }
+            }}
+            className="gap-2"
+            disabled={busy}
+          >
             <CheckCircle2 className="h-4 w-4" />
             Mark as Paid
+          </Button>
+        )}
+
+        {invoice?.status === "unpaid" && (
+          <Button
+            variant="outline"
+            onClick={handleCancelInvoice}
+            className="gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+            disabled={busy}
+          >
+            <XCircle className="h-4 w-4" />
+            Cancel Invoice
           </Button>
         )}
       </div>

@@ -172,6 +172,106 @@ export async function setCustomerActive(
   return mapRow(data);
 }
 
+/** Customers per month for chart (current year, uses created_at) */
+export type CustomersByMonth = {
+  month: string;
+  label: string;
+  count: number;
+};
+
+export async function getCustomersByMonth(
+  year?: number
+): Promise<CustomersByMonth[]> {
+  const userId = await getUserId();
+  const y = year ?? new Date().getFullYear();
+  const startDate = `${y}-01-01T00:00:00`;
+  const endDate = `${y}-12-31T23:59:59`;
+  const { data, error } = await supabase
+    .from("customers")
+    .select("created_at")
+    .eq("user_id", userId)
+    .gte("created_at", startDate)
+    .lte("created_at", endDate);
+
+  if (error) throw error;
+
+  const byMonth = new Map<string, number>();
+  for (let m = 1; m <= 12; m++) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    byMonth.set(key, 0);
+  }
+
+  (data ?? []).forEach((r: { created_at?: string }) => {
+    const d = r.created_at;
+    if (!d) return;
+    const date = new Date(d);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    if (byMonth.has(key)) byMonth.set(key, (byMonth.get(key) ?? 0) + 1);
+  });
+
+  return Array.from(byMonth.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, count]) => {
+      const [yr, m] = month.split("-");
+      const date = new Date(parseInt(yr), parseInt(m) - 1, 1);
+      const label = date.toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
+      });
+      return { month, label, count };
+    });
+}
+
+/** Customers per month for a date range (e.g. for reports) */
+export async function getCustomersByMonthForRange(
+  startDate: string,
+  endDate: string
+): Promise<CustomersByMonth[]> {
+  const userId = await getUserId();
+  const start = `${startDate}T00:00:00`;
+  const end = `${endDate}T23:59:59`;
+  const { data, error } = await supabase
+    .from("customers")
+    .select("created_at")
+    .eq("user_id", userId)
+    .gte("created_at", start)
+    .lte("created_at", end);
+
+  if (error) throw error;
+
+  const [startY, startM] = startDate.split("-").map(Number);
+  const [endY, endM] = endDate.split("-").map(Number);
+  const byMonth = new Map<string, number>();
+  for (let y = startY; y <= endY; y++) {
+    const mStart = y === startY ? startM : 1;
+    const mEnd = y === endY ? endM : 12;
+    for (let m = mStart; m <= mEnd; m++) {
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      byMonth.set(key, 0);
+    }
+  }
+
+  (data ?? []).forEach((r: { created_at?: string }) => {
+    const d = r.created_at;
+    if (!d) return;
+    const date = new Date(d);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    if (byMonth.has(key)) byMonth.set(key, (byMonth.get(key) ?? 0) + 1);
+  });
+
+  return Array.from(byMonth.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, count]) => {
+      const [yr, m] = month.split("-");
+      const date = new Date(parseInt(yr), parseInt(m) - 1, 1);
+      const label = date.toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
+      });
+      return { month, label, count };
+    });
+}
+
 /** Delete by id */
 export async function deleteCustomer(id: string): Promise<void> {
   await getUserId();

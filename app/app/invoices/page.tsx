@@ -72,7 +72,7 @@ export default function InvoicesPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return rows
-      .filter((r) => r.status !== "paid")
+      .filter((r) => r.status !== "paid" && r.status !== "cancelled")
       .reduce((acc, r) => acc + Number(r.total || 0), 0);
   }, [rows]);
   async function load() {
@@ -262,8 +262,9 @@ export default function InvoicesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="unpaid">OverDue</SelectItem>
+                <SelectItem value="unpaid">Overdue</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
           </div>
