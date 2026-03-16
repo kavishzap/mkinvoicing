@@ -3,6 +3,8 @@ export const dynamic = "force-dynamic";
 import type React from "react";
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,7 +92,17 @@ export default function LoginPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="pt-6 pb-2">
-            <span className="text-3xl font-bold tracking-tight">PocketLedger</span>
+            <div className="flex items-center gap-2">
+              <Image
+                src={Logo}
+                alt="Pocket Ledger logo"
+                width={32}
+                height={32}
+                className="rounded-md shadow-sm"
+                priority
+              />
+              <span className="text-3xl font-bold tracking-tight">Pocket Ledger</span>
+            </div>
           </div>
           <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
           <CardDescription>
@@ -169,16 +181,27 @@ export default function LoginPage() {
           <p className="text-sm text-center text-muted-foreground">
             Don&apos;t have an account?{" "}
             <Link
-              href="/auth/register"
+              href="https://mojhoa.com"
               className="text-primary hover:underline font-medium"
+              target="_blank"
+              rel="noopener noreferrer"
             >
-              Create account
+              Contact admin
             </Link>
           </p>
         </CardFooter>
       </form>
       <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground">PocketLedger</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Image
+            src={Logo}
+            alt="Pocket Ledger logo small"
+            width={18}
+            height={18}
+            className="rounded-sm"
+          />
+          <span>Pocket Ledger</span>
+        </div>
       </div>
     </Card>
   );

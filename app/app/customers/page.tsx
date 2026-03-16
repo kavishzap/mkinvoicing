@@ -43,13 +43,7 @@ import {
   type CustomerRow,
   type CustomerPayload,
 } from "@/lib/customers-service";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+// Customers chart removed per request
 
 type FormData = {
   type: "company" | "individual";
@@ -92,22 +86,7 @@ export default function CustomersPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [chartData, setChartData] = useState<{ month: string; label: string; count: number }[]>([]);
-
-  const chartConfig = { count: { label: "Customers", color: "hsl(217, 91%, 60%)" } } satisfies ChartConfig;
-
-  async function loadChart() {
-    try {
-      const data = await getCustomersByMonth();
-      setChartData(data);
-    } catch {
-      setChartData([]);
-    }
-  }
-
-  useEffect(() => {
-    loadChart();
-  }, []);
+  // Customers per month chart removed per request
 
   // Load
   useEffect(() => {
@@ -183,7 +162,6 @@ export default function CustomersPage() {
         });
       }
       await reload();
-      loadChart();
       setIsDialogOpen(false);
     } catch (e: any) {
       toast({
@@ -490,55 +468,6 @@ export default function CustomersPage() {
       )}
 
       {/* Customers per month chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Customers per Month</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            New customers by month (current year, by created date)
-          </p>
-        </CardHeader>
-        <CardContent>
-          {chartData.length > 0 ? (
-            <ChartContainer config={chartConfig} className="h-[280px] w-full">
-              <AreaChart data={chartData} margin={{ left: 0, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  allowDecimals={false}
-                />
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      formatter={(value) => [String(value), "Customers"]}
-                    />
-                  }
-                />
-                <Area
-                  type="monotone"
-                  dataKey="count"
-                  stroke="hsl(217, 91%, 60%)"
-                  fill="hsl(217, 91%, 60%)"
-                  fillOpacity={0.4}
-                  strokeWidth={2}
-                />
-              </AreaChart>
-            </ChartContainer>
-          ) : (
-            <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
-              No customer data yet
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Add/Edit Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">

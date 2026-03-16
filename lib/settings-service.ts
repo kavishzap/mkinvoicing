@@ -6,6 +6,7 @@ export type Profile = {
   logoUrl?: string;
   registrationId?: string;
   vatNumber?: string;
+  vatRegistered?: boolean;
   fullName?: string;
   taxId?: string;
   email?: string;
@@ -53,6 +54,7 @@ export async function fetchProfile(): Promise<Profile> {
     logoUrl: row.logo_url ?? "",
     registrationId: row.registration_id ?? "",
     vatNumber: row.vat_number ?? "",
+    vatRegistered: row.vat_registered ?? false,
     fullName: row.full_name ?? "",
     taxId: row.tax_id ?? "",
     email: row.email ?? "",
@@ -77,6 +79,7 @@ export async function upsertProfile(profile: Profile) {
     logo_url: profile.logoUrl || null,
     registration_id: profile.registrationId || null,
     vat_number: profile.vatNumber || null,
+    vat_registered: profile.vatRegistered ?? false,
     full_name: profile.fullName || null,
     tax_id: profile.taxId || null,
     email: profile.email || null,

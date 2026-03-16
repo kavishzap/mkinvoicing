@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type React from "react";
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient"; // ✅ add your supabase client
+import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -115,7 +117,17 @@ export default function RegisterPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="pt-6 pb-2">
-            <span className="text-3xl font-bold tracking-tight">PocketLedger</span>
+            <div className="flex items-center gap-2">
+              <Image
+                src={Logo}
+                alt="Pocket Ledger logo"
+                width={32}
+                height={32}
+                className="rounded-md shadow-sm"
+                priority
+              />
+              <span className="text-3xl font-bold tracking-tight">Pocket Ledger</span>
+            </div>
           </div>
           <CardTitle className="text-2xl font-bold">Register</CardTitle>
           <CardDescription>

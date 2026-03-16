@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
+import Joyride, { STATUS, type CallBackProps, type Step } from "react-joyride";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
@@ -15,6 +16,7 @@ import {
   Clock,
   Receipt,
   TrendingUp,
+  Sparkles,
 } from "lucide-react";
 import {
   Bar,
@@ -23,6 +25,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import Link from "next/link";
 import {
   getDashboardStats,
   getIncomeOverTime,
@@ -57,6 +60,60 @@ export default function DashboardPage() {
     { month: string; label: string; income: number }[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [runTour, setRunTour] = useState(false);
+
+  const steps: Step[] = [
+    {
+      target: '[data-tour-id="dashboard"]',
+      title: "Dashboard overview",
+      content:
+        "Here you see a quick summary of your paid invoices, overdue amounts, expenses and profit.",
+      disableBeacon: true,
+    },
+    {
+      target: '[data-tour-id="invoices"]',
+      title: "Invoices",
+      content:
+        "Create professional invoices, track payments and download PDFs for your clients.",
+    },
+    {
+      target: '[data-tour-id="customers"]',
+      title: "Customers",
+      content:
+        "Manage your customer list so you can quickly select them on invoices and reports.",
+    },
+    {
+      target: '[data-tour-id="expenses"]',
+      title: "Expenses",
+      content:
+        "Capture detailed expense line items to keep your business costs organised.",
+    },
+    {
+      target: '[data-tour-id="customer-credit"]',
+      title: "Customer Credit",
+      content:
+        "Track and settle overpayments made by customers across their invoices.",
+    },
+    {
+      target: '[data-tour-id="pnl-report"]',
+      title: "PnL Report",
+      content:
+        "View and download your Profit & Loss statement for any period.",
+    },
+    {
+      target: '[data-tour-id="company-settings"]',
+      title: "Company Settings",
+      content:
+        "Configure your company details, logo, bank info and invoice defaults.",
+    },
+  ];
+
+  const handleJoyrideCallback = (data: CallBackProps) => {
+    const { status } = data;
+    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+      setRunTour(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -84,11 +141,13 @@ export default function DashboardPage() {
   if (loading || !stats) {
     return (
       <div className="p-6 space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Overview of your invoicing and expenses
-          </p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+            <p className="text-muted-foreground mt-1">
+              Overview of your invoicing and expenses
+            </p>
+          </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
@@ -116,11 +175,39 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
-          Overview of your invoicing and expenses
-        </p>
+      <Joyride
+        steps={steps}
+        run={runTour}
+        continuous
+        showProgress
+        showSkipButton
+        callback={handleJoyrideCallback}
+        spotlightPadding={6}
+        styles={{
+          options: {
+            primaryColor: "#10b981",
+            zIndex: 9999,
+          },
+        }}
+      />
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">
+            Overview of your invoicing and expenses
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setRunTour(true)}
+          className="relative inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500 text-white px-4 py-2 text-xs font-semibold shadow-lg shadow-emerald-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+        >
+          <span className="absolute -inset-1 rounded-full bg-emerald-400/30 blur-xl animate-pulse" />
+          <span className="relative flex items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            <span>Click me</span>
+          </span>
+        </button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

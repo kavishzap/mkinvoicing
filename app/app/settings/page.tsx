@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -67,6 +68,7 @@ export default function SettingsPage() {
     logoUrl: "",
     registrationId: "",
     vatNumber: "",
+    vatRegistered: false,
     fullName: "",
     taxId: "",
     email: "",
@@ -261,9 +263,9 @@ export default function SettingsPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Company Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Manage your account and invoice preferences
+          Manage your company details and invoice preferences
         </p>
       </div>
 
@@ -400,6 +402,20 @@ export default function SettingsPage() {
                       setProfile({ ...profile, vatNumber: e.target.value })
                     }
                     placeholder="VAT123456789"
+                  />
+                </div>
+                <div className="flex items-center justify-between border rounded-md px-3 py-2">
+                  <div className="space-y-0.5">
+                    <Label className="text-sm">VAT registered</Label>
+                    <p className="text-xs text-muted-foreground">
+                      If enabled, a 15% corporate tax will be shown in your PnL report.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={profile.vatRegistered ?? false}
+                    onCheckedChange={(checked) =>
+                      setProfile({ ...profile, vatRegistered: !!checked })
+                    }
                   />
                 </div>
               </CardContent>

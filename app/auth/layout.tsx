@@ -14,14 +14,19 @@ export default function AuthLayout({
           {children}
         </div>
         <div className="hidden lg:flex items-center justify-center">
-          <Image
-            src="/Resume%20folder-bro.png"
-            alt=""
-            width={500}
-            height={400}
-            className="object-contain max-h-[400px] w-full"
-            priority
-          />
+          <div className="flex flex-col items-center gap-3">
+            <Image
+              src="/Resume%20folder-bro.png"
+              alt=""
+              width={500}
+              height={400}
+              className="object-contain max-h-[400px] w-full"
+              priority
+            />
+            <p className="text-xs text-muted-foreground">
+              Developed by Mojhoa Automations
+            </p>
+          </div>
         </div>
       </div>
     </div>

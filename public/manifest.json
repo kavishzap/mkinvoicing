@@ -1,6 +1,6 @@
 {
-  "name": "PocketLedger",
-  "short_name": "PocketLedger",
+  "name": "Pocket Ledger",
+  "short_name": "Pocket Ledger",
   "description": "Invoice, expense tracking & bookkeeping",
   "start_url": "/",
   "display": "standalone",

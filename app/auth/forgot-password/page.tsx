@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import type React from "react";
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
+import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -79,7 +81,17 @@ export default function ForgotPasswordPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="pt-6 pb-2">
-            <span className="text-3xl font-bold tracking-tight">PocketLedger</span>
+            <div className="flex items-center gap-2">
+              <Image
+                src={Logo}
+                alt="Pocket Ledger logo"
+                width={32}
+                height={32}
+                className="rounded-md shadow-sm"
+                priority
+              />
+              <span className="text-3xl font-bold tracking-tight">Pocket Ledger</span>
+            </div>
           </div>
           <CardTitle className="text-2xl font-bold">Forgot password?</CardTitle>
           <CardDescription>
@@ -120,7 +132,16 @@ export default function ForgotPasswordPage() {
         </CardFooter>
       </form>
       <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground">PocketLedger</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Image
+            src={Logo}
+            alt="Pocket Ledger logo small"
+            width={18}
+            height={18}
+            className="rounded-sm"
+          />
+          <span>Pocket Ledger</span>
+        </div>
       </div>
     </Card>
   );

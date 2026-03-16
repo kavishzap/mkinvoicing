@@ -32,6 +32,11 @@ import {
   updateInvoicePayment,
 } from "@/lib/invoices-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import {
+  addCustomerCredit,
+  getCustomerCredit,
+  createCustomerSettlement,
+} from "@/lib/customer-credits-service";
 
 interface InvoiceViewActionsProps {
   invoiceId: string;
@@ -166,11 +171,15 @@ export function InvoiceViewActions({
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Card Payment" | "Credit Facilities" | null>(
+  const [paymentMethod, setPaymentMethod] = useState<
+    "Cash" | "Card Payment" | "Credit Facilities" | "Bank Transfer" | null
+  >(
     invoice?.payment_method || null
   );
   const [amountPaid, setAmountPaid] = useState(invoice?.amount_paid || 0);
   const [amountPaidError, setAmountPaidError] = useState<string | null>(null);
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [creditToApply, setCreditToApply] = useState(0);
 
   const isPaid = useMemo(() => invoice?.status === "paid", [invoice?.status]);
   
@@ -183,10 +192,44 @@ export function InvoiceViewActions({
   // Update local state when invoice changes
   useEffect(() => {
     if (invoice) {
-      setPaymentMethod(invoice.payment_method || null);
+      setPaymentMethod(
+        (invoice.payment_method as
+          | "Cash"
+          | "Card Payment"
+          | "Credit Facilities"
+          | "Bank Transfer"
+          | null) || null
+      );
       setAmountPaid(invoice.amount_paid || 0);
+      setCreditToApply(0);
     }
   }, [invoice]);
+
+  // Load customer credit whenever the linked customer changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!invoice?.customer_id) {
+        setCreditBalance(null);
+        return;
+      }
+      try {
+        const credit = await getCustomerCredit(invoice.customer_id);
+        if (!cancelled) {
+          setCreditBalance(credit ? Number(credit.balance || 0) : 0);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to load customer credit", e);
+          setCreditBalance(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [invoice?.customer_id]);
 
   const handleDownloadPDF = async () => {
     if (busy) return;
@@ -365,7 +408,7 @@ export function InvoiceViewActions({
           doc.setFontSize(8);
           doc.setTextColor("#94A3B8");
           // Powered by text (centered)
-          doc.text("Powered by PocketLedger", pageW / 2, pageH - 35, { align: "center" });
+          doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, { align: "center" });
           // Page number (right aligned)
           doc.setFontSize(9);
           doc.setTextColor("#64748B");
@@ -665,7 +708,7 @@ export function InvoiceViewActions({
           doc.setFontSize(8);
           doc.setTextColor("#94A3B8");
           // Powered by text (centered)
-          doc.text("Powered by PocketLedger", pageW / 2, pageH - 35, { align: "center" });
+          doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, { align: "center" });
           // Page number (right aligned)
           doc.setFontSize(9);
           doc.setTextColor("#64748B");
@@ -810,30 +853,71 @@ export function InvoiceViewActions({
       setAmountPaidError("Amount paid cannot be negative");
       return;
     }
-    if (amountPaid > totals.total) {
-      setAmountPaidError(`Amount paid cannot exceed invoice total of ${invoice?.currency} ${totals.total.toFixed(2)}`);
-      return;
-    }
-    
+
     setAmountPaidError(null);
     setBusy(true);
     try {
-      const calculatedAmountDue = Math.max(0, totals.total - amountPaid);
-      // Only mark as paid if the full amount is paid (amount_paid >= total)
-      const newStatus = amountPaid >= totals.total ? "paid" : "unpaid";
-      
+      const effectivePaid = amountPaid + creditToApply;
+      const calculatedAmountDue = Math.max(0, totals.total - effectivePaid);
+      const newStatus = effectivePaid >= totals.total ? "paid" : "unpaid";
+      const overpaid = Math.max(0, effectivePaid - totals.total);
+
       await updateInvoicePayment(invoiceId, {
         payment_method: paymentMethod,
-        amount_paid: amountPaid,
+        // Store the full amount that went towards this invoice:
+        // cash (amountPaid) + credit applied.
+        amount_paid: effectivePaid,
         amount_due: calculatedAmountDue,
         status: newStatus,
+        credit_applied: creditToApply,
       });
-      
-      toast({ 
-        title: "Payment updated",
-        description: amountPaid >= totals.total 
+
+      // Apply customer credit to this invoice (settlement + balance decrement)
+      if (creditToApply > 0 && invoice?.customer_id) {
+        try {
+          await createCustomerSettlement({
+            customerId: invoice.customer_id as string,
+            invoiceId: invoiceId,
+            amount: creditToApply,
+            notes: "Applied automatically when updating invoice payment.",
+          });
+        } catch (e) {
+          // Non-fatal: log and continue
+          // eslint-disable-next-line no-console
+          console.error("Failed to settle customer credit", e);
+        }
+      }
+
+      // Track customer credit for overpayments (extra money beyond total)
+      if (overpaid > 0 && invoice?.customer_id) {
+        try {
+          await addCustomerCredit(
+            invoice.customer_id as string,
+            overpaid
+          );
+        } catch (e) {
+          // Non-fatal: log and continue
+          // eslint-disable-next-line no-console
+          console.error("Failed to record customer credit", e);
+        }
+      }
+
+      const baseMessage =
+        effectivePaid >= totals.total
           ? "Invoice marked as paid. Full amount has been received."
-          : "Payment information has been updated successfully.",
+          : "Payment information has been updated successfully.";
+      const appliedCreditMessage =
+        creditToApply > 0
+          ? ` ${money(creditToApply, invoice?.currency || "MUR")} of customer credit has been applied to this invoice.`
+          : "";
+      const overpayCreditMessage =
+        overpaid > 0
+          ? ` An extra ${money(overpaid, invoice?.currency || "MUR")} has been stored as customer credit.`
+          : "";
+
+      toast({
+        title: "Payment updated",
+        description: baseMessage + appliedCreditMessage + overpayCreditMessage,
       });
       setIsPaymentDialogOpen(false);
       
@@ -905,6 +989,8 @@ export function InvoiceViewActions({
               if (invoice) {
                 setPaymentMethod(invoice.payment_method || null);
                 setAmountPaid(invoice.amount_paid || 0);
+                setAmountPaidError(null);
+                setCreditToApply(0);
               }
               setIsPaymentDialogOpen(true);
             }} 
@@ -925,6 +1011,7 @@ export function InvoiceViewActions({
                 setPaymentMethod(invoice.payment_method || "Cash");
                 setAmountPaid(totals.total);
                 setAmountPaidError(null);
+                setCreditToApply(0);
                 setIsPaymentDialogOpen(true);
               }
             }}
@@ -949,7 +1036,10 @@ export function InvoiceViewActions({
         )}
       </div>
 
-      <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+      <Dialog
+        open={isPaymentDialogOpen}
+        onOpenChange={setIsPaymentDialogOpen}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Update Payment Information</DialogTitle>
@@ -964,7 +1054,13 @@ export function InvoiceViewActions({
                 value={paymentMethod || ""}
                 onValueChange={(v) =>
                   setPaymentMethod(
-                    v === "" ? null : (v as "Cash" | "Card Payment" | "Credit Facilities")
+                    v === ""
+                      ? null
+                      : (v as
+                          | "Cash"
+                          | "Card Payment"
+                          | "Credit Facilities"
+                          | "Bank Transfer")
                   )
                 }
               >
@@ -975,6 +1071,7 @@ export function InvoiceViewActions({
                   <SelectItem value="Cash">Cash</SelectItem>
                   <SelectItem value="Card Payment">Card Payment</SelectItem>
                   <SelectItem value="Credit Facilities">Credit Facilities</SelectItem>
+                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -985,16 +1082,14 @@ export function InvoiceViewActions({
                 type="number"
                 min="0"
                 step="0.01"
-                max={totals.total}
                 value={amountPaid}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   const val = Number(e.target.value);
-                  // Don't allow more than total
-                  const newValue = val >= 0 ? Math.min(val, totals.total) : 0;
+                  const newValue = val >= 0 ? val : 0;
                   setAmountPaid(newValue);
                   // Clear error when user corrects the value
                   if (amountPaidError) {
-                    if (newValue >= 0 && newValue <= totals.total) {
+                    if (newValue >= 0) {
                       setAmountPaidError(null);
                     }
                   }
@@ -1006,10 +1101,45 @@ export function InvoiceViewActions({
                 <p className="text-xs text-destructive">{amountPaidError}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Maximum: {invoice?.currency} {totals.total.toFixed(2)}
+                  You can enter more than the invoice total; any extra will be stored as customer credit.
                 </p>
               )}
             </div>
+            {invoice?.customer_id && creditBalance !== null && creditBalance > 0 && (
+              <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                <p className="text-xs text-emerald-800 font-medium">
+                  This customer has{" "}
+                  {money(creditBalance, invoice?.currency || "MUR")}{" "}
+                  of available credit.
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-emerald-700">
+                    You can use this credit to reduce the amount due on this invoice.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="px-3 py-1 rounded-full border-emerald-400 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+                    onClick={() => {
+                      const remaining = Math.max(0, totals.total - amountPaid);
+                      if (remaining <= 0) return;
+                      const useAmount = Math.min(creditBalance, remaining);
+                      setCreditToApply(useAmount);
+                      toast({
+                        title: "Credit selected",
+                        description: `${money(
+                          useAmount,
+                          invoice?.currency || "MUR"
+                        )} of customer credit will be applied when you update this payment.`,
+                      });
+                    }}
+                  >
+                    Use credit
+                  </Button>
+                </div>
+              </div>
+            )}
             <div className="rounded-lg bg-muted p-3 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Invoice Total:</span>
@@ -1023,13 +1153,21 @@ export function InvoiceViewActions({
                   {invoice?.currency} {amountPaid.toFixed(2)}
                 </span>
               </div>
+              {creditToApply > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Credit Applied:</span>
+                  <span className="font-medium">
+                    {invoice?.currency} {creditToApply.toFixed(2)}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Amount Due:</span>
-                <span className={`font-semibold ${Math.max(0, totals.total - amountPaid) > 0 ? "text-destructive" : "text-green-600"}`}>
-                  {invoice?.currency} {Math.max(0, totals.total - amountPaid).toFixed(2)}
+                <span className={`font-semibold ${Math.max(0, totals.total - amountPaid - creditToApply) > 0 ? "text-destructive" : "text-green-600"}`}>
+                  {invoice?.currency} {Math.max(0, totals.total - amountPaid - creditToApply).toFixed(2)}
                 </span>
               </div>
-              {amountPaid >= totals.total && (
+              {amountPaid + creditToApply >= totals.total && (
                 <div className="pt-2 border-t">
                   <p className="text-xs text-green-600 font-medium">
                     ✓ Full payment received. Invoice will be marked as paid.

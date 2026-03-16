@@ -1,91 +1,24 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { FileDown, Loader2 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { getReportData, type ReportData } from "@/lib/report-service";
-import { getCustomersByMonthForRange } from "@/lib/customers-service";
+import { fetchProfile, type Profile } from "@/lib/settings-service";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import html2canvas from "html2canvas-pro";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  XAxis,
-  YAxis,
-} from "recharts";
 
 type ReportRange = "monthly" | "yearly" | "custom";
-
-export type ChartDataPoint = {
-  month: string;
-  label: string;
-  income: number;
-  expense: number;
-};
-
-const chartConfig = {
-  income: { label: "Income", color: "hsl(217, 91%, 60%)" },
-  expense: { label: "Expense", color: "hsl(0, 84%, 60%)" },
-} satisfies ChartConfig;
-
-const customersChartConfig = {
-  count: { label: "Customers", color: "hsl(217, 91%, 60%)" },
-} satisfies ChartConfig;
-
-function aggregateByMonth(data: ReportData): ChartDataPoint[] {
-  const byMonth = new Map<string, { income: number; expense: number }>();
-  const [startY, startM] = data.startDate.split("-").map(Number);
-  const [endY, endM] = data.endDate.split("-").map(Number);
-  for (let y = startY; y <= endY; y++) {
-    const mStart = y === startY ? startM : 1;
-    const mEnd = y === endY ? endM : 12;
-    for (let m = mStart; m <= mEnd; m++) {
-      const key = `${y}-${String(m).padStart(2, "0")}`;
-      byMonth.set(key, { income: 0, expense: 0 });
-    }
-  }
-  data.invoices.forEach((inv) => {
-    const d = inv.issueDate;
-    if (!d) return;
-    const [y, m] = d.split("-");
-    const key = `${y}-${m}`;
-    const cur = byMonth.get(key);
-    if (cur) cur.income += Number(inv.total || 0);
-  });
-  data.expenses.forEach((e) => {
-    const d = e.expense_date;
-    if (!d) return;
-    const [y, m] = d.split("-");
-    const key = `${y}-${m}`;
-    const cur = byMonth.get(key);
-    if (cur) cur.expense += Number(e.amount || 0);
-  });
-  return Array.from(byMonth.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, vals]) => {
-      const [y, m] = month.split("-");
-      const d = new Date(parseInt(y), parseInt(m) - 1, 1);
-      const label = d.toLocaleDateString("en-GB", {
-        month: "short",
-        year: "numeric",
-      });
-      return { month, label, income: vals.income, expense: vals.expense };
-    });
-}
 
 function toLocalDateStr(d: Date): string {
   const y = d.getFullYear();
@@ -94,7 +27,11 @@ function toLocalDateStr(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function getDateRange(range: ReportRange, customStart?: string, customEnd?: string): { start: string; end: string } {
+function getDateRange(
+  range: ReportRange,
+  customStart?: string,
+  customEnd?: string
+): { start: string; end: string } {
   const today = new Date();
   const y = today.getFullYear();
   if (range === "monthly") {
@@ -130,49 +67,109 @@ function formatDate(d: string) {
   });
 }
 
-function generateReportPDF(
-  data: ReportData,
-  rangeLabel: string,
-  chartImageDataUrl?: string,
-  customersChartImageDataUrl?: string
-) {
+async function imageUrlToDataURL(
+  url: string
+): Promise<{ dataUrl: string; fmt: "PNG" | "JPEG" } | undefined> {
+  try {
+    const res = await fetch(url, { cache: "force-cache" });
+    if (!res.ok) return undefined;
+    const blob = await res.blob();
+    const fmt: "PNG" | "JPEG" = blob.type.includes("png") ? "PNG" : "JPEG";
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    return { dataUrl, fmt };
+  } catch {
+    return undefined;
+  }
+}
+
+async function generateReportPDF(data: ReportData, rangeLabel: string, profile: Profile | null) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const M = 40;
 
-  // Theme colors (RGB for jsPDF compatibility)
-  const headerBg = [15, 23, 42] as [number, number, number]; // slate-900
-  const white = [255, 255, 255] as [number, number, number];
-  const black = [0, 0, 0] as [number, number, number];
+  const brandColor: [number, number, number] = [15, 23, 42]; // slate-900
 
-  // Header
-  doc.setFillColor(...headerBg);
-  doc.rect(0, 0, pageW, 72, "F");
-  doc.setTextColor(...white);
-  doc.setFont("helvetica", "bold").setFontSize(22).text("Financial Report", M, 32);
-  doc.setFont("helvetica", "normal").setFontSize(11);
-  doc.text(rangeLabel, M, 52);
-  doc.text(`Generated: ${formatDate(new Date().toISOString().slice(0, 10))}`, pageW - M, 52, {
-    align: "right",
-  });
-  doc.setTextColor(...black);
+  const senderName =
+    (profile as any)?.companyName ||
+    (profile as any)?.fullName ||
+    "Your Company";
+  const senderEmail = (profile as any)?.email || "";
+  const registrationId = (profile as any)?.registration_id || (profile as any)?.registrationId;
+  const vatNumber = (profile as any)?.vat_number || (profile as any)?.vatNumber;
+  const resolvedLogo =
+    (profile as any)?.logoUrl ||
+    (profile as any)?.logo_url ||
+    "/kredence.png";
 
-  let y = 100;
+  const revenue = data.totalPaid;
+  const totalExpenses = data.totalExpense;
+  const netProfit = data.profitableIncome;
+  const isVatRegistered =
+    (profile as any)?.vat_registered ?? (profile as any)?.vatRegistered ?? false;
+  const taxRate = isVatRegistered ? 0.15 : 0;
+  const taxAmount = netProfit > 0 ? netProfit * taxRate : 0;
+  const netAfterTax = netProfit - taxAmount;
 
-  // Summary section
-  doc.setFont("helvetica", "bold").setFontSize(14).text("Summary", M, y);
-  y += 8;
+  // Header bar
+  doc.setFillColor(...brandColor);
+  doc.rect(0, 0, pageW, 70, "F");
 
-  const summaryRows = [
-    ["Total Paid", formatCurrency(data.totalPaid, data.currency)],
-    ["Total Expense", formatCurrency(data.totalExpense, data.currency)],
-    ["Profitable Income", formatCurrency(data.profitableIncome, data.currency)],
+  // Logo on the left
+  const logoImg = resolvedLogo ? await imageUrlToDataURL(resolvedLogo) : undefined;
+  if (logoImg?.dataUrl) {
+    doc.addImage(logoImg.dataUrl, logoImg.fmt, M, 14, 48, 48, undefined, "FAST");
+  }
+
+  const headerTextX = M + 60;
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold").setFontSize(18);
+  doc.text("PROFIT & LOSS", headerTextX, 28);
+  doc.setFont("helvetica", "normal").setFontSize(10);
+  doc.text(senderName, headerTextX, 44);
+  if (senderEmail) {
+    doc.text(senderEmail, headerTextX, 58);
+  }
+
+  // Right-side meta (range + generated date + BRN / VAT)
+  const metaLines = [
+    rangeLabel,
+    `Generated: ${formatDate(new Date().toISOString().slice(0, 10))}`,
   ];
+  if (registrationId) {
+    metaLines.push(`BRN: ${registrationId}`);
+  }
+  if (vatNumber) {
+    metaLines.push(`VAT: ${vatNumber}`);
+  }
+  const rightX = pageW - M;
+  let metaY = 26;
+  doc.setFontSize(9);
+  for (const line of metaLines) {
+    doc.text(line, rightX, metaY, { align: "right" });
+    metaY += 12;
+  }
 
+  doc.setTextColor(0, 0, 0);
+
+  let y = 110;
+
+  // 1. Revenue
+  doc.setFont("helvetica", "bold").setFontSize(14).text("1. Revenue", M, y);
+  y += 10;
   autoTable(doc, {
     startY: y,
-    head: [["Metric", "Amount"]],
-    body: summaryRows,
+    head: [["Description", `Amount (${data.currency})`]],
+    body: [
+      ["Sales / Invoices Revenue", formatCurrency(revenue, data.currency)],
+      ["Other Income", formatCurrency(0, data.currency)],
+      ["Total Revenue", formatCurrency(revenue, data.currency)],
+    ],
     margin: { left: M, right: M },
     theme: "plain",
     headStyles: {
@@ -182,133 +179,239 @@ function generateReportPDF(
       fontSize: 10,
     },
     bodyStyles: { fontSize: 10 },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
     columnStyles: {
-      0: { cellWidth: 120 },
-      1: { cellWidth: "auto", halign: "right" },
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 120, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // 2. Cost of Sales (we don't separate yet, so zeros)
+  doc.setFont("helvetica", "bold").setFontSize(14).text("2. Cost of Sales / Direct Costs", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["Description", `Amount (${data.currency})`]],
+    body: [
+      ["Cost of Goods Sold (COGS)", formatCurrency(0, data.currency)],
+      ["Purchases", formatCurrency(0, data.currency)],
+      ["Direct Labour", formatCurrency(0, data.currency)],
+      ["Other Direct Costs", formatCurrency(0, data.currency)],
+      ["Total Cost of Sales", formatCurrency(0, data.currency)],
+    ],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 120, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // Gross Profit = Revenue - Cost of Sales (here = revenue)
+  doc.setFont("helvetica", "bold").setFontSize(14).text("Gross Profit", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["", `Amount (${data.currency})`]],
+    body: [["Gross Profit", formatCurrency(revenue, data.currency)]],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 120, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // 3. Operating Expenses (we only know Total Expenses)
+  doc.setFont("helvetica", "bold").setFontSize(14).text("3. Operating Expenses", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["Expense Category", `Amount (${data.currency})`]],
+    body: [
+      ["Total Expenses", formatCurrency(totalExpenses, data.currency)],
+      ["Total Operating Expenses", formatCurrency(totalExpenses, data.currency)],
+    ],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 140, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // Net Operating Profit = Gross Profit - Operating Expenses
+  doc.setFont("helvetica", "bold").setFontSize(14).text("Net Operating Profit", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["", `Amount (${data.currency})`]],
+    body: [["Net Operating Profit", formatCurrency(netProfit, data.currency)]],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 140, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // 4. Other Income / Expenses (not tracked separately yet)
+  doc.setFont("helvetica", "bold").setFontSize(14).text("4. Other Income / Expenses", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["Description", `Amount (${data.currency})`]],
+    body: [
+      ["Interest Income", formatCurrency(0, data.currency)],
+      ["Interest Expense", formatCurrency(0, data.currency)],
+      ["Other Non-Operating Income", formatCurrency(0, data.currency)],
+      ["Total Other Income / Expense", formatCurrency(0, data.currency)],
+    ],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 140, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // Net Profit Before Tax (same as Net Operating Profit)
+  doc.setFont("helvetica", "bold").setFontSize(14).text("Net Profit Before Tax", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["", `Amount (${data.currency})`]],
+    body: [["Net Profit Before Tax", formatCurrency(netProfit, data.currency)]],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 160, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // 5. Tax
+  doc.setFont("helvetica", "bold").setFontSize(14).text("5. Tax", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["Description", `Amount (${data.currency})`]],
+    body: [
+      [
+        "Corporate Tax (15% Mauritius)",
+        formatCurrency(taxAmount, data.currency),
+      ],
+      ["CSR Levy (if applicable)", formatCurrency(0, data.currency)],
+      ["Total Tax", formatCurrency(taxAmount, data.currency)],
+    ],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 160, halign: "right" },
+    },
+  });
+  y = (doc as any).lastAutoTable.finalY + 18;
+
+  // Net Profit After Tax
+  doc.setFont("helvetica", "bold").setFontSize(14).text("Net Profit After Tax", M, y);
+  y += 10;
+  autoTable(doc, {
+    startY: y,
+    head: [["", `Amount (${data.currency})`]],
+    body: [["Net Profit After Tax", formatCurrency(netAfterTax, data.currency)]],
+    margin: { left: M, right: M },
+    theme: "plain",
+    headStyles: {
+      fillColor: [59, 130, 246],
+      textColor: 255,
+      fontStyle: "bold",
+      fontSize: 10,
+    },
+    bodyStyles: { fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 180, halign: "right" },
     },
   });
 
-  y = (doc as any).lastAutoTable.finalY + 24;
+  // Footer: powered by + page number
+  doc.setDrawColor(230);
+  doc.line(M, pageH - 50, pageW - M, pageH - 50);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(148, 163, 184); // slate-400
+  doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, {
+    align: "center",
+  });
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139); // slate-500
+  doc.text(`Page ${doc.getNumberOfPages()}`, pageW - M, pageH - 24, {
+    align: "right",
+  });
+  doc.setTextColor(0, 0, 0);
 
-  // Chart
-  if (chartImageDataUrl && y < 500) {
-    const chartW = pageW - 2 * M;
-    const chartH = 140;
-    doc.setFont("helvetica", "bold").setFontSize(12).text("Income vs Expense", M, y);
-    y += 8;
-    doc.addImage(chartImageDataUrl, "PNG", M, y, chartW, chartH);
-    y += chartH + 24;
-  } else if (chartImageDataUrl) {
-    doc.addPage();
-    y = 40;
-    doc.setFont("helvetica", "bold").setFontSize(12).text("Income vs Expense", M, y);
-    y += 8;
-    const chartW = pageW - 2 * M;
-    const chartH = 140;
-    doc.addImage(chartImageDataUrl, "PNG", M, y, chartW, chartH);
-    y += chartH + 24;
-  }
-
-  // Customers per month chart
-  if (customersChartImageDataUrl) {
-    if (y > 550) {
-      doc.addPage();
-      y = 40;
-    }
-    doc.setFont("helvetica", "bold").setFontSize(12).text("Customers per Month", M, y);
-    y += 8;
-    const chartW = pageW - 2 * M;
-    const chartH = 120;
-    doc.addImage(customersChartImageDataUrl, "PNG", M, y, chartW, chartH);
-    y += chartH + 24;
-  }
-
-  // Paid Invoices table
-  if (data.invoices.length > 0) {
-    if (y > 650) {
-      doc.addPage();
-      y = 40;
-    }
-    doc.setFont("helvetica", "bold").setFontSize(12).text("Paid Invoices", M, y);
-    y += 6;
-
-    const invRows = data.invoices.map((inv) => [
-      inv.number,
-      inv.clientName,
-      formatDate(inv.issueDate),
-      formatCurrency(inv.total, inv.currency),
-    ]);
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Invoice #", "Client", "Issue Date", "Amount"]],
-      body: invRows,
-      margin: { left: M, right: M },
-      theme: "striped",
-      headStyles: {
-        fillColor: [30, 41, 59],
-        textColor: 255,
-        fontStyle: "bold",
-        fontSize: 9,
-      },
-      bodyStyles: { fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: 50 },
-        1: { cellWidth: "auto" },
-        2: { cellWidth: 55 },
-        3: { cellWidth: 55, halign: "right" },
-      },
-    });
-    y = (doc as any).lastAutoTable.finalY + 20;
-  }
-
-  // Expenses table
-  if (data.expenses.length > 0) {
-    if (y > 620) {
-      doc.addPage();
-      y = 40;
-    }
-    doc.setFont("helvetica", "bold").setFontSize(12).text("Expenses", M, y);
-    y += 6;
-
-    const expRows = data.expenses.map((e) => [
-      e.description || "—",
-      e.expense_date ? formatDate(e.expense_date) : "—",
-      formatCurrency(e.amount, e.currency || data.currency),
-      e.notes?.trim() || "—",
-    ]);
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Description", "Date", "Amount", "Notes"]],
-      body: expRows,
-      margin: { left: M, right: M },
-      theme: "striped",
-      headStyles: {
-        fillColor: [30, 41, 59],
-        textColor: 255,
-        fontStyle: "bold",
-        fontSize: 9,
-      },
-      bodyStyles: { fontSize: 9 },
-      columnStyles: {
-        0: { cellWidth: "auto" },
-        1: { cellWidth: 55 },
-        2: { cellWidth: 50, halign: "right" },
-        3: { cellWidth: "auto" },
-      },
-    });
-  }
-
-  const filename = `PocketLedger-Report-${data.startDate}_to_${data.endDate}.pdf`;
+  const filename = `Pocket-Ledger-Report-${data.startDate}_to_${data.endDate}.pdf`;
   doc.save(filename);
 }
 
-export default function ReportsPage() {
+export default function PnlReportPage() {
   const { toast } = useToast();
-  const chartRef = useRef<HTMLDivElement>(null);
-  const customersChartRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState<ReportRange>("yearly");
   const [customStart, setCustomStart] = useState(() => {
     const d = new Date();
@@ -317,10 +420,7 @@ export default function ReportsPage() {
   });
   const [customEnd, setCustomEnd] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
-  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [customersChartData, setCustomersChartData] = useState<{ month: string; label: string; count: number }[]>([]);
   const [reportData, setReportData] = useState<ReportData | null>(null);
-  const [chartLoading, setChartLoading] = useState(true);
 
   const { start, end } = getDateRange(range, customStart, customEnd);
 
@@ -328,31 +428,20 @@ export default function ReportsPage() {
     let cancelled = false;
     (async () => {
       if (range === "custom" && customStart > customEnd) {
-        setChartData([]);
-        setCustomersChartData([]);
         setReportData(null);
-        setChartLoading(false);
         return;
       }
-      setChartLoading(true);
       try {
-        const [data, custData] = await Promise.all([
-          getReportData(start, end),
-          getCustomersByMonthForRange(start, end),
-        ]);
+        const data = await getReportData(start, end);
         if (!cancelled) {
           setReportData(data);
-          setChartData(aggregateByMonth(data));
-          setCustomersChartData(custData);
         }
       } catch {
         if (!cancelled) {
           setReportData(null);
-          setChartData([]);
-          setCustomersChartData([]);
         }
       } finally {
-        if (!cancelled) setChartLoading(false);
+        // no-op
       }
     })();
     return () => { cancelled = true; };
@@ -378,30 +467,8 @@ export default function ReportsPage() {
     setLoading(true);
     try {
       const data = await getReportData(start, end);
-      const freshChartData = aggregateByMonth(data);
-      const freshCustData = await getCustomersByMonthForRange(start, end);
-      setChartData(freshChartData);
-      setCustomersChartData(freshCustData);
-      await new Promise((r) => setTimeout(r, 600));
-      let chartImageDataUrl: string | undefined;
-      let customersChartImageDataUrl: string | undefined;
-      if (chartRef.current && freshChartData.length > 0) {
-        const canvas = await html2canvas(chartRef.current, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-        });
-        chartImageDataUrl = canvas.toDataURL("image/png");
-      }
-      if (customersChartRef.current && freshCustData.length > 0) {
-        const canvas = await html2canvas(customersChartRef.current, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-        });
-        customersChartImageDataUrl = canvas.toDataURL("image/png");
-      }
-      generateReportPDF(data, rangeLabel, chartImageDataUrl, customersChartImageDataUrl);
+      const prof = await fetchProfile().catch(() => null);
+      await generateReportPDF(data, rangeLabel, prof);
       toast({
         title: "Report downloaded",
         description: "Your financial report has been downloaded successfully.",
@@ -420,9 +487,9 @@ export default function ReportsPage() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Reports</h1>
+        <h1 className="text-3xl font-bold tracking-tight">PnL Report</h1>
         <p className="text-muted-foreground mt-1">
-          Download financial reports (Total Paid, Total Expense, Profitable Income)
+          Download profit and loss reports (Total Paid, Total Expense, Profitable Income)
         </p>
       </div>
 
@@ -451,7 +518,7 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {range === "custom" && (
+        {range === "custom" && (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="start">Start date</Label>
@@ -474,149 +541,268 @@ export default function ReportsPage() {
             </div>
           )}
 
-          <div
-            ref={chartRef}
-            className="rounded-lg border p-4"
-            style={
-              {
-                backgroundColor: "#ffffff",
-                color: "#0a0a0a",
-                "--background": "#ffffff",
-                "--foreground": "#0a0a0a",
-                "--chart-1": "#3b82f6",
-                "--chart-2": "#ef4444",
-                "--card": "#ffffff",
-                "--card-foreground": "#0a0a0a",
-                "--muted": "#f1f5f9",
-                "--muted-foreground": "#64748b",
-                "--border": "#e2e8f0",
-              } as React.CSSProperties
-            }
-          >
-            <p className="text-sm font-medium mb-3">Income vs Expense</p>
-            {chartLoading ? (
-              <div className="h-[260px] flex items-center justify-center text-muted-foreground text-sm">
-                Loading chart…
+          {reportData ? (
+            <div className="space-y-4">
+              <div className="grid md:grid-cols-3 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">
+                      Total Invoices
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold">
+                      {reportData.currency}{" "}
+                      {reportData.totalPaid.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">
+                      Total Expenses
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold">
+                      {reportData.currency}{" "}
+                      {reportData.totalExpense.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">
+                      Net Profit
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold">
+                      {reportData.currency}{" "}
+                      {reportData.profitableIncome.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </CardContent>
+                </Card>
               </div>
-            ) : chartData.length > 0 ? (
-              <ChartContainer config={chartConfig} className="h-[260px] w-full">
-                <AreaChart data={chartData} margin={{ left: 0, right: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    tickFormatter={(v) =>
-                      (reportData?.currency ?? "MUR") + " " + (v >= 1000 ? v / 1000 + "k" : v)
-                    }
-                  />
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        formatter={(value) =>
-                          (reportData?.currency ?? "MUR") + " " +
-                          Number(value).toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })
-                        }
-                      />
-                    }
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="income"
-                    stroke="hsl(217, 91%, 60%)"
-                    fill="hsl(217, 91%, 60%)"
-                    fillOpacity={0.4}
-                    strokeWidth={2}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="expense"
-                    stroke="hsl(0, 84%, 60%)"
-                    fill="hsl(0, 84%, 60%)"
-                    fillOpacity={0.4}
-                    strokeWidth={2}
-                  />
-                  <ChartLegend content={<ChartLegendContent />} />
-                </AreaChart>
-              </ChartContainer>
-            ) : (
-              <div className="h-[260px] flex items-center justify-center text-muted-foreground text-sm">
-                No data for selected period
-              </div>
-            )}
-          </div>
 
-          <div
-            ref={customersChartRef}
-            className="rounded-lg border p-4"
-            style={
-              {
-                backgroundColor: "#ffffff",
-                color: "#0a0a0a",
-                "--background": "#ffffff",
-                "--foreground": "#0a0a0a",
-                "--chart-1": "#3b82f6",
-                "--card": "#ffffff",
-                "--card-foreground": "#0a0a0a",
-                "--muted": "#f1f5f9",
-                "--muted-foreground": "#64748b",
-                "--border": "#e2e8f0",
-              } as React.CSSProperties
-            }
-          >
-            <p className="text-sm font-medium mb-3">Customers per Month</p>
-            {chartLoading ? (
-              <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">
-                Loading chart…
-              </div>
-            ) : customersChartData.length > 0 ? (
-              <ChartContainer config={customersChartConfig} className="h-[220px] w-full">
-                <AreaChart data={customersChartData} margin={{ left: 0, right: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    allowDecimals={false}
-                  />
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        formatter={(value) => [String(value), "Customers"]}
-                      />
-                    }
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="count"
-                    stroke="hsl(217, 91%, 60%)"
-                    fill="hsl(217, 91%, 60%)"
-                    fillOpacity={0.4}
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ChartContainer>
-            ) : (
-              <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">
-                No customer data for selected period
-              </div>
-            )}
-          </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Profit &amp; Loss Statement</CardTitle>
+                  <CardDescription>
+                    Simplified P&amp;L based on invoices (revenue) and expenses
+                    for the selected period.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 text-sm">
+                  {/* Revenue */}
+                  <div>
+                    <p className="font-semibold mb-2">1. Revenue</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <span>Sales / Invoices Revenue</span>
+                      <span className="text-right">
+                        {reportData.currency}{" "}
+                        {reportData.totalPaid.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                      <span>Other Income</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span className="font-semibold">Total Revenue</span>
+                      <span className="text-right font-semibold">
+                        {reportData.currency}{" "}
+                        {reportData.totalPaid.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cost of Sales */}
+                  <div>
+                    <p className="font-semibold mb-2">
+                      2. Cost of Sales / Direct Costs
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                      <span>Cost of Goods Sold (COGS)</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span>Purchases</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span>Direct Labour</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span>Other Direct Costs</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        Total Cost of Sales
+                      </span>
+                      <span className="text-right font-semibold text-foreground">
+                        {reportData.currency} 0.00
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Gross Profit */}
+                  <div>
+                    <p className="font-semibold mb-2">Gross Profit</p>
+                    <div className="flex items-center justify-between">
+                      <span>Gross Profit</span>
+                      <span className="font-semibold">
+                        {reportData.currency}{" "}
+                        {reportData.totalPaid.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Operating Expenses */}
+                  <div>
+                    <p className="font-semibold mb-2">3. Operating Expenses</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <span>Total Expenses</span>
+                      <span className="text-right">
+                        {reportData.currency}{" "}
+                        {reportData.totalExpense.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                      <span className="font-semibold">
+                        Total Operating Expenses
+                      </span>
+                      <span className="text-right font-semibold">
+                        {reportData.currency}{" "}
+                        {reportData.totalExpense.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Net Operating Profit */}
+                  <div>
+                    <p className="font-semibold mb-2">Net Operating Profit</p>
+                    <div className="flex items-center justify-between">
+                      <span>Net Operating Profit</span>
+                      <span className="font-semibold">
+                        {reportData.currency}{" "}
+                        {reportData.profitableIncome.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Other Income / Expenses */}
+                  <div>
+                    <p className="font-semibold mb-2">
+                      4. Other Income / Expenses
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                      <span>Interest Income</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span>Interest Expense</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span>Other Non-Operating Income</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        Total Other Income / Expense
+                      </span>
+                      <span className="text-right font-semibold text-foreground">
+                        {reportData.currency} 0.00
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Net Profit Before Tax */}
+                  <div>
+                    <p className="font-semibold mb-2">
+                      Net Profit Before Tax
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <span>Net Profit Before Tax</span>
+                      <span className="font-semibold">
+                        {reportData.currency}{" "}
+                        {reportData.profitableIncome.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Tax */}
+                  <div>
+                    <p className="font-semibold mb-2">5. Tax</p>
+                    <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                      <span>Corporate Tax (15% Mauritius)</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span>CSR Levy (if applicable)</span>
+                      <span className="text-right">
+                        {reportData.currency} 0.00
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        Total Tax
+                      </span>
+                      <span className="text-right font-semibold text-foreground">
+                        {reportData.currency} 0.00
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Net Profit After Tax */}
+                  <div>
+                    <p className="font-semibold mb-2">Net Profit After Tax</p>
+                    <div className="flex items-center justify-between">
+                      <span>Net Profit After Tax</span>
+                      <span className="font-semibold">
+                        {reportData.currency}{" "}
+                        {reportData.profitableIncome.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No data available for the selected period yet.
+            </p>
+          )}
 
           <Button
             className="gap-2"

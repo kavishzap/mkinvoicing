@@ -2,12 +2,16 @@ import { supabase } from "@/lib/supabaseClient";
 
 export type ExpenseLineItem = {
   item: string;
-  price: number;
+  description?: string;
+  quantity: number;
+  unit_price: number;
+  tax_percent: number;
+  line_total: number;
 };
 
 export type ExpensePayload = {
   description?: string; // derived from first line item if empty
-  amount: number; // sum of line item prices
+  amount: number; // sum of line totals
   currency?: string;
   expense_date?: string;
   line_items: ExpenseLineItem[];
@@ -31,6 +35,21 @@ async function getUserId() {
 
 const COLUMNS =
   "id,user_id,description,amount,currency,expense_date,line_items,invoice_id,notes,created_at,updated_at";
+
+/** Fetch a single expense by id (scoped to current user) */
+export async function getExpense(id: string): Promise<ExpenseRow> {
+  const userId = await getUserId();
+  const { data, error } = await supabase
+    .from("expenses")
+    .select(COLUMNS)
+    .eq("user_id", userId)
+    .eq("id", id)
+    .single();
+
+  if (error) throw error;
+  if (!data) throw new Error("Expense not found or not accessible");
+  return mapRow(data as any);
+}
 
 /**
  * Paged list with optional search (searches description and line item names).
@@ -73,7 +92,13 @@ export async function listExpenses(opts?: {
 export async function addExpense(payload: ExpensePayload): Promise<ExpenseRow> {
   const userId = await getUserId();
   const lineItems = payload.line_items ?? [];
-  const amount = Number(payload.amount) ?? lineItems.reduce((s, li) => s + Number(li.price || 0), 0);
+  const amount =
+    lineItems.length > 0
+      ? lineItems.reduce(
+          (s, li) => s + Number(li.line_total || 0),
+          0
+        )
+      : Number(payload.amount) || 0;
   const description =
     payload.description?.trim() ||
     (lineItems[0]?.item?.trim() || "Expense");
@@ -110,7 +135,7 @@ export async function updateExpense(
   if (payload.line_items !== undefined) {
     update.line_items = payload.line_items;
     const amount = payload.line_items.reduce(
-      (s, li) => s + Number(li.price || 0),
+      (s, li) => s + Number(li.line_total || 0),
       0
     );
     update.amount = amount;
@@ -152,10 +177,34 @@ export async function deleteExpense(id: string): Promise<void> {
 function mapRow(r: Record<string, unknown>): ExpenseRow {
   const rawItems = r.line_items;
   const lineItems: ExpenseLineItem[] = Array.isArray(rawItems)
-    ? rawItems.map((li: unknown) => ({
-        item: String((li as any)?.item ?? ""),
-        price: Number((li as any)?.price ?? 0),
-      }))
+    ? rawItems.map((li: unknown) => {
+        const anyLi = li as any;
+        const legacyPrice = Number(anyLi?.price ?? 0);
+        const quantity = Number(anyLi?.quantity ?? 1) || 1;
+        const unitPrice =
+          anyLi?.unit_price !== undefined
+            ? Number(anyLi.unit_price)
+            : legacyPrice || 0;
+        const taxPercent = Number(anyLi?.tax_percent ?? 0);
+        const computedLineTotal =
+          quantity * unitPrice * (1 + taxPercent / 100);
+        const lineTotal =
+          anyLi?.line_total !== undefined
+            ? Number(anyLi.line_total)
+            : computedLineTotal;
+
+        return {
+          item: String(anyLi?.item ?? ""),
+          description:
+            anyLi?.description !== undefined
+              ? String(anyLi.description)
+              : undefined,
+          quantity,
+          unit_price: unitPrice,
+          tax_percent: taxPercent,
+          line_total: lineTotal,
+        };
+      })
     : [];
 
   return {

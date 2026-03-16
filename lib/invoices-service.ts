@@ -282,13 +282,19 @@ export type InvoiceDetail = {
   due_date: string;
   status: "unpaid" | "paid" | "cancelled";
   currency: string;
+  customer_id: string | null;
   from_snapshot: any;
   bill_to_snapshot: any;
   discount_type: "value" | "percent";
   discount_amount: number;
   notes: string | null;
   terms: string | null;
-  payment_method: "Cash" | "Card Payment" | "Credit Facilities" | null;
+  payment_method:
+    | "Cash"
+    | "Card Payment"
+    | "Credit Facilities"
+    | "Bank Transfer"
+    | null;
   amount_paid: number;
   amount_due: number;
   items: InvoiceItemRow[];
@@ -322,7 +328,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     .from("invoices")
     .select(
       `
-      id, number, issue_date, due_date, status, currency,
+      id, number, issue_date, due_date, status, currency, customer_id,
       from_snapshot, bill_to_snapshot,
       discount_type, discount_amount,
       notes, terms,
@@ -371,13 +377,19 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     due_date: data.due_date,
     status: data.status as "unpaid" | "paid" | "cancelled",
     currency: data.currency,
+    customer_id: (data.customer_id as string) ?? null,
     from_snapshot: data.from_snapshot,
     bill_to_snapshot: data.bill_to_snapshot,
     discount_type: data.discount_type,
     discount_amount: Number(data.discount_amount || 0),
     notes: data.notes,
     terms: data.terms,
-    payment_method: data.payment_method as "Cash" | "Card Payment" | "Credit Facilities" | null,
+    payment_method: data.payment_method as
+      | "Cash"
+      | "Card Payment"
+      | "Credit Facilities"
+      | "Bank Transfer"
+      | null,
     amount_paid: amountPaid,
     amount_due: amountDue,
     items: items,
@@ -410,6 +422,7 @@ export async function updateInvoicePayment(
     amount_paid?: number;
     amount_due?: number;
     status?: "unpaid" | "paid" | "cancelled";
+    credit_applied?: number;
   }
 ): Promise<void> {
   const { error } = await supabase

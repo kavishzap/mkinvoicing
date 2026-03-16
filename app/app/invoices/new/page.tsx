@@ -1032,7 +1032,13 @@ export default function NewInvoicePage() {
                     value={paymentMethod || ""}
                     onValueChange={(v) =>
                       setPaymentMethod(
-                        v === "" ? null : (v as "Cash" | "Card Payment" | "Credit Facilities")
+                        v === ""
+                          ? null
+                          : (v as
+                              | "Cash"
+                              | "Card Payment"
+                              | "Credit Facilities"
+                              | "Bank Transfer")
                       )
                     }
                   >
@@ -1043,6 +1049,7 @@ export default function NewInvoicePage() {
                       <SelectItem value="Cash">Cash</SelectItem>
                       <SelectItem value="Card Payment">Card Payment</SelectItem>
                       <SelectItem value="Credit Facilities">Credit Facilities</SelectItem>
+                      <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

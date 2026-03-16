@@ -9,13 +9,13 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PocketLedger",
+  title: "Pocket Ledger",
   description: "Invoice, expense tracking & bookkeeping",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "PocketLedger",
+    title: "Pocket Ledger",
   },
   formatDetection: {
     telephone: false,
