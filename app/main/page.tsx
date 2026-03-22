@@ -10,12 +10,16 @@ import {
   BarChart3,
   Check,
   X,
-  Play,
+  Menu,
+  Cloud,
+  Cpu,
+  Sparkles,
+  Users,
+  FileSearch,
   Mail,
   Twitter,
   Linkedin,
   FileText,
-  Users,
   Receipt,
   Settings,
   ScrollText,
@@ -28,11 +32,13 @@ import {
   BookOpen,
   Package,
   Store,
+  CircuitBoard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { LoginModal } from "@/components/login-modal";
+import { Sheet, SheetContent, SheetTrigger, SheetClose } from "@/components/ui/sheet";
 
 const CYAN = "#00f2ff";
 const YELLOW = "#facc15";
@@ -84,68 +90,101 @@ export default function LandingPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#06060a] text-white antialiased">
+    <div className="min-h-screen bg-[#06060a] text-white antialiased overflow-x-hidden">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-white/5 bg-[#06060a]/90 backdrop-blur-md">
-        <div className="container mx-auto flex h-16 items-center justify-between gap-4 px-4">
+      <header className="sticky top-0 z-50 bg-transparent">
+        <div className="container mx-auto flex h-14 sm:h-16 items-center justify-between gap-4 px-4 sm:px-6">
           <Link href="/main" className="flex items-center shrink-0">
-            <Image src="/moledger.png" alt="MoLedger" width={56} height={56} className="object-contain" />
+            <Image src="/moledger.png" alt="MoLedger" width={48} height={48} className="h-10 w-auto sm:h-14 sm:w-14 object-contain" />
           </Link>
-          <nav className="flex items-center gap-6 md:gap-10">
-            <a href="#faq" className="text-xs font-medium uppercase tracking-widest text-white/80 hover:text-white transition">FAQ</a>
-            <a href="#features" className="text-xs font-medium uppercase tracking-widest text-white/80 hover:text-white transition">Features</a>
-            <a href="#pricing" className="text-xs font-medium uppercase tracking-widest text-white/80 hover:text-white transition">Pricing</a>
-            <Button size="sm" className="rounded-full bg-[#00f2ff]/10 border border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/20 hover:border-[#00f2ff]" asChild>
-              <Link href="/auth/register">Get started</Link>
-            </Button>
+          {/* Desktop nav */}
+          <nav className="hidden md:flex items-center gap-3 lg:gap-4">
+            <a href="#faq" className="rounded-lg px-3 py-2 text-xs font-medium uppercase tracking-widest text-white border border-white/30 hover:bg-white/10 transition">FAQ</a>
+            <a href="#features" className="rounded-lg px-3 py-2 text-xs font-medium uppercase tracking-widest text-white border border-white/30 hover:bg-white/10 transition">Features</a>
+            <a href="#pricing" className="rounded-lg px-3 py-2 text-xs font-medium uppercase tracking-widest text-white border border-white/30 hover:bg-white/10 transition">Pricing</a>
+            <Link href="/auth/register" className="rounded-lg px-3 py-2 text-xs font-medium uppercase tracking-widest bg-[#00f2ff]/10 border border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/20 hover:border-[#00f2ff] hover:shadow-[0_0_20px_rgba(0,242,255,0.3)] transition">Get started</Link>
           </nav>
+          {/* Mobile menu */}
+          <Sheet>
+            <SheetTrigger asChild>
+              <button type="button" className="md:hidden p-2 rounded-lg border border-white/30 text-white hover:bg-white/10" aria-label="Open menu">
+                <Menu className="h-6 w-6" />
+              </button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full max-w-xs border-white/10 bg-[#0d0d12] [&>button]:text-white">
+              <nav className="flex flex-col gap-2 pt-8">
+                <SheetClose asChild>
+                  <a href="#faq" className="rounded-lg px-4 py-3 text-sm font-medium text-white border border-white/30 hover:bg-white/10 transition block">FAQ</a>
+                </SheetClose>
+                <SheetClose asChild>
+                  <a href="#features" className="rounded-lg px-4 py-3 text-sm font-medium text-white border border-white/30 hover:bg-white/10 transition block">Features</a>
+                </SheetClose>
+                <SheetClose asChild>
+                  <a href="#pricing" className="rounded-lg px-4 py-3 text-sm font-medium text-white border border-white/30 hover:bg-white/10 transition block">Pricing</a>
+                </SheetClose>
+                <SheetClose asChild>
+                  <Link href="/auth/register" className="rounded-lg px-4 py-3 text-sm font-medium bg-[#00f2ff]/10 border border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/20 hover:border-[#00f2ff] transition text-center block">Get started</Link>
+                </SheetClose>
+              </nav>
+            </SheetContent>
+          </Sheet>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="relative overflow-hidden pt-16 pb-24 md:pt-24 md:pb-32 px-4">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(0,242,255,0.08),transparent_50%)]" />
-        <div className="absolute top-1/4 right-0 w-96 h-96 bg-[#ec4899]/10 rounded-full blur-3xl -z-10" />
-        <div className="absolute bottom-1/4 left-0 w-80 h-80 bg-[#00f2ff]/5 rounded-full blur-3xl -z-10" />
-        <div className="container mx-auto max-w-6xl">
-          <div className="grid md:grid-cols-2 gap-16 items-center">
-            <div className="flex flex-col justify-center">
-              <p className="text-sm font-semibold uppercase tracking-widest mb-4" style={{ color: YELLOW }}>Business Management</p>
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6">
-                Amazingly simple.
-              </h1>
-              <p className="text-lg text-white/70 mb-10 max-w-md">
-                Invoicing, purchases, payroll, stock, accounting & reports — everything you need to manage your SME in one place.
-              </p>
-              <div className="flex flex-col sm:flex-row items-start gap-4">
-                <Link
-                  href="/auth/register"
-                  className="inline-flex items-center gap-2 w-fit rounded-full px-8 py-3 text-sm font-medium bg-[#0d1624] border-2 transition-all hover:border-[#00f2ff]/80 hover:shadow-[0_0_30px_rgba(0,242,255,0.2)]"
-                  style={{ borderColor: "rgba(0,242,255,0.5)" }}
-                >
-                  <Play className="h-4 w-4 fill-current" style={{ color: CYAN }} />
-                  <span style={{ color: CYAN }}>Watch demo</span>
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setLoginOpen(true)}
-                  className="inline-flex items-center justify-center rounded-full px-8 py-3 text-sm font-medium border border-white/30 text-white hover:bg-white/10 transition"
-                >
-                  Log in
-                </button>
+      {/* Hero - extends behind header so image shows through transparent header */}
+      <section
+        className="relative -mt-14 sm:-mt-16 min-h-[70vh] sm:min-h-[80vh] flex items-center justify-center pt-32 sm:pt-36 pb-20 sm:pb-32 px-4 sm:px-6 overflow-hidden bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/hero.jpg')" }}
+      >
+        <div className="absolute inset-0 bg-black/55 z-[1]" aria-hidden />
+
+        {/* Central content */}
+        <div className="relative z-10 text-center max-w-3xl mx-auto w-full">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-white mb-4 sm:mb-6">
+            Everything Your Business Needs.
+            <br />
+            In One Place.
+          </h1>
+          <p className="text-base sm:text-lg md:text-xl text-white/80 mb-8 sm:mb-10 max-w-2xl mx-auto px-0">
+            From invoicing to accounting, MoLedger gives you full control of your business with simplicity, clarity, and powerful tools.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 mb-8 sm:mb-10">
+            <Link
+              href="/auth/register"
+              className="w-full sm:w-auto inline-flex items-center justify-center rounded-lg px-6 py-4 sm:px-8 sm:py-6 text-sm sm:text-base font-medium bg-[#00f2ff]/10 border-2 border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/20 hover:border-[#00f2ff] hover:shadow-[0_0_30px_rgba(0,242,255,0.3)] transition"
+            >
+              Get Started
+            </Link>
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="w-full sm:w-auto rounded-lg px-6 py-4 sm:px-8 sm:py-6 text-sm sm:text-base font-medium bg-[#00f2ff]/10 border-2 border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/20 hover:border-[#00f2ff] hover:shadow-[0_0_30px_rgba(0,242,255,0.3)] transition"
+            >
+              Log in
+            </button>
+          </div>
+          {/* Icons below buttons - 3 left, 3 right */}
+          <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 md:gap-16">
+            <div className="flex gap-2 sm:gap-3 md:gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 shadow-lg shrink-0">
+                <Cloud className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
+              </div>
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 shadow-lg shrink-0">
+                <Cpu className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-400" />
+              </div>
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 shadow-lg shrink-0">
+                <CircuitBoard className="h-4 w-4 sm:h-5 sm:w-5 text-purple-400" />
               </div>
             </div>
-            <div className="relative">
-              <div className="absolute -inset-1 rounded-2xl opacity-30 blur-xl" style={{ background: `linear-gradient(135deg, ${CYAN}, ${MAGENTA})` }} />
-              <div className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-white/10 bg-[#0d0d12]">
-                <Image
-                  src="/ChatGPT Image Mar 23, 2026, 12_17_13 AM.png"
-                  alt="MoLedger dashboard"
-                  width={600}
-                  height={450}
-                  className="object-cover w-full h-full"
-                  priority
-                />
+            <div className="flex gap-2 sm:gap-3 md:gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 shadow-lg shrink-0">
+                <Users className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
+              </div>
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 shadow-lg shrink-0">
+                <FileSearch className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-400" />
+              </div>
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center backdrop-blur-md bg-white/5 border border-white/20 shadow-lg shrink-0">
+                <Shield className="h-4 w-4 sm:h-5 sm:w-5 text-purple-400" />
               </div>
             </div>
           </div>
@@ -153,46 +192,62 @@ export default function LandingPage() {
       </section>
 
       {/* Feature Cards - two large cards */}
-      <section id="features" className="py-24 px-4">
+      <section id="features" className="py-16 sm:py-20 md:py-24 px-4 sm:px-6">
         <div className="container mx-auto max-w-5xl">
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="rounded-2xl border border-white/10 bg-[#0d0d12] p-10 hover:border-[#00f2ff]/30 transition-colors">
-              <div className="w-14 h-14 rounded-full flex items-center justify-center mb-6" style={{ backgroundColor: "rgba(0,242,255,0.15)" }}>
-                <Zap className="h-7 w-7" style={{ color: CYAN }} />
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+            <div className="rounded-2xl border border-white/10 bg-[#0d0d12] p-6 sm:p-8 md:p-10 hover:border-[#00f2ff]/30 transition-colors">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center mb-4 sm:mb-6" style={{ backgroundColor: "rgba(0,242,255,0.15)" }}>
+                <Zap className="h-6 w-6 sm:h-7 sm:w-7" style={{ color: CYAN }} />
               </div>
-              <h3 className="text-2xl font-bold mb-4">Work smarter, not harder</h3>
-              <p className="text-white/70 mb-8">
+              <h3 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Work smarter, not harder</h3>
+              <p className="text-white/70 mb-6 sm:mb-8 text-sm sm:text-base">
                 Automate invoicing, track expenses, and get real-time reports. One platform for your entire business.
               </p>
-              <Button className="rounded-full bg-[#0d1624] border border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/10" asChild>
+              <Button className="rounded-full bg-[#0d1624] border-2 border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/10 px-6" asChild>
                 <Link href="/auth/register">Get started</Link>
               </Button>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-[#0d0d12] p-10 hover:border-[#00f2ff]/30 transition-colors">
-              <div className="w-14 h-14 rounded-full flex items-center justify-center mb-6" style={{ backgroundColor: "rgba(0,242,255,0.15)" }}>
-                <Shield className="h-7 w-7" style={{ color: CYAN }} />
+            <div className="rounded-2xl border border-white/10 bg-[#0d0d12] p-6 sm:p-8 md:p-10 hover:border-[#00f2ff]/30 transition-colors">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center mb-4 sm:mb-6" style={{ backgroundColor: "rgba(0,242,255,0.15)" }}>
+                <Shield className="h-6 w-6 sm:h-7 sm:w-7" style={{ color: CYAN }} />
               </div>
-              <h3 className="text-2xl font-bold mb-4">Sleep easy, we&apos;ve got your back</h3>
-              <p className="text-white/70 mb-8">
+              <h3 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Sleep easy, we&apos;ve got your back</h3>
+              <p className="text-white/70 mb-6 sm:mb-8 text-sm sm:text-base">
                 Secure, reliable, and built for SMEs. Your data is protected and always available.
               </p>
-              <Button variant="outline" className="rounded-full border-white/20 text-white hover:bg-white/5" asChild>
-                <Link href="#features">See benefits</Link>
+              <button
+                type="button"
+                onClick={() => document.getElementById("feature-list")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                className="rounded-full px-6 py-3 text-sm font-medium bg-[#0d1624] border-2 border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/10 transition"
+              >
+                See benefits
+              </button>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#0d0d12] p-6 sm:p-8 md:p-10 hover:border-[#00f2ff]/30 transition-colors sm:col-span-2 lg:col-span-1">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center mb-4 sm:mb-6" style={{ backgroundColor: "rgba(0,242,255,0.15)" }}>
+                <BarChart3 className="h-6 w-6 sm:h-7 sm:w-7" style={{ color: CYAN }} />
+              </div>
+              <h3 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Grow with clarity</h3>
+              <p className="text-white/70 mb-6 sm:mb-8 text-sm sm:text-base">
+                Sales, expenses, profit and loss — see exactly how your business is performing with powerful reports and insights.
+              </p>
+              <Button className="rounded-full bg-[#0d1624] border-2 border-[#00f2ff]/50 text-[#00f2ff] hover:bg-[#00f2ff]/10 px-6" asChild>
+                <Link href="/auth/register">Get started</Link>
               </Button>
             </div>
           </div>
-          <div className="mt-12 flex flex-wrap items-center justify-center gap-12 text-white/50 text-xs font-medium uppercase tracking-widest">
+          <div className="mt-8 sm:mt-12 flex flex-wrap items-center justify-center gap-6 sm:gap-12 text-white/50 text-xs font-medium uppercase tracking-widest">
             <span className="flex items-center gap-2"><Layers className="h-4 w-4" /> Easy integration</span>
             <span className="flex items-center gap-2"><Shield className="h-4 w-4" /> Secure</span>
             <span className="flex items-center gap-2"><BarChart3 className="h-4 w-4" /> Real-time reports</span>
           </div>
 
-          <div className="mt-24">
-            <h2 className="text-2xl md:text-3xl font-bold text-center mb-4">Everything you need</h2>
-            <p className="text-white/60 text-center mb-12 max-w-2xl mx-auto">
+          <div id="feature-list" className="mt-16 sm:mt-20 md:mt-24 scroll-mt-24 sm:scroll-mt-28">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-center mb-3 sm:mb-4">Everything you need</h2>
+            <p className="text-white/60 text-center mb-8 sm:mb-12 max-w-2xl mx-auto text-sm sm:text-base">
               From invoicing to payroll, from stock to accounting — MoLedger grows with your business.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
               {features.map((f) => (
                 <div
                   key={f.title}
@@ -214,20 +269,20 @@ export default function LandingPage() {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="py-24 px-4">
+      <section id="pricing" className="py-16 sm:py-20 md:py-24 px-4 sm:px-6">
         <div className="container mx-auto max-w-5xl">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">Flexible pricing for teams of all sizes</h2>
-          <div className="flex items-center justify-center gap-4 mb-16">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-center mb-4">Flexible pricing for teams of all sizes</h2>
+          <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 mb-10 sm:mb-16">
             <span className={`text-sm ${!annual ? "text-white" : "text-white/50"}`}>Monthly</span>
             <Switch checked={annual} onCheckedChange={setAnnual} className="data-[state=checked]:bg-[#00f2ff]" />
             <span className={`text-sm ${annual ? "text-white" : "text-white/50"}`}>Annual</span>
             <span className="text-xs text-[#00f2ff]">Save 10%</span>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {pricing.map((plan, i) => (
               <div
                 key={plan.name}
-                className={`relative rounded-2xl p-8 flex flex-col ${
+                className={`relative rounded-2xl p-6 sm:p-8 flex flex-col ${
                   plan.badge === "Most Popular"
                     ? "border-2 bg-gradient-to-b from-[#00f2ff]/10 to-transparent"
                     : "border border-white/10 bg-[#0d0d12]"
@@ -272,13 +327,13 @@ export default function LandingPage() {
       </section>
 
       {/* FAQ */}
-      <section id="faq" className="py-24 px-4 bg-[#0a0a0f]">
+      <section id="faq" className="py-16 sm:py-20 md:py-24 px-4 sm:px-6 bg-[#0a0a0f]">
         <div className="container mx-auto max-w-4xl">
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-4">Curiosity didn&apos;t kill the cat, it gave it answers.</h2>
-          <p className="text-white/60 text-center mb-16">Common questions about MoLedger</p>
-          <Accordion type="single" collapsible className="grid md:grid-cols-2 gap-6">
+          <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-center mb-3 sm:mb-4">Curiosity didn&apos;t kill the cat, it gave it answers.</h2>
+          <p className="text-white/60 text-center mb-10 sm:mb-16 text-sm sm:text-base">Common questions about MoLedger</p>
+          <Accordion type="single" collapsible className="grid sm:grid-cols-2 gap-4 sm:gap-6">
             {faqs.map((faq, i) => (
-              <AccordionItem key={i} value={`faq-${i}`} className="border border-white/10 rounded-xl px-4 bg-[#0d0d12]">
+                <AccordionItem key={i} value={`faq-${i}`} className="border border-white/10 rounded-xl px-3 sm:px-4 bg-[#0d0d12]">
                 <AccordionTrigger className="text-left py-4 hover:no-underline [&>svg]:text-[#00f2ff]">
                   <span className="text-white/90">{faq.q}</span>
                 </AccordionTrigger>
@@ -292,10 +347,10 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="py-12 px-4 border-t border-white/10">
+      <footer className="py-8 sm:py-12 px-4 sm:px-6 border-t border-white/10">
         <div className="container mx-auto max-w-6xl">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex gap-8 text-sm text-white/60">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
+            <div className="flex flex-wrap justify-center sm:justify-start gap-4 sm:gap-8 text-sm text-white/60">
               <Link href="#" className="hover:text-white transition">Privacy Policy</Link>
               <Link href="#" className="hover:text-white transition">Terms of Use</Link>
             </div>
@@ -305,7 +360,7 @@ export default function LandingPage() {
               <a href="#" className="w-10 h-10 rounded-full border border-white/20 flex items-center justify-center text-white/60 hover:text-white hover:border-white/40 transition"><Linkedin className="h-4 w-4" /></a>
             </div>
           </div>
-          <p className="mt-8 text-center text-sm text-white/40">© {new Date().getFullYear()} MoLedger. All rights reserved.</p>
+          <p className="mt-6 sm:mt-8 text-center text-xs sm:text-sm text-white/40">© {new Date().getFullYear()} MoLedger. All rights reserved.</p>
         </div>
       </footer>
 
