@@ -408,7 +408,7 @@ export function InvoiceViewActions({
           doc.setFontSize(8);
           doc.setTextColor("#94A3B8");
           // Powered by text (centered)
-          doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, { align: "center" });
+          doc.text("Powered by MoLedger", pageW / 2, pageH - 35, { align: "center" });
           // Page number (right aligned)
           doc.setFontSize(9);
           doc.setTextColor("#64748B");
@@ -708,7 +708,7 @@ export function InvoiceViewActions({
           doc.setFontSize(8);
           doc.setTextColor("#94A3B8");
           // Powered by text (centered)
-          doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, { align: "center" });
+          doc.text("Powered by MoLedger", pageW / 2, pageH - 35, { align: "center" });
           // Page number (right aligned)
           doc.setFontSize(9);
           doc.setTextColor("#64748B");

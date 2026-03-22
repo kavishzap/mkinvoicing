@@ -305,6 +305,32 @@ export default function InvoiceViewPage() {
                       <InvoiceStatusBadge status={invoice.status} />
                     </div>
                   </div>
+                  {(invoice.created_from_quotation_id ||
+                    invoice.created_from_sales_order_id) && (
+                    <div>
+                      <p className="text-sm font-semibold text-muted-foreground">
+                        Created from
+                      </p>
+                      <div className="mt-1 space-y-1">
+                        {invoice.created_from_quotation_id && (
+                          <Link
+                            href={`/app/quotations/${invoice.created_from_quotation_id}`}
+                            className="block text-sm text-primary underline font-medium"
+                          >
+                            Open quotation
+                          </Link>
+                        )}
+                        {invoice.created_from_sales_order_id && (
+                          <Link
+                            href={`/app/sales-orders/${invoice.created_from_sales_order_id}`}
+                            className="block text-sm text-primary underline font-medium"
+                          >
+                            Open sales order
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <Separator />
                   <div>
                     <p className="text-sm font-semibold text-muted-foreground mb-2">

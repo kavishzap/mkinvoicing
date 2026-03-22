@@ -24,8 +24,13 @@ function computeItemsTotal(items: { quantity: number; unit_price: number; tax_pe
 export type ReportData = {
   invoices: InvoiceListRow[];
   expenses: ExpenseRow[];
+  /** Paid sales invoices (revenue) in period */
   totalPaid: number;
+  /** Sum of purchase invoice totals (non-cancelled, by issue date) */
+  totalPurchases: number;
+  /** Sum of all expenses (including payroll/salary) */
   totalExpense: number;
+  /** Revenue − purchases − expenses */
   profitableIncome: number;
   currency: string;
   startDate: string;
@@ -34,14 +39,15 @@ export type ReportData = {
 
 /**
  * Fetches report data for the given date range.
- * Only includes PAID invoices (no overdue/unpaid).
+ * Revenue: paid sales invoices only.
+ * Purchases: purchase invoice totals (non-cancelled) by issue date in range.
  */
 export async function getReportData(
   startDate: string,
   endDate: string
 ): Promise<ReportData> {
   const userId = await getUserId();
-  const [invResult, expResult] = await Promise.all([
+  const [invResult, expResult, piResult] = await Promise.all([
     supabase
       .from("invoices")
       .select(
@@ -61,13 +67,21 @@ export async function getReportData(
       .gte("expense_date", startDate)
       .lte("expense_date", endDate)
       .order("expense_date", { ascending: false }),
+    supabase
+      .from("purchase_invoices")
+      .select("total, currency")
+      .neq("status", "cancelled")
+      .gte("issue_date", startDate)
+      .lte("issue_date", endDate),
   ]);
 
   if (invResult.error) throw invResult.error;
   if (expResult.error) throw expResult.error;
+  if (piResult.error) throw piResult.error;
 
   const invData = invResult.data ?? [];
   const expData = expResult.data ?? [];
+  const piData = piResult.data ?? [];
 
   const invoices: InvoiceListRow[] = invData.map((r: any) => ({
     id: r.id,
@@ -94,15 +108,28 @@ export async function getReportData(
   }));
 
   const totalPaid = invoices.reduce((acc, r) => acc + Number(r.total || 0), 0);
-  const totalExpense = expenses.reduce((acc, r) => acc + Number(r.amount || 0), 0);
-  const currency = invoices[0]?.currency || expenses[0]?.currency || "MUR";
+  const totalPurchases = piData.reduce(
+    (acc, r: { total?: number }) => acc + Number(r.total ?? 0),
+    0
+  );
+
+  const totalExpense = expenses.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+  const grossProfit = totalPaid - totalPurchases;
+  const profitableIncome = grossProfit - totalExpense;
+
+  const currency =
+    invoices[0]?.currency ||
+    expenses[0]?.currency ||
+    (piData[0] as { currency?: string } | undefined)?.currency ||
+    "MUR";
 
   return {
     invoices,
     expenses,
     totalPaid,
+    totalPurchases,
     totalExpense,
-    profitableIncome: totalPaid - totalExpense,
+    profitableIncome,
     currency,
     startDate,
     endDate,

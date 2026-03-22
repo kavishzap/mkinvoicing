@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,11 @@ import {
 } from "@/lib/settings-service";
 import { listCustomers, type CustomerRow } from "@/lib/customers-service";
 import { createInvoice, type LineItemPayload } from "@/lib/invoices-service";
+import { getQuotation } from "@/lib/quotations-service";
+import {
+  getSalesOrder,
+  clientInfoFromBillSnapshot,
+} from "@/lib/sales-orders-service";
 
 type LineItem = {
   id: string;
@@ -87,9 +92,17 @@ type FieldErrors = Partial<
   >
 >;
 
-export default function NewInvoicePage() {
+function NewInvoicePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [convertFromQuotationId] = useState(() =>
+    searchParams.get("convertFromQuotation")
+  );
+  const [convertFromSalesOrderId] = useState(() =>
+    searchParams.get("convertFromSalesOrder")
+  );
   const { toast } = useToast();
+  const convertHandledRef = useRef(false);
 
   // ===== Load profile & preferences from Supabase
   const [loading, setLoading] = useState(true);
@@ -146,15 +159,21 @@ export default function NewInvoicePage() {
 
   // Errors
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [convertedFromSource, setConvertedFromSource] = useState<{
+    type: "quotation" | "sales_order";
+    number: string;
+  } | null>(null);
 
   // ========= INITIAL LOAD
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const [p, prefs] = await Promise.all([
           fetchProfile(),
           fetchPreferences(),
         ]);
+        if (cancelled) return;
         setProfile(p);
         setPreferences(prefs);
 
@@ -183,18 +202,147 @@ export default function NewInvoicePage() {
           page: 1,
           pageSize: 50,
         });
+        if (cancelled) return;
         setCustomers(rows);
+
+        // Convert from quotation
+        if (convertFromQuotationId && !convertHandledRef.current) {
+          convertHandledRef.current = true;
+          const q = await getQuotation(convertFromQuotationId);
+          if (cancelled) return;
+          if (q) {
+            const ci = clientInfoFromBillSnapshot(q.bill_to_snapshot);
+            setClientInfo({
+              type: ci.type,
+              companyName: ci.companyName,
+              contactName: ci.contactName,
+              fullName: ci.fullName,
+              email: ci.email,
+              phone: ci.phone,
+              street: ci.street,
+              city: ci.city,
+              postal: ci.postal,
+              country: ci.country,
+              address_line_1: ci.address_line_1,
+              address_line_2: ci.address_line_2,
+            });
+            setDiscount({
+              type: q.discount_type,
+              amount: q.discount_amount,
+            });
+            setNotes(q.notes ?? "");
+            setTerms(q.terms ?? "");
+            setIssueDate(q.issue_date);
+            setDueDate(q.valid_until);
+            setLineItems(
+              [...q.items]
+                .sort(
+                  (a, b) =>
+                    Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+                )
+                .map((it, i) => ({
+                  id: `ln-${Date.now()}-${i}`,
+                  item: it.item,
+                  description: it.description ?? "",
+                  quantity: Number(it.quantity),
+                  unitPrice: Number(it.unit_price),
+                  tax: Number(it.tax_percent),
+                }))
+            );
+            if (q.customer_id) {
+              const match = rows.find((c) => c.id === q.customer_id);
+              if (match) setSelectedCustomer(match);
+            }
+            setConvertedFromSource({ type: "quotation", number: q.number });
+            toast({
+              title: "Convert from quotation",
+              description: `Form filled from quotation ${q.number}. Save to create invoice with link.`,
+            });
+          } else {
+            toast({
+              title: "Could not load quotation",
+              description: "Starting with a blank form.",
+              variant: "destructive",
+            });
+          }
+          router.replace("/app/invoices/new", { scroll: false });
+        } else if (convertFromSalesOrderId && !convertHandledRef.current) {
+          convertHandledRef.current = true;
+          const so = await getSalesOrder(convertFromSalesOrderId);
+          if (cancelled) return;
+          if (so) {
+            const ci = clientInfoFromBillSnapshot(so.bill_to_snapshot);
+            setClientInfo({
+              type: ci.type,
+              companyName: ci.companyName,
+              contactName: ci.contactName,
+              fullName: ci.fullName,
+              email: ci.email,
+              phone: ci.phone,
+              street: ci.street,
+              city: ci.city,
+              postal: ci.postal,
+              country: ci.country,
+              address_line_1: ci.address_line_1,
+              address_line_2: ci.address_line_2,
+            });
+            setDiscount({
+              type: so.discount_type,
+              amount: so.discount_amount,
+            });
+            setNotes(so.notes ?? "");
+            setTerms(so.terms ?? "");
+            setIssueDate(so.issue_date);
+            setDueDate(so.valid_until);
+            setLineItems(
+              [...so.items]
+                .sort(
+                  (a, b) =>
+                    Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+                )
+                .map((it, i) => ({
+                  id: `ln-${Date.now()}-${i}`,
+                  item: it.item,
+                  description: it.description ?? "",
+                  quantity: Number(it.quantity),
+                  unitPrice: Number(it.unit_price),
+                  tax: Number(it.tax_percent),
+                }))
+            );
+            if (so.customer_id) {
+              const match = rows.find((c) => c.id === so.customer_id);
+              if (match) setSelectedCustomer(match);
+            }
+            setConvertedFromSource({ type: "sales_order", number: so.number });
+            toast({
+              title: "Convert from sales order",
+              description: `Form filled from sales order ${so.number}. Save to create invoice with link.`,
+            });
+          } else {
+            toast({
+              title: "Could not load sales order",
+              description: "Starting with a blank form.",
+              variant: "destructive",
+            });
+          }
+          router.replace("/app/invoices/new", { scroll: false });
+        }
       } catch (e: any) {
-        toast({
-          title: "Failed to load data",
-          description: e?.message ?? "Please try again.",
-          variant: "destructive",
-        });
+        if (!cancelled) {
+          toast({
+            title: "Failed to load data",
+            description: e?.message ?? "Please try again.",
+            variant: "destructive",
+          });
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [toast]);
+    return () => {
+      cancelled = true;
+    };
+  }, [toast, convertFromQuotationId, convertFromSalesOrderId, router]);
 
   // React to search within dialog
   useEffect(() => {
@@ -413,6 +561,8 @@ export default function NewInvoicePage() {
               address_line_1: clientInfo.address_line_1 || null,
               address_line_2: clientInfo.address_line_2 || null,
             },
+        created_from_quotation_id: convertFromQuotationId || undefined,
+        created_from_sales_order_id: convertFromSalesOrderId || undefined,
         items: itemsPayload,
       });
 
@@ -473,6 +623,18 @@ export default function NewInvoicePage() {
           <p className="text-muted-foreground mt-1">
             Fill in the details to create a new invoice
           </p>
+          {convertedFromSource && (
+            <p className="text-sm text-muted-foreground mt-1">
+              Converting from{" "}
+              {convertedFromSource.type === "quotation"
+                ? "quotation"
+                : "sales order"}{" "}
+              <span className="font-medium text-foreground">
+                {convertedFromSource.number}
+              </span>{" "}
+              — save to create invoice with link.
+            </p>
+          )}
         </div>
       </div>
 
@@ -1157,5 +1319,23 @@ export default function NewInvoicePage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function NewInvoicePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="p-6 max-w-7xl mx-auto space-y-6">
+          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div className="h-56 rounded bg-muted animate-pulse" />
+            <div className="h-56 rounded bg-muted animate-pulse" />
+          </div>
+        </div>
+      }
+    >
+      <NewInvoicePageContent />
+    </Suspense>
   );
 }

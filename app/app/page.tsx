@@ -2,7 +2,6 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
-import Joyride, { STATUS, type CallBackProps, type Step } from "react-joyride";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
@@ -16,7 +15,9 @@ import {
   Clock,
   Receipt,
   TrendingUp,
-  Sparkles,
+  Users,
+  Truck,
+  Coins,
 } from "lucide-react";
 import {
   Bar,
@@ -50,70 +51,20 @@ function formatCurrency(amount: number, currency: string) {
 export default function DashboardPage() {
   const { toast } = useToast();
   const [stats, setStats] = useState<{
+    netSales: number;
     totalPaid: number;
     totalOverdue: number;
     totalExpense: number;
+    totalCustomerCredit: number;
     profitableIncome: number;
+    customerCount: number;
+    supplierCount: number;
     currency: string;
   } | null>(null);
   const [incomeData, setIncomeData] = useState<
     { month: string; label: string; income: number }[]
   >([]);
   const [loading, setLoading] = useState(true);
-  const [runTour, setRunTour] = useState(false);
-
-  const steps: Step[] = [
-    {
-      target: '[data-tour-id="dashboard"]',
-      title: "Dashboard overview",
-      content:
-        "Here you see a quick summary of your paid invoices, overdue amounts, expenses and profit.",
-      disableBeacon: true,
-    },
-    {
-      target: '[data-tour-id="invoices"]',
-      title: "Invoices",
-      content:
-        "Create professional invoices, track payments and download PDFs for your clients.",
-    },
-    {
-      target: '[data-tour-id="customers"]',
-      title: "Customers",
-      content:
-        "Manage your customer list so you can quickly select them on invoices and reports.",
-    },
-    {
-      target: '[data-tour-id="expenses"]',
-      title: "Expenses",
-      content:
-        "Capture detailed expense line items to keep your business costs organised.",
-    },
-    {
-      target: '[data-tour-id="customer-credit"]',
-      title: "Customer Credit",
-      content:
-        "Track and settle overpayments made by customers across their invoices.",
-    },
-    {
-      target: '[data-tour-id="pnl-report"]',
-      title: "PnL Report",
-      content:
-        "View and download your Profit & Loss statement for any period.",
-    },
-    {
-      target: '[data-tour-id="company-settings"]',
-      title: "Company Settings",
-      content:
-        "Configure your company details, logo, bank info and invoice defaults.",
-    },
-  ];
-
-  const handleJoyrideCallback = (data: CallBackProps) => {
-    const { status } = data;
-    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
-      setRunTour(false);
-    }
-  };
 
   useEffect(() => {
     (async () => {
@@ -149,8 +100,8 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <Card key={i}>
               <CardHeader className="pb-2">
                 <div className="h-5 w-24 bg-muted rounded animate-pulse" />
@@ -175,21 +126,6 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <Joyride
-        steps={steps}
-        run={runTour}
-        continuous
-        showProgress
-        showSkipButton
-        callback={handleJoyrideCallback}
-        spotlightPadding={6}
-        styles={{
-          options: {
-            primaryColor: "#10b981",
-            zIndex: 9999,
-          },
-        }}
-      />
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
@@ -197,24 +133,30 @@ export default function DashboardPage() {
             Overview of your invoicing and expenses
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setRunTour(true)}
-          className="relative inline-flex items-center gap-2 rounded-full border border-emerald-400/60 bg-emerald-500 text-white px-4 py-2 text-xs font-semibold shadow-lg shadow-emerald-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-        >
-          <span className="absolute -inset-1 rounded-full bg-emerald-400/30 blur-xl animate-pulse" />
-          <span className="relative flex items-center gap-2">
-            <Sparkles className="h-4 w-4" />
-            <span>Click me</span>
-          </span>
-        </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" data-tour-id="dashboard">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Paid
+              Net Sales
+            </CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCurrency(stats.netSales, stats.currency)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Total invoice value (paid + pending)
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Money In (Paid)
             </CardTitle>
             <Banknote className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -231,12 +173,12 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Overdue
+              Money Pending
             </CardTitle>
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">
+            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
               {formatCurrency(stats.totalOverdue, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -258,6 +200,57 @@ export default function DashboardPage() {
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               All expenses
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Total Customer Credit
+            </CardTitle>
+            <Coins className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCurrency(stats.totalCustomerCredit, stats.currency)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Credit owed to customers
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Customers
+            </CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.customerCount}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Active & inactive
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Suppliers
+            </CardTitle>
+            <Truck className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {stats.supplierCount}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Active & inactive
             </p>
           </CardContent>
         </Card>

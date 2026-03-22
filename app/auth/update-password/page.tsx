@@ -105,13 +105,13 @@ export default function UpdatePasswordPage() {
             <div className="flex items-center gap-2">
               <Image
                 src={Logo}
-                alt="Pocket Ledger logo"
+                alt="MoLedger logo"
                 width={32}
                 height={32}
                 className="rounded-md shadow-sm"
                 priority
               />
-              <span className="text-3xl font-bold tracking-tight">Pocket Ledger</span>
+              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">
@@ -218,7 +218,7 @@ export default function UpdatePasswordPage() {
         </CardFooter>
       </form>
       <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground">PocketLedger</span>
+        <span className="text-xs text-muted-foreground">MoLedger</span>
       </div>
     </Card>
   );

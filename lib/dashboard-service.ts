@@ -1,11 +1,18 @@
 import { listInvoices } from "@/lib/invoices-service";
 import { listExpenses } from "@/lib/expenses-service";
+import { listCustomers } from "@/lib/customers-service";
+import { listSuppliers } from "@/lib/suppliers-service";
+import { listCustomerCredits } from "@/lib/customer-credits-service";
 
 export type DashboardStats = {
-  totalPaid: number;
-  totalOverdue: number;
+  netSales: number;
+  totalPaid: number; // Money In (Paid)
+  totalOverdue: number; // Money Pending
   totalExpense: number;
-  profitableIncome: number; // totalPaid - totalExpense
+  totalCustomerCredit: number;
+  profitableIncome: number;
+  customerCount: number;
+  supplierCount: number;
   currency: string;
 };
 
@@ -22,10 +29,14 @@ export type ExpenseByMonth = {
 };
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const [invResult, expResult] = await Promise.all([
-    listInvoices({ status: "all", pageSize: 5000 }),
-    listExpenses({ pageSize: 5000 }),
-  ]);
+  const [invResult, expResult, custResult, suppResult, creditRows] =
+    await Promise.all([
+      listInvoices({ status: "all", pageSize: 5000 }),
+      listExpenses({ pageSize: 5000 }),
+      listCustomers({ pageSize: 1, includeInactive: true }),
+      listSuppliers({ pageSize: 1, includeInactive: true }),
+      listCustomerCredits(),
+    ]);
 
   const totalPaid = invResult.rows
     .filter((r) => r.status === "paid")
@@ -35,18 +46,25 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     .filter((r) => r.status !== "paid" && r.status !== "cancelled")
     .reduce((acc, r) => acc + Number(r.total || 0), 0);
 
+  const netSales = totalPaid + totalOverdue;
+
   const totalExpense = expResult.rows.reduce(
     (acc, r) => acc + Number(r.amount || 0),
     0
   );
 
   const currency = invResult.rows[0]?.currency || expResult.rows[0]?.currency || "MUR";
+  const totalCustomerCredit = creditRows.reduce((acc, c) => acc + Number(c.balance || 0), 0);
 
   return {
+    netSales,
     totalPaid,
     totalOverdue,
     totalExpense,
+    totalCustomerCredit,
     profitableIncome: totalPaid - totalExpense,
+    customerCount: custResult.total,
+    supplierCount: suppResult.total,
     currency,
   };
 }

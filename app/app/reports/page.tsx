@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileDown, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, FileDown, Loader2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -108,7 +109,9 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
     "/kredence.png";
 
   const revenue = data.totalPaid;
+  const totalPurchases = data.totalPurchases;
   const totalExpenses = data.totalExpense;
+  const grossProfit = revenue - totalPurchases;
   const netProfit = data.profitableIncome;
   const isVatRegistered =
     (profile as any)?.vat_registered ?? (profile as any)?.vatRegistered ?? false;
@@ -186,7 +189,7 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
   });
   y = (doc as any).lastAutoTable.finalY + 18;
 
-  // 2. Cost of Sales (we don't separate yet, so zeros)
+  // 2. Cost of Sales (purchase invoices)
   doc.setFont("helvetica", "bold").setFontSize(14).text("2. Cost of Sales / Direct Costs", M, y);
   y += 10;
   autoTable(doc, {
@@ -194,10 +197,10 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
     head: [["Description", `Amount (${data.currency})`]],
     body: [
       ["Cost of Goods Sold (COGS)", formatCurrency(0, data.currency)],
-      ["Purchases", formatCurrency(0, data.currency)],
+      ["Purchases (purchase invoices)", formatCurrency(totalPurchases, data.currency)],
       ["Direct Labour", formatCurrency(0, data.currency)],
       ["Other Direct Costs", formatCurrency(0, data.currency)],
-      ["Total Cost of Sales", formatCurrency(0, data.currency)],
+      ["Total Cost of Sales", formatCurrency(totalPurchases, data.currency)],
     ],
     margin: { left: M, right: M },
     theme: "plain",
@@ -215,13 +218,13 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
   });
   y = (doc as any).lastAutoTable.finalY + 18;
 
-  // Gross Profit = Revenue - Cost of Sales (here = revenue)
+  // Gross Profit = Revenue - Cost of Sales
   doc.setFont("helvetica", "bold").setFontSize(14).text("Gross Profit", M, y);
   y += 10;
   autoTable(doc, {
     startY: y,
     head: [["", `Amount (${data.currency})`]],
-    body: [["Gross Profit", formatCurrency(revenue, data.currency)]],
+    body: [["Gross Profit", formatCurrency(grossProfit, data.currency)]],
     margin: { left: M, right: M },
     theme: "plain",
     headStyles: {
@@ -238,14 +241,14 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
   });
   y = (doc as any).lastAutoTable.finalY + 18;
 
-  // 3. Operating Expenses (we only know Total Expenses)
+  // 3. Operating Expenses (all expenses including salary)
   doc.setFont("helvetica", "bold").setFontSize(14).text("3. Operating Expenses", M, y);
   y += 10;
   autoTable(doc, {
     startY: y,
     head: [["Expense Category", `Amount (${data.currency})`]],
     body: [
-      ["Total Expenses", formatCurrency(totalExpenses, data.currency)],
+      ["Total Expenses (incl. salary / payroll)", formatCurrency(totalExpenses, data.currency)],
       ["Total Operating Expenses", formatCurrency(totalExpenses, data.currency)],
     ],
     margin: { left: M, right: M },
@@ -396,7 +399,7 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184); // slate-400
-  doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, {
+  doc.text("Powered by MoLedger", pageW / 2, pageH - 35, {
     align: "center",
   });
   doc.setFontSize(9);
@@ -406,7 +409,7 @@ async function generateReportPDF(data: ReportData, rangeLabel: string, profile: 
   });
   doc.setTextColor(0, 0, 0);
 
-  const filename = `Pocket-Ledger-Report-${data.startDate}_to_${data.endDate}.pdf`;
+  const filename = `MoLedger-Report-${data.startDate}_to_${data.endDate}.pdf`;
   doc.save(filename);
 }
 
@@ -486,18 +489,47 @@ export default function PnlReportPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">PnL Report</h1>
-        <p className="text-muted-foreground mt-1">
-          Download profit and loss reports (Total Paid, Total Expense, Profitable Income)
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Link href="/app/reportings">
+            <Button variant="ghost" size="icon">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">PnL Report</h1>
+            <p className="text-muted-foreground mt-1">
+              Revenue from paid invoices, purchase invoices (cost of purchases), expenses, and net profit
+            </p>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={handleDownload}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Exporting…
+            </>
+          ) : (
+            <>
+              <FileDown className="h-4 w-4" />
+              Export PDF
+            </>
+          )}
+        </Button>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Download Report</CardTitle>
           <CardDescription>
-            Export as PDF. Paid invoices only — no overdue data.
+            Export as PDF. Sales revenue uses paid invoices only; purchases use non-cancelled purchase
+            invoices by issue date in the period.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -543,11 +575,11 @@ export default function PnlReportPage() {
 
           {reportData ? (
             <div className="space-y-4">
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium">
-                      Total Invoices
+                      Sales revenue (paid)
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -563,7 +595,23 @@ export default function PnlReportPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium">
-                      Total Expenses
+                      Purchases (PINV)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold">
+                      {reportData.currency}{" "}
+                      {reportData.totalPurchases.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium">
+                      Total expenses
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -579,7 +627,7 @@ export default function PnlReportPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium">
-                      Net Profit
+                      Net profit
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -598,8 +646,8 @@ export default function PnlReportPage() {
                 <CardHeader>
                   <CardTitle>Profit &amp; Loss Statement</CardTitle>
                   <CardDescription>
-                    Simplified P&amp;L based on invoices (revenue) and expenses
-                    for the selected period.
+                    Revenue from paid sales invoices, purchase invoice costs, and operating expenses for
+                    the selected period.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6 text-sm">
@@ -640,9 +688,13 @@ export default function PnlReportPage() {
                       <span className="text-right">
                         {reportData.currency} 0.00
                       </span>
-                      <span>Purchases</span>
+                      <span>Purchases (purchase invoices)</span>
                       <span className="text-right">
-                        {reportData.currency} 0.00
+                        {reportData.currency}{" "}
+                        {reportData.totalPurchases.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                       <span>Direct Labour</span>
                       <span className="text-right">
@@ -656,7 +708,11 @@ export default function PnlReportPage() {
                         Total Cost of Sales
                       </span>
                       <span className="text-right font-semibold text-foreground">
-                        {reportData.currency} 0.00
+                        {reportData.currency}{" "}
+                        {reportData.totalPurchases.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
                       </span>
                     </div>
                   </div>
@@ -668,7 +724,7 @@ export default function PnlReportPage() {
                       <span>Gross Profit</span>
                       <span className="font-semibold">
                         {reportData.currency}{" "}
-                        {reportData.totalPaid.toLocaleString("en-US", {
+                        {(reportData.totalPaid - reportData.totalPurchases).toLocaleString("en-US", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
@@ -680,7 +736,7 @@ export default function PnlReportPage() {
                   <div>
                     <p className="font-semibold mb-2">3. Operating Expenses</p>
                     <div className="grid grid-cols-2 gap-2">
-                      <span>Total Expenses</span>
+                      <span>Total Expenses (incl. salary / payroll)</span>
                       <span className="text-right">
                         {reportData.currency}{" "}
                         {reportData.totalExpense.toLocaleString("en-US", {

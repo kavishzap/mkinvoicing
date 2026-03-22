@@ -1,6 +1,6 @@
 {
-  "name": "Pocket Ledger",
-  "short_name": "Pocket Ledger",
+  "name": "MoLedger",
+  "short_name": "MoLedger",
   "description": "Invoice, expense tracking & bookkeeping",
   "start_url": "/",
   "display": "standalone",

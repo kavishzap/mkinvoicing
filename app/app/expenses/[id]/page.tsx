@@ -186,7 +186,7 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(148, 163, 184); // slate-400
-  doc.text("Powered by Pocket Ledger", pageW / 2, pageH - 35, {
+  doc.text("Powered by MoLedger", pageW / 2, pageH - 35, {
     align: "center",
   });
   doc.setTextColor(0, 0, 0);

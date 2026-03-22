@@ -84,13 +84,13 @@ export default function ForgotPasswordPage() {
             <div className="flex items-center gap-2">
               <Image
                 src={Logo}
-                alt="Pocket Ledger logo"
+                alt="MoLedger logo"
                 width={32}
                 height={32}
                 className="rounded-md shadow-sm"
                 priority
               />
-              <span className="text-3xl font-bold tracking-tight">Pocket Ledger</span>
+              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">Forgot password?</CardTitle>
@@ -135,12 +135,12 @@ export default function ForgotPasswordPage() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Image
             src={Logo}
-            alt="Pocket Ledger logo small"
+            alt="MoLedger logo small"
             width={18}
             height={18}
             className="rounded-sm"
           />
-          <span>Pocket Ledger</span>
+          <span>MoLedger</span>
         </div>
       </div>
     </Card>

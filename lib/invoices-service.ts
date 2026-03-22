@@ -42,6 +42,11 @@ export type CreateInvoicePayload = {
     address_line_2?: string | null;
   } | null;
 
+  /** When converting from quotation — pass quotation id */
+  created_from_quotation_id?: string | null;
+  /** When converting from sales order — pass sales order id */
+  created_from_sales_order_id?: string | null;
+
   items: LineItemPayload[];
 };
 
@@ -100,15 +105,23 @@ export async function createInvoice(
     throw new Error("Unexpected response from create_invoice RPC");
   }
 
-  // Update payment fields if provided (database function may not handle them)
+  // Update created_from and payment fields (RPC may not handle them)
   // Always update payment fields to ensure they are saved correctly
   try {
     const updatePayload: {
+      created_from_quotation_id?: string | null;
+      created_from_sales_order_id?: string | null;
       payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
       amount_paid?: number;
       amount_due?: number | null;
     } = {};
-    
+
+    if (inv.created_from_quotation_id !== undefined && inv.created_from_quotation_id !== null) {
+      updatePayload.created_from_quotation_id = inv.created_from_quotation_id;
+    }
+    if (inv.created_from_sales_order_id !== undefined && inv.created_from_sales_order_id !== null) {
+      updatePayload.created_from_sales_order_id = inv.created_from_sales_order_id;
+    }
     if (inv.payment_method !== undefined) {
       updatePayload.payment_method = inv.payment_method ?? null;
     }
@@ -283,6 +296,8 @@ export type InvoiceDetail = {
   status: "unpaid" | "paid" | "cancelled";
   currency: string;
   customer_id: string | null;
+  created_from_quotation_id: string | null;
+  created_from_sales_order_id: string | null;
   from_snapshot: any;
   bill_to_snapshot: any;
   discount_type: "value" | "percent";
@@ -329,6 +344,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     .select(
       `
       id, number, issue_date, due_date, status, currency, customer_id,
+      created_from_quotation_id, created_from_sales_order_id,
       from_snapshot, bill_to_snapshot,
       discount_type, discount_amount,
       notes, terms,
@@ -378,6 +394,8 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     status: data.status as "unpaid" | "paid" | "cancelled",
     currency: data.currency,
     customer_id: (data.customer_id as string) ?? null,
+    created_from_quotation_id: (data.created_from_quotation_id as string) ?? null,
+    created_from_sales_order_id: (data.created_from_sales_order_id as string) ?? null,
     from_snapshot: data.from_snapshot,
     bill_to_snapshot: data.bill_to_snapshot,
     discount_type: data.discount_type,

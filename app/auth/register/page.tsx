@@ -117,17 +117,17 @@ export default function RegisterPage() {
       <CardHeader className="space-y-2">
         <div className="flex flex-col items-center text-center">
           <div className="pt-6 pb-2">
-            <div className="flex items-center gap-2">
+            <Link href="/main" className="flex items-center justify-center gap-2 hover:opacity-80 transition">
               <Image
                 src={Logo}
-                alt="Pocket Ledger logo"
+                alt="MoLedger logo"
                 width={32}
                 height={32}
                 className="rounded-md shadow-sm"
                 priority
               />
-              <span className="text-3xl font-bold tracking-tight">Pocket Ledger</span>
-            </div>
+              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
+            </Link>
           </div>
           <CardTitle className="text-2xl font-bold">Register</CardTitle>
           <CardDescription>
@@ -273,7 +273,9 @@ export default function RegisterPage() {
         </CardFooter>
       </form>
       <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground">PocketLedger</span>
+        <Link href="/main" className="text-xs text-muted-foreground hover:text-foreground transition">
+          Back to home
+        </Link>
       </div>
     </Card>
   );

@@ -29,6 +29,22 @@ export type Preferences = {
   paymentTerms: number;
   defaultNotes?: string;
   defaultTerms?: string;
+  /** Quotation numbering (user_settings.quotation_*) */
+  quotationPrefix?: string;
+  quotationNumberPadding?: number;
+  quotationNextNumber?: number;
+  /** Sales order numbering (user_settings.sales_order_*) */
+  salesOrderPrefix?: string;
+  salesOrderNumberPadding?: number;
+  salesOrderNextNumber?: number;
+  /** Purchase order numbering (user_settings.purchase_order_*) */
+  purchaseOrderPrefix?: string;
+  purchaseOrderNumberPadding?: number;
+  purchaseOrderNextNumber?: number;
+  /** Purchase invoice numbering (user_settings.purchase_invoice_*) */
+  purchaseInvoicePrefix?: string;
+  purchaseInvoiceNumberPadding?: number;
+  purchaseInvoiceNextNumber?: number;
 };
 
 export async function getCurrentUserId() {
@@ -119,6 +135,18 @@ export async function fetchPreferences(): Promise<Preferences> {
     paymentTerms: row.payment_terms ?? 14,
     defaultNotes: row.default_notes ?? "",
     defaultTerms: row.default_terms ?? "",
+    quotationPrefix: row.quotation_prefix ?? "QT",
+    quotationNumberPadding: row.quotation_number_padding ?? 4,
+    quotationNextNumber: row.quotation_next_number ?? 1,
+    salesOrderPrefix: row.sales_order_prefix ?? "SO",
+    salesOrderNumberPadding: row.sales_order_number_padding ?? 4,
+    salesOrderNextNumber: row.sales_order_next_number ?? 1,
+    purchaseOrderPrefix: row.purchase_order_prefix ?? "PO",
+    purchaseOrderNumberPadding: row.purchase_order_number_padding ?? 4,
+    purchaseOrderNextNumber: row.purchase_order_next_number ?? 1,
+    purchaseInvoicePrefix: row.purchase_invoice_prefix ?? "PINV",
+    purchaseInvoiceNumberPadding: row.purchase_invoice_number_padding ?? 4,
+    purchaseInvoiceNextNumber: row.purchase_invoice_next_number ?? 1,
   };
 }
 
