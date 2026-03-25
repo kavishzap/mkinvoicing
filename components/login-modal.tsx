@@ -113,7 +113,13 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
           <>
             <DialogHeader>
               <div className="flex flex-col items-center text-center">
-                <Image src="/moledger.png" alt="MoLedger" width={40} height={40} className="mb-4 object-contain" />
+                <Image
+                  src="/logo2.png"
+                  alt="MoLedger"
+                  width={112}
+                  height={112}
+                  className="mb-3 h-11 w-auto object-contain sm:mb-4 sm:h-12 sm:w-auto"
+                />
                 <DialogTitle className="text-2xl font-bold">Sign in</DialogTitle>
                 <DialogDescription className="text-white/60">
                   Enter your credentials to access your account
@@ -181,7 +187,13 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
           <>
             <DialogHeader>
               <div className="flex flex-col items-center text-center">
-                <Image src="/moledger.png" alt="MoLedger" width={40} height={40} className="mb-4 object-contain" />
+                <Image
+                  src="/logo2.png"
+                  alt="MoLedger"
+                  width={112}
+                  height={112}
+                  className="mb-3 h-11 w-auto object-contain sm:mb-4 sm:h-12 sm:w-auto"
+                />
                 <DialogTitle className="text-2xl font-bold">Forgot password?</DialogTitle>
                 <DialogDescription className="text-white/60">
                   Enter your email and we&apos;ll send you a reset link
