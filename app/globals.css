@@ -120,7 +120,26 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Stable full-viewport height for mobile (avoids legacy 100vh bugs); pairs with hero h-[100svh] */
+  html {
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
+    min-height: 100%;
+    min-height: 100dvh;
+  }
+}
+
+/* Landing: dark grid + soft cyan wash (MoLedger theme) */
+@layer utilities {
+  .bg-landing-pattern {
+    background-color: #06060a;
+    background-image:
+      radial-gradient(ellipse 100% 80% at 50% 0%, rgba(0, 242, 255, 0.08), transparent 55%),
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 100% 100%, 56px 56px, 56px 56px;
+    background-position: center top, center center, center center;
   }
 }

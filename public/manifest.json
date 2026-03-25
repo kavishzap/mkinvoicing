@@ -9,14 +9,14 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/ChatGPT Image Oct 26, 2025, 11_14_55 PM.png",
-      "sizes": "192x192",
+      "src": "/icon",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/ChatGPT Image Oct 26, 2025, 11_14_55 PM.png",
-      "sizes": "512x512",
+      "src": "/icon",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     }

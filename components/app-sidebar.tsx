@@ -68,7 +68,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
           <Image
             src="/moledger.png"
             alt="MoLedger"
-            width={208}
+            width={80}
             height={80}
             className="w-full h-auto object-contain"
             priority
