@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { getActiveCompanyId } from "@/lib/active-company";
 
 export type CustomerPayload = {
   type: "company" | "individual";
@@ -79,6 +80,42 @@ export async function listCustomers(opts?: {
     rows: (data ?? []).map(mapRow),
     total: count ?? 0,
   };
+}
+
+/**
+ * Active customers for the current user's company (for WhatsApp groups, etc.).
+ * Returns up to 500 rows; empty if no company context.
+ */
+export async function listCustomersForCompany(opts?: {
+  search?: string;
+}): Promise<CustomerRow[]> {
+  const companyId = await getActiveCompanyId();
+  if (!companyId) return [];
+
+  let q = supabase
+    .from("customers")
+    .select(COLUMNS)
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  const term = opts?.search?.trim();
+  if (term) {
+    const s = `%${term}%`;
+    q = q.or(
+      [
+        `company_name.ilike.${s}`,
+        `full_name.ilike.${s}`,
+        `email.ilike.${s}`,
+        `phone.ilike.${s}`,
+      ].join(",")
+    );
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []).map(mapRow);
 }
 
 /** Create customer */

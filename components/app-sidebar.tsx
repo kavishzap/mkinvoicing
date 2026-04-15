@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { FileText, LayoutDashboard, Settings, Users, LogOut, Receipt, BarChart3, Coins, ScrollText, ShoppingCart, Truck, ClipboardList, FileInput, BookOpen, Wallet } from "lucide-react";
+import { FileText, LayoutDashboard, Settings, Users, LogOut, Receipt, BarChart3, Coins, ScrollText, ShoppingCart, Truck, ClipboardList, FileInput, BookOpen, Wallet, Package2, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -31,9 +31,11 @@ const navItems = [
   { title: "Purchase Invoices", href: "/app/purchase-invoices", icon: FileInput },
   { title: "Customers", href: "/app/customers", icon: Users },
   { title: "Suppliers", href: "/app/suppliers", icon: Truck },
+  { title: "Inventory", href: "/app/inventory", icon: Package2 },
   { title: "Expenses", href: "/app/expenses", icon: Receipt },
   { title: "Payroll", href: "/app/payroll", icon: Wallet },
   { title: "Customer Credit", href: "/app/customer-credit", icon: Coins },
+  { title: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
   { title: "Reportings", href: "/app/reportings", icon: BarChart3 },
   { title: "Accounting", href: "/app/accounting", icon: BookOpen },
   { title: "Company Settings", href: "/app/settings", icon: Settings },
