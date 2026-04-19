@@ -12,17 +12,14 @@ import type { Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
-import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
+import {
+  authInputClass,
+  authLabelClass,
+  authPanelClass,
+  authPrimaryButtonClass,
+} from "@/lib/auth-ui";
 
 function hashParams(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -159,130 +156,126 @@ export default function InviteAcceptPage() {
   const blocked = !!errors.general && !session;
 
   return (
-    <Card className="shadow-lg border-border/50 max-w-md mx-auto">
-      <CardHeader className="space-y-2">
-        <div className="flex flex-col items-center text-center">
-          <div className="pt-6 pb-2">
-            <div className="flex items-center gap-2">
+    <div className={authPanelClass}>
+          <div className="mb-6 flex flex-col items-center text-center">
+            <Link
+              href="/main"
+              className="mb-5 inline-flex flex-col items-center gap-2 transition-opacity hover:opacity-90"
+            >
               <Image
-                src={Logo}
-                alt="MoLedger logo"
-                width={32}
-                height={32}
-                className="rounded-md shadow-sm"
+                src="/logo2.png"
+                alt="MoLedger"
+                width={160}
+                height={160}
+                className="h-11 w-auto object-contain sm:h-12"
                 priority
               />
-              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
-            </div>
+            </Link>
+            <h1 className="text-2xl font-bold tracking-tight">Accept your invite</h1>
+            <p className="mt-2 text-sm text-white/60">
+              Choose a password to finish setting up your account
+            </p>
           </div>
-          <CardTitle className="text-2xl font-bold">Accept your invite</CardTitle>
-          <CardDescription>
-            Choose a password to finish setting up your account
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <form onSubmit={handleSubmit} noValidate>
-        <CardContent className="space-y-4">
-          {!ready ? (
-            <p className="text-sm text-muted-foreground">Loading invite…</p>
-          ) : blocked ? (
-            <div className="text-sm text-destructive">{errors.general}</div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPwd ? "text" : "password"}
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className={
-                      errors.password ? "border-destructive pr-10" : "pr-10"
-                    }
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    aria-label={showPwd ? "Hide password" : "Show password"}
-                    className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowPwd((s) => !s)}
-                  >
-                    {showPwd ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-                {errors.password && (
-                  <p className="text-sm text-destructive">{errors.password}</p>
-                )}
+
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
+            {!ready ? (
+              <p className="text-center text-sm text-white/50">Loading invite…</p>
+            ) : blocked ? (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {errors.general}
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirm">Confirm password</Label>
-                <div className="relative">
-                  <Input
-                    id="confirm"
-                    type={showConfirm ? "text" : "password"}
-                    placeholder="Re-enter your password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    className={
-                      errors.confirm ? "border-destructive pr-10" : "pr-10"
-                    }
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    aria-label={
-                      showConfirm ? "Hide password" : "Show password"
-                    }
-                    className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowConfirm((s) => !s)}
-                  >
-                    {showConfirm ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="password" className={authLabelClass}>
+                    Password
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPwd ? "text" : "password"}
+                      placeholder="At least 8 characters"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className={`${authInputClass} pr-10 ${errors.password ? "border-red-500" : ""}`}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      aria-label={showPwd ? "Hide password" : "Show password"}
+                      className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+                      onClick={() => setShowPwd((s) => !s)}
+                    >
+                      {showPwd ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <p className="text-sm text-red-400">{errors.password}</p>
+                  )}
                 </div>
-                {errors.confirm && (
-                  <p className="text-sm text-destructive">{errors.confirm}</p>
-                )}
-              </div>
 
-              {errors.general ? (
-                <div className="text-sm text-destructive">{errors.general}</div>
-              ) : null}
-            </>
-          )}
-        </CardContent>
+                <div className="space-y-2">
+                  <Label htmlFor="confirm" className={authLabelClass}>
+                    Confirm password
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="confirm"
+                      type={showConfirm ? "text" : "password"}
+                      placeholder="Re-enter your password"
+                      value={confirm}
+                      onChange={(e) => setConfirm(e.target.value)}
+                      className={`${authInputClass} pr-10 ${errors.confirm ? "border-red-500" : ""}`}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      aria-label={
+                        showConfirm ? "Hide password" : "Show password"
+                      }
+                      className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+                      onClick={() => setShowConfirm((s) => !s)}
+                    >
+                      {showConfirm ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {errors.confirm && (
+                    <p className="text-sm text-red-400">{errors.confirm}</p>
+                  )}
+                </div>
 
-        <CardFooter className="flex flex-col space-y-4 mt-3">
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isLoading || blocked || !session || !ready}
-          >
-            {isLoading ? "Saving…" : "Activate account"}
-          </Button>
+                {errors.general ? (
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                    {errors.general}
+                  </div>
+                ) : null}
+              </>
+            )}
 
-          <Link
-            href="/auth/login"
-            className="flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to sign in
-          </Link>
-        </CardFooter>
-      </form>
-      <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground">MoLedger</span>
-      </div>
-    </Card>
+            <Button
+              type="submit"
+              className={`mt-2 ${authPrimaryButtonClass}`}
+              disabled={isLoading || blocked || !session || !ready}
+            >
+              {isLoading ? "Saving…" : "Activate account"}
+            </Button>
+
+            <Link
+              href="/auth/login"
+              className="flex items-center justify-center gap-2 text-sm text-white/55 transition-colors hover:text-white"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to sign in
+            </Link>
+          </form>
+    </div>
   );
 }

@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { AppPageShell } from "@/components/app-page-shell";
 import {
   getCustomerSupplierLedgerData,
   type CustomerSupplierLedgerFilters,
@@ -172,21 +173,16 @@ export default function CustomerSupplierLedgerPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/app/accounting">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Customer / Supplier Ledger</h1>
-            <p className="text-muted-foreground mt-1">
-              Accounts receivable by customer, accounts payable by supplier
-            </p>
-          </div>
-        </div>
+    <AppPageShell
+      leading={
+        <Link href="/app/accounting">
+          <Button variant="ghost" size="icon" aria-label="Back to accounting">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle="Switch between customers and suppliers to see who owes you and what you owe—then export a PDF for the period."
+      actions={
         <Button
           variant="outline"
           size="sm"
@@ -206,8 +202,8 @@ export default function CustomerSupplierLedgerPage() {
             </>
           )}
         </Button>
-      </div>
-
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Ledger</CardTitle>
@@ -268,7 +264,7 @@ export default function CustomerSupplierLedgerPage() {
                     <CardTitle className="text-sm font-medium">Total Receivable</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                    <p className="text-xl font-bold text-amber-600 dark:text-amber-400">
                       {formatCurrency(data.totalReceivable, data.currency)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">What customers owe you</p>
@@ -279,7 +275,7 @@ export default function CustomerSupplierLedgerPage() {
                     <CardTitle className="text-sm font-medium">Total Payable</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                    <p className="text-xl font-bold text-amber-600 dark:text-amber-400">
                       {formatCurrency(data.totalPayable, data.currency)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">What you owe suppliers</p>
@@ -333,7 +329,7 @@ export default function CustomerSupplierLedgerPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }
 

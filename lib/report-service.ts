@@ -1,10 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-
-async function getUserId() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data?.user) throw new Error("Not authenticated");
-  return data.user.id;
-}
+import { requireActiveCompanyId } from "@/lib/active-company";
 import type { InvoiceListRow } from "@/lib/invoices-service";
 import type { ExpenseRow } from "@/lib/expenses-service";
 
@@ -46,7 +41,7 @@ export async function getReportData(
   startDate: string,
   endDate: string
 ): Promise<ReportData> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const [invResult, expResult, piResult] = await Promise.all([
     supabase
       .from("invoices")
@@ -56,6 +51,7 @@ export async function getReportData(
         invoice_items ( quantity, unit_price, tax_percent )
       `
       )
+      .eq("company_id", companyId)
       .eq("status", "paid")
       .gte("issue_date", startDate)
       .lte("issue_date", endDate)
@@ -63,13 +59,14 @@ export async function getReportData(
     supabase
       .from("expenses")
       .select("id, description, amount, currency, expense_date, notes")
-      .eq("user_id", userId)
+      .eq("company_id", companyId)
       .gte("expense_date", startDate)
       .lte("expense_date", endDate)
       .order("expense_date", { ascending: false }),
     supabase
       .from("purchase_invoices")
       .select("total, currency")
+      .eq("company_id", companyId)
       .neq("status", "cancelled")
       .gte("issue_date", startDate)
       .lte("issue_date", endDate),

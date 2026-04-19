@@ -1,7 +1,15 @@
 // lib/invoices-service.ts
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 /* -------------------- Types -------------------- */
+
+/** Allowed values for `invoices.payment_method` (matches UI selects). */
+export type InvoicePaymentMethod =
+  | "Cash"
+  | "Card Payment"
+  | "Credit Facilities"
+  | "Bank Transfer";
 
 export type LineItemPayload = {
   item: string;
@@ -21,7 +29,7 @@ export type CreateInvoicePayload = {
   shipping_amount?: number;
   notes?: string;
   terms?: string;
-  payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
+  payment_method?: InvoicePaymentMethod | null;
   amount_paid?: number;
   amount_due?: number;
 
@@ -64,10 +72,12 @@ export async function createInvoice(
   params: CreateInvoicePayload
 ): Promise<string> {
   const { items, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
 
   // Never send `number` from client — server generates it.
   const { data, error } = await supabase.rpc("create_invoice", {
     p_invoice: {
+      company_id: companyId,
       issue_date: inv.issue_date,
       due_date: inv.due_date,
       status: inv.status, // enum cast handled in function
@@ -111,7 +121,7 @@ export async function createInvoice(
     const updatePayload: {
       created_from_quotation_id?: string | null;
       created_from_sales_order_id?: string | null;
-      payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
+      payment_method?: InvoicePaymentMethod | null;
       amount_paid?: number;
       amount_due?: number | null;
     } = {};
@@ -136,7 +146,8 @@ export async function createInvoice(
       const { error: updateError } = await supabase
         .from("invoices")
         .update(updatePayload)
-        .eq("id", invoiceId);
+        .eq("id", invoiceId)
+        .eq("company_id", companyId);
       
       if (updateError) {
         // Log but don't fail - invoice was created successfully
@@ -195,6 +206,7 @@ export async function listInvoices(opts?: {
   sortBy?: SortByKey;
   sort?: SortDir;
 }): Promise<{ rows: InvoiceListRow[]; total: number }> {
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
@@ -213,13 +225,16 @@ export async function listInvoices(opts?: {
   const sortColumn = sortFieldMap[sortByKey] ?? "issue_date";
   const ascending = (opts?.sort ?? "desc") === "asc";
 
-  let q = supabase.from("invoices").select(
-    `
+  let q = supabase
+    .from("invoices")
+    .select(
+      `
       id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at,
       invoice_items ( quantity, unit_price, tax_percent )
     `,
-    { count: "exact" }
-  );
+      { count: "exact" }
+    )
+    .eq("company_id", companyId);
 
   // Filters
   if (opts?.status && opts.status !== "all") {
@@ -304,12 +319,7 @@ export type InvoiceDetail = {
   discount_amount: number;
   notes: string | null;
   terms: string | null;
-  payment_method:
-    | "Cash"
-    | "Card Payment"
-    | "Credit Facilities"
-    | "Bank Transfer"
-    | null;
+  payment_method: InvoicePaymentMethod | null;
   amount_paid: number;
   amount_due: number;
   items: InvoiceItemRow[];
@@ -339,6 +349,7 @@ export function computeTotals(inv: InvoiceDetail) {
 }
 
 export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("invoices")
     .select(
@@ -353,6 +364,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     `
     )
     .eq("id", id)
+    .eq("company_id", companyId)
     .single();
 
   if (error) {
@@ -402,12 +414,7 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     discount_amount: Number(data.discount_amount || 0),
     notes: data.notes,
     terms: data.terms,
-    payment_method: data.payment_method as
-      | "Cash"
-      | "Card Payment"
-      | "Credit Facilities"
-      | "Bank Transfer"
-      | null,
+    payment_method: data.payment_method as InvoicePaymentMethod | null,
     amount_paid: amountPaid,
     amount_due: amountDue,
     items: items,
@@ -415,20 +422,24 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
 }
 
 export async function markInvoicePaid(id: string): Promise<void> {
+  const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("invoices")
     .update({ status: "paid" })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }
 
 /** Cancel invoice: sets status to cancelled and amount_paid to 0 so it does not count in total paid or overdue */
 export async function cancelInvoice(id: string): Promise<void> {
+  const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("invoices")
     .update({ status: "cancelled", amount_paid: 0, amount_due: 0 })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }
@@ -436,17 +447,19 @@ export async function cancelInvoice(id: string): Promise<void> {
 export async function updateInvoicePayment(
   id: string,
   payment: {
-    payment_method?: "Cash" | "Card Payment" | "Credit Facilities" | null;
+    payment_method?: InvoicePaymentMethod | null;
     amount_paid?: number;
     amount_due?: number;
     status?: "unpaid" | "paid" | "cancelled";
     credit_applied?: number;
   }
 ): Promise<void> {
+  const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("invoices")
     .update(payment)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 import type { Profile } from "@/lib/settings-service";
 import type { SupplierRow } from "@/lib/suppliers-service";
 import type { SalesOrderClientInfo } from "@/lib/sales-orders-service";
@@ -103,6 +104,7 @@ export function supplierToClientInfo(s: SupplierRow): SalesOrderClientInfo {
 
 export async function expireStalePurchaseOrders(): Promise<void> {
   const today = new Date().toISOString().split("T")[0];
+  const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("purchase_orders")
     .update({
@@ -110,7 +112,8 @@ export async function expireStalePurchaseOrders(): Promise<void> {
       updated_at: new Date().toISOString(),
     })
     .lt("valid_until", today)
-    .eq("status", "active");
+    .eq("status", "active")
+    .eq("company_id", companyId);
 
   if (error) {
     // eslint-disable-next-line no-console
@@ -141,8 +144,10 @@ export async function createPurchaseOrder(
   params: CreatePurchaseOrderPayload
 ): Promise<string> {
   const { items, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase.rpc("create_purchase_order", {
     p_purchase_order: {
+      company_id: companyId,
       issue_date: inv.issue_date,
       valid_until: inv.valid_until,
       status: inv.status,
@@ -187,6 +192,7 @@ export async function listPurchaseOrders(opts?: {
   pageSize?: number;
 }): Promise<{ rows: PurchaseOrderListRow[]; total: number }> {
   await expireStalePurchaseOrders();
+  const companyId = await requireActiveCompanyId();
 
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
@@ -199,6 +205,7 @@ export async function listPurchaseOrders(opts?: {
       "id, number, issue_date, valid_until, status, currency, bill_to_snapshot, total",
       { count: "exact" }
     )
+    .eq("company_id", companyId)
     .order("issue_date", { ascending: false })
     .range(from, to);
 
@@ -238,6 +245,7 @@ export async function getPurchaseOrder(
   id: string
 ): Promise<PurchaseOrderDetail | null> {
   await expireStalePurchaseOrders();
+  const companyId = await requireActiveCompanyId();
 
   const { data, error } = await supabase
     .from("purchase_orders")
@@ -250,6 +258,7 @@ export async function getPurchaseOrder(
     `
     )
     .eq("id", id)
+    .eq("company_id", companyId)
     .single();
 
   if (error) return null;
@@ -283,7 +292,12 @@ export async function getPurchaseOrder(
 }
 
 export async function deletePurchaseOrder(id: string): Promise<void> {
-  const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("purchase_orders")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
   if (error) throw error;
 }
 
@@ -299,6 +313,7 @@ export async function updatePurchaseOrder(
   params: UpdatePurchaseOrderPayload
 ): Promise<void> {
   const { items, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
   const subtotal = items.reduce(
     (s, it) => s + Number(it.quantity) * Number(it.unit_price),
     0
@@ -335,7 +350,8 @@ export async function updatePurchaseOrder(
       terms: inv.terms ?? null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (upErr) throw upErr;
 
@@ -351,6 +367,7 @@ export async function updatePurchaseOrder(
     const sortOrder = it.sort_order ?? idx;
     return {
       purchase_order_id: id,
+      company_id: companyId,
       item: it.item,
       description: it.description ?? null,
       quantity: it.quantity,

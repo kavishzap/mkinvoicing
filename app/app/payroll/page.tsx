@@ -6,6 +6,7 @@ import { Users, Calendar, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { listPayrollRuns } from "@/lib/payroll-runs-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "MUR" }).format(amount);
@@ -34,14 +35,7 @@ export default function PayrollPage() {
   }, []);
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Payroll</h1>
-        <p className="text-muted-foreground mt-1">
-          Employees, salary processing, and payslips
-        </p>
-      </div>
-
+    <AppPageShell subtitle="Maintain your team here, then run monthly payroll and payslips from the same area.">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         <Link href="/app/payroll/employees">
           <Card className="hover:bg-accent/30 cursor-pointer transition-colors h-full">
@@ -111,6 +105,6 @@ export default function PayrollPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

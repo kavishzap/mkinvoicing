@@ -1,4 +1,58 @@
 import { supabase } from "./supabaseClient";
+import { getActiveCompanyId } from "@/lib/active-company";
+
+type CompanyRow = {
+  id: string;
+  name: string;
+  company_logo_url: string | null;
+  brn: string | null;
+  vat_number: string | null;
+  email: string | null;
+  phone: string | null;
+  address_line_1: string | null;
+  address_line_2: string | null;
+  city: string | null;
+  country: string | null;
+};
+
+function profileFromDbRow(row: Record<string, unknown>): Profile {
+  return {
+    accountType: (row.account_type ?? "company") as Profile["accountType"],
+    companyName: (row.company_name as string) ?? "",
+    logoUrl: (row.logo_url as string) ?? "",
+    registrationId: (row.registration_id as string) ?? "",
+    vatNumber: (row.vat_number as string) ?? "",
+    vatRegistered: (row.vat_registered as boolean) ?? false,
+    fullName: (row.full_name as string) ?? "",
+    taxId: (row.tax_id as string) ?? "",
+    email: (row.email as string) ?? "",
+    phone: (row.phone as string) ?? "",
+    street: (row.street as string) ?? "",
+    city: (row.city as string) ?? "",
+    postal: (row.postal as string) ?? "",
+    country: (row.country as string) ?? "",
+    address_line_1: (row.address_line_1 as string) ?? "",
+    address_line_2: (row.address_line_2 as string) ?? "",
+    bank_name: (row.bank_name as string) ?? "",
+    bank_acc_num: (row.bank_acc_num as string) ?? "",
+  };
+}
+
+function mergeCompanyIntoProfile(p: Profile, c: CompanyRow): Profile {
+  return {
+    ...p,
+    companyName: c.name ?? "",
+    logoUrl: c.company_logo_url ?? "",
+    registrationId: c.brn ?? "",
+    vatNumber: c.vat_number ?? "",
+    email: c.email ?? "",
+    phone: c.phone ?? "",
+    address_line_1: c.address_line_1 ?? "",
+    address_line_2: c.address_line_2 ?? "",
+    city: c.city ?? "",
+    country: c.country ?? "",
+  };
+}
 
 export type Profile = {
   accountType: "company" | "individual";
@@ -63,31 +117,88 @@ export async function fetchProfile(): Promise<Profile> {
 
   if (error && error.code !== "PGRST116") throw error; // not found
   const row = data ?? {};
+  let profile = profileFromDbRow(row as Record<string, unknown>);
 
-  return {
-    accountType: (row.account_type ?? "company") as Profile["accountType"],
-    companyName: row.company_name ?? "",
-    logoUrl: row.logo_url ?? "",
-    registrationId: row.registration_id ?? "",
-    vatNumber: row.vat_number ?? "",
-    vatRegistered: row.vat_registered ?? false,
-    fullName: row.full_name ?? "",
-    taxId: row.tax_id ?? "",
-    email: row.email ?? "",
-    phone: row.phone ?? "",
-    street: row.street ?? "",
-    city: row.city ?? "",
-    postal: row.postal ?? "",
-    country: row.country ?? "",
-    address_line_1: row.address_line_1 ?? "",
-    address_line_2: row.address_line_2 ?? "",
-    bank_name: row.bank_name ?? "",
-    bank_acc_num: row.bank_acc_num ?? "",
-  };
+  const companyId = await getActiveCompanyId();
+  const isCompanyAccount = profile.accountType === "company";
+
+  if (companyId && isCompanyAccount) {
+    const { data: co, error: cErr } = await supabase
+      .from("companies")
+      .select(
+        "id, name, company_logo_url, brn, vat_number, email, phone, address_line_1, address_line_2, city, country",
+      )
+      .eq("id", companyId)
+      .maybeSingle();
+
+    if (cErr && cErr.code !== "PGRST116") throw cErr;
+    if (co) {
+      profile = mergeCompanyIntoProfile(profile, co as CompanyRow);
+    }
+  }
+
+  return profile;
 }
 
 export async function upsertProfile(profile: Profile) {
   const userId = await getCurrentUserId();
+  const companyId = await getActiveCompanyId();
+
+  if (profile.accountType === "company" && !companyId) {
+    throw new Error(
+      "No active company is selected. You cannot save company details until a company is linked to this session.",
+    );
+  }
+
+  const isCompany = profile.accountType === "company" && !!companyId;
+
+  if (isCompany) {
+    const { error: cErr } = await supabase
+      .from("companies")
+      .update({
+        name: profile.companyName?.trim() || "",
+        company_logo_url: profile.logoUrl?.trim() || null,
+        brn: profile.registrationId?.trim() || null,
+        vat_number: profile.vatNumber?.trim() || null,
+        email: profile.email?.trim() || null,
+        phone: profile.phone?.trim() || null,
+        address_line_1: profile.address_line_1?.trim() || null,
+        address_line_2: profile.address_line_2?.trim() || null,
+        city: profile.city?.trim() || null,
+        country: profile.country?.trim() || null,
+      })
+      .eq("id", companyId);
+    if (cErr) throw cErr;
+
+    const profilePayload = {
+      id: userId,
+      account_type: profile.accountType,
+      vat_registered: profile.vatRegistered ?? false,
+      full_name: profile.fullName || null,
+      tax_id: profile.taxId || null,
+      street: profile.street || null,
+      postal: profile.postal || null,
+      bank_name: profile.bank_name || null,
+      bank_acc_num: profile.bank_acc_num || null,
+      company_name: null,
+      logo_url: null,
+      registration_id: null,
+      vat_number: null,
+      email: null,
+      phone: null,
+      city: null,
+      country: null,
+      address_line_1: null,
+      address_line_2: null,
+    };
+
+    const { error } = await supabase
+      .from("profiles")
+      .upsert(profilePayload, { onConflict: "id" });
+    if (error) throw error;
+    return;
+  }
+
   const payload = {
     id: userId,
     account_type: profile.accountType,
@@ -118,11 +229,10 @@ export async function upsertProfile(profile: Profile) {
 
 export async function fetchPreferences(): Promise<Preferences> {
   const userId = await getCurrentUserId();
-  const { data, error } = await supabase
-    .from("user_settings")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
+  const companyId = await getActiveCompanyId();
+  let query = supabase.from("user_settings").select("*").eq("user_id", userId);
+  if (companyId) query = query.eq("company_id", companyId);
+  const { data, error } = await query.single();
 
   if (error && error.code !== "PGRST116") throw error;
   const row = data ?? {};
@@ -152,8 +262,10 @@ export async function fetchPreferences(): Promise<Preferences> {
 
 export async function upsertPreferences(prefs: Preferences) {
   const userId = await getCurrentUserId();
-  const payload = {
+  const companyId = await getActiveCompanyId();
+  const payload: Record<string, unknown> = {
     user_id: userId,
+    company_id: companyId,
     currency: prefs.currency,
     number_prefix: prefs.numberPrefix,
     number_padding: prefs.numberPadding,

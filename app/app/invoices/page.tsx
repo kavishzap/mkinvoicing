@@ -2,9 +2,9 @@
 export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Search, Eye, MoreHorizontal } from "lucide-react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { Plus, Eye, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -14,19 +14,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DataTable } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
 import { InvoiceEmptyState } from "@/components/invoice-empty-state";
 import { InvoiceTableSkeleton } from "@/components/invoice-table-skeleton";
@@ -37,6 +31,7 @@ import {
   type InvoiceListRow,
   type InvoiceStatus,
 } from "@/lib/invoices-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function InvoicesPage() {
   const router = useRouter();
@@ -160,18 +155,130 @@ export default function InvoicesPage() {
       year: "numeric",
     });
 
+  const columns = useMemo<ColumnDef<InvoiceListRow>[]>(
+    () => [
+      {
+        id: "number",
+        accessorFn: (r) => r.number,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Invoice #" />
+        ),
+        meta: {
+          searchValue: (row: InvoiceListRow) =>
+            [row.number, row.clientName].join(" "),
+        },
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.number}</span>
+        ),
+      },
+      {
+        id: "clientName",
+        accessorFn: (r) => r.clientName,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Client" />
+        ),
+        meta: {
+          searchValue: (row: InvoiceListRow) => row.clientName,
+        },
+        cell: ({ row }) => row.original.clientName,
+      },
+      {
+        id: "issueDate",
+        accessorFn: (r) => new Date(r.issueDate).getTime(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Issue Date" />
+        ),
+        meta: {
+          searchValue: (row: InvoiceListRow) => row.issueDate,
+        },
+        cell: ({ row }) => formatDate(row.original.issueDate),
+      },
+      {
+        id: "dueDate",
+        accessorFn: (r) => new Date(r.dueDate).getTime(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Due Date" />
+        ),
+        meta: {
+          searchValue: (row: InvoiceListRow) => row.dueDate,
+        },
+        cell: ({ row }) => formatDate(row.original.dueDate),
+      },
+      {
+        id: "status",
+        accessorFn: (r) => r.status,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Status" />
+        ),
+        meta: {
+          searchValue: (row: InvoiceListRow) => row.status,
+        },
+        cell: ({ row }) => (
+          <InvoiceStatusBadge status={row.original.status} />
+        ),
+      },
+      {
+        id: "total",
+        accessorFn: (r) => Number(r.total),
+        header: ({ column }) => (
+          <div className="flex justify-end">
+            <DataTableColumnHeader column={column} title="Total" />
+          </div>
+        ),
+        meta: {
+          thClassName: "text-right",
+          tdClassName: "text-right font-medium",
+          searchValue: (row: InvoiceListRow) =>
+            String(row.total) + " " + row.currency,
+        },
+        cell: ({ row }) =>
+          formatCurrency(row.original.total, row.original.currency),
+      },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => (
+          <span className="sr-only">Actions</span>
+        ),
+        meta: {
+          searchable: false,
+          thClassName: "w-[120px] text-right",
+          tdClassName: "text-right",
+        },
+        cell: ({ row }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8">
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="sr-only">Open menu</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() =>
+                  router.push(`/app/invoices/${row.original.id}`)
+                }
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                View
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+      },
+    ],
+    [router],
+  );
+
+  const invoiceSubtitle =
+    "Bill customers and stay on top of what’s paid, pending, or overdue.";
 
   // UI skeletons/empty
   if (isLoading && rows.length === 0) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage and track your invoices
-            </p>
-          </div>
+      <AppPageShell
+        subtitle={invoiceSubtitle}
+        actions={
           <Button
             onClick={() => router.push("/app/invoices/new")}
             className="gap-2"
@@ -179,25 +286,21 @@ export default function InvoicesPage() {
             <Plus className="h-4 w-4" />
             Create Invoice
           </Button>
-        </div>
+        }
+      >
         <Card className="p-6">
           <InvoiceTableSkeleton />
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   // ✅ show first-time empty state ONLY when there is truly no data and no filters
   if (!isLoading && total === 0 && !hasActiveFilters) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage and track your invoices
-            </p>
-          </div>
+      <AppPageShell
+        subtitle={invoiceSubtitle}
+        actions={
           <Button
             onClick={() => router.push("/app/invoices/new")}
             className="gap-2"
@@ -205,21 +308,17 @@ export default function InvoicesPage() {
             <Plus className="h-4 w-4" />
             Create Invoice
           </Button>
-        </div>
+        }
+      >
         <InvoiceEmptyState />
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Invoices</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage and track your invoices
-          </p>
-        </div>
+    <AppPageShell
+      subtitle={invoiceSubtitle}
+      actions={
         <Button
           onClick={() => router.push("/app/invoices/new")}
           className="gap-2"
@@ -227,41 +326,39 @@ export default function InvoicesPage() {
           <Plus className="h-4 w-4" />
           Create Invoice
         </Button>
-      </div>
+      }
+    >
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card className="p-5">
           <div className="text-sm text-muted-foreground">Total Paid</div>
-          <div className="mt-1 text-2xl font-bold">
+          <div className="mt-1 text-xl font-bold">
             {formatCurrency(totalPaidAmount, currencyForSummary)}
           </div>
         </Card>
 
         <Card className="p-5">
           <div className="text-sm text-muted-foreground">Total Overdue</div>
-          <div className="mt-1 text-2xl font-bold">
+          <div className="mt-1 text-xl font-bold">
             {formatCurrency(totalOverdueAmount, currencyForSummary)}
           </div>
         </Card>
       </div>
 
       <Card className="p-6">
-        {/* Filters */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-6">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search by invoice # or client..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            {/* Only 'unpaid' and 'paid' are valid now */}
+        <DataTable
+          columns={columns}
+          data={rows}
+          manualFiltering
+          searchPlaceholder="Search by invoice # or client…"
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          toolbarLeft={
             <Select
               value={statusFilter}
-              onValueChange={(v) => setStatusFilter(v as any)}
+              onValueChange={(v) =>
+                setStatusFilter(v as InvoiceStatus | "all")
+              }
             >
               <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder="Status" />
@@ -273,141 +370,81 @@ export default function InvoicesPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-        </div>
+          }
+          getRowId={(r) => r.id}
+          emptyMessage={
+            hasActiveFilters ? (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div>No invoices match your current filters.</div>
+                <div className="text-xs text-muted-foreground">
+                  Try adjusting search or status.
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                    setPeriodFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            ) : (
+              "No invoices to display."
+            )
+          }
+          footer={
+            <div className="flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Rows per page:
+                </span>
+                <Select
+                  value={String(itemsPerPage)}
+                  onValueChange={(v) => setItemsPerPage(Number(v))}
+                >
+                  <SelectTrigger className="w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-        {/* Table */}
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Invoice #</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Issue Date</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead className="text-right w-[120px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-10 text-center text-sm text-muted-foreground"
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
                   >
-                    {hasActiveFilters ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <div>No invoices match your current filters.</div>
-                        <div className="text-xs">
-                          Try adjusting search or status.
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSearchQuery("");
-                              setStatusFilter("all");
-                              setPeriodFilter("all");
-                            }}
-                          >
-                            Clear filters
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>No invoices to display.</div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((inv) => (
-                  <TableRow key={inv.id} className="group">
-                    <TableCell className="font-medium">{inv.number}</TableCell>
-                    <TableCell>{inv.clientName}</TableCell>
-                    <TableCell>{formatDate(inv.issueDate)}</TableCell>
-                    <TableCell>{formatDate(inv.dueDate)}</TableCell>
-                    <TableCell>
-                      <InvoiceStatusBadge status={inv.status} />
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(inv.total, inv.currency)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Open menu</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => router.push(`/app/invoices/${inv.id}`)}
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        {/* Pagination */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Rows per page:
-            </span>
-            <Select
-              value={String(itemsPerPage)}
-              onValueChange={(v) => setItemsPerPage(Number(v))}
-            >
-              <SelectTrigger className="w-[70px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Page {currentPage} of {totalPages}
-            </span>
-            <div className="flex gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setCurrentPage((p) => Math.min(totalPages, p + 1))
-                }
-                disabled={currentPage >= totalPages}
-              >
-                Next
-              </Button>
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
+                    disabled={currentPage >= totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          }
+        />
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

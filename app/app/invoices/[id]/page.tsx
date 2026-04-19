@@ -17,6 +17,7 @@ import {
   computeTotals,
   type InvoiceDetail,
 } from "@/lib/invoices-service";
+import { AppPageShell } from "@/components/app-page-shell";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 
 export default function InvoiceViewPage() {
@@ -87,10 +88,10 @@ export default function InvoiceViewPage() {
 
   if (!loading && !invoice) {
     return (
-      <div className="p-6">
+      <AppPageShell>
         <Card>
           <CardContent className="py-16 text-center">
-            <h2 className="text-2xl font-semibold mb-2">Invoice not found</h2>
+            <h2 className="text-xl font-semibold mb-2">Invoice not found</h2>
             <p className="text-muted-foreground mb-6">
               {error ?? "The invoice you're looking for doesn't exist."}
             </p>
@@ -99,14 +100,14 @@ export default function InvoiceViewPage() {
             </Link>
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   // Skeleton depends only on invoice, not profile (prevents deadlock)
   if (loading || !invoice) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <AppPageShell className="max-w-7xl">
         <div className="flex items-center justify-between">
           <div className="h-8 w-64 bg-muted rounded animate-pulse" />
           <div className="h-9 w-40 bg-muted rounded animate-pulse" />
@@ -115,7 +116,7 @@ export default function InvoiceViewPage() {
           <div className="lg:col-span-2 h-96 bg-muted rounded animate-pulse" />
           <div className="h-60 bg-muted rounded animate-pulse" />
         </div>
-      </div>
+      </AppPageShell>
     );
   }
 
@@ -152,26 +153,17 @@ export default function InvoiceViewPage() {
   const logoSrc = (from as any)?.logoUrl || safeProfile.logoUrl || "/kredence.png";
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header Actions */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-4">
-          <Link href="/app/invoices">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Invoice {invoice.number}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              View and manage invoice details
-            </p>
-          </div>
-        </div>
-
-        {/* UPDATED: pass invoice/profile/logoSrc so PDF uses data, not HTML */}
+    <AppPageShell
+      className="max-w-7xl"
+      leading={
+        <Link href="/app/invoices">
+          <Button variant="ghost" size="icon" aria-label="Back to invoices">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle={`${invoice.number}${billName ? ` · ${billName}` : ""} — Review amounts, record payments, print or share PDF.`}
+      actions={
         <InvoiceViewActions
           invoiceId={invoice.id}
           invoice={invoice}
@@ -192,8 +184,8 @@ export default function InvoiceViewPage() {
             setRefreshKey((prev) => prev + 1);
           }}
         />
-      </div>
-
+      }
+    >
       <div>
         {/* Invoice Content */}
         <div className="lg:col-span-2 space-y-6">
@@ -215,12 +207,12 @@ export default function InvoiceViewPage() {
                       />
                     </div>
                   ) : (
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-xl mb-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg mb-3">
                       I
                     </div>
                   )}
 
-                  <h2 className="text-2xl font-bold">{fromName}</h2>
+                  <h2 className="text-xl font-bold">{fromName}</h2>
                   {fromEmail && (
                     <p className="text-sm text-muted-foreground mt-1">
                       {fromEmail}
@@ -238,7 +230,7 @@ export default function InvoiceViewPage() {
                   )}
                 </div>
                 <div className="text-right">
-                  <h3 className="text-3xl font-bold text-muted-foreground">
+                  <h3 className="text-2xl font-bold text-muted-foreground">
                     INVOICE
                   </h3>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -457,7 +449,7 @@ export default function InvoiceViewPage() {
                       </div>
                     )}
                     <Separator />
-                    <div className="flex justify-between text-lg font-bold">
+                    <div className="flex justify-between text-base font-bold">
                       <span>Total</span>
                       <span>
                         {new Intl.NumberFormat("en-US", {
@@ -537,6 +529,6 @@ export default function InvoiceViewPage() {
           </Card>
         </div>
       </div>
-    </div>
+    </AppPageShell>
   );
 }

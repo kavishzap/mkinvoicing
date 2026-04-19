@@ -60,6 +60,7 @@ import {
   type PurchaseInvoiceLinePayload,
   type PurchaseInvoiceStatus,
 } from "@/lib/purchase-invoices-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -503,7 +504,7 @@ export default function EditPurchaseInvoicePage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -520,33 +521,39 @@ export default function EditPurchaseInvoicePage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href={purchaseInvoiceId ? `/app/purchase-invoices/${purchaseInvoiceId}` : "/app/purchase-invoices"}>
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={`${purchaseInvoiceNumber} — Update supplier, lines, or payment details, then save.`}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={
+              purchaseInvoiceId
+                ? `/app/purchase-invoices/${purchaseInvoiceId}`
+                : "/app/purchase-invoices"
+            }
+          >
+            <Button variant="ghost" size="icon" aria-label="Back to purchase invoice">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={savePurchaseInvoice} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save changes"}
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Edit Purchase Invoice
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            <span className="font-medium">{purchaseInvoiceNumber}</span>
-          </p>
-          {createdFromPurchaseOrderId && (
-            <p className="text-sm mt-2">
-              <span className="text-muted-foreground">Created from </span>
-              <Link
-                href={`/app/purchase-orders/${createdFromPurchaseOrderId}`}
-                className="text-primary underline font-medium"
-              >
-                purchase order
-              </Link>
-            </p>
-          )}
         </div>
-      </div>
+      }
+    >
+      {createdFromPurchaseOrderId ? (
+        <p className="text-sm text-muted-foreground print:hidden">
+          <span>Created from </span>
+          <Link
+            href={`/app/purchase-orders/${createdFromPurchaseOrderId}`}
+            className="font-medium text-primary underline"
+          >
+            purchase order
+          </Link>
+        </p>
+      ) : null}
 
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
@@ -1182,7 +1189,7 @@ export default function EditPurchaseInvoicePage() {
                 </div>
               )}
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1198,12 +1205,6 @@ export default function EditPurchaseInvoicePage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={savePurchaseInvoice} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save changes"}
-        </Button>
       </div>
 
       <Dialog
@@ -1265,6 +1266,6 @@ export default function EditPurchaseInvoicePage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

@@ -17,6 +17,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  clearActiveCompanyCache,
+  resolveCompanyIdForLogin,
+  setActiveCompanyCache,
+} from "@/lib/active-company";
+import {
+  clearRoleFeaturesCache,
+  getRoleFeatures,
+} from "@/lib/role-features-service";
+import { logLoginSessionDebug } from "@/lib/login-session-debug-log";
 
 interface LoginModalProps {
   open: boolean;
@@ -29,15 +39,21 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
   const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [companyCode, setCompanyCode] = useState("");
   const [showPwd, setShowPwd] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    companyCode?: string;
+  }>({});
   const [isLoading, setIsLoading] = useState(false);
 
   const validateForm = () => {
-    const newErrors: { email?: string; password?: string } = {};
+    const newErrors: { email?: string; password?: string; companyCode?: string } = {};
     if (!email) newErrors.email = "Email is required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) newErrors.email = "Please enter a valid email";
     if (!password) newErrors.password = "Password is required";
+    if (!companyCode.trim()) newErrors.companyCode = "Company code is required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -48,6 +64,8 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
 
     try {
       setIsLoading(true);
+      clearActiveCompanyCache();
+      clearRoleFeaturesCache();
       const { error } = await supabase.auth.signInWithPassword({ email, password });
 
       if (error) {
@@ -55,6 +73,36 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
           ? "Please confirm your email before signing in."
           : error.message;
         throw new Error(msg);
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user?.id) {
+        await supabase.auth.signOut();
+        clearActiveCompanyCache();
+        throw new Error("Could not load your session. Please try again.");
+      }
+
+      const companyResult = await resolveCompanyIdForLogin(user.id, companyCode);
+      if ("error" in companyResult) {
+        await supabase.auth.signOut();
+        clearActiveCompanyCache();
+        clearRoleFeaturesCache();
+        throw new Error(companyResult.error);
+      }
+
+      setActiveCompanyCache(user.id, companyResult.companyId);
+
+      // Warm the role features cache so the sidebar renders immediately.
+      try {
+        const roleFeatures = await getRoleFeatures(
+          user.id,
+          companyResult.companyId
+        );
+        await logLoginSessionDebug(user, companyResult.companyId, roleFeatures);
+      } catch {
+        /* non-fatal – provider will retry */
       }
 
       toast({ title: "Welcome back!", description: "You have successfully signed in." });
@@ -128,6 +176,24 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
             </DialogHeader>
 
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-company-code" className="text-white/90">Company Code</Label>
+                <Input
+                  id="login-company-code"
+                  type="text"
+                  placeholder="Your organization code"
+                  value={companyCode}
+                  onChange={(e) => setCompanyCode(e.target.value)}
+                  onBlur={validateForm}
+                  className={`border-white/20 bg-[#06060a] text-white placeholder:text-white/40 focus-visible:ring-[#00f2ff] ${errors.companyCode ? "border-red-500" : ""}`}
+                  autoComplete="organization"
+                  spellCheck={false}
+                />
+                {errors.companyCode && (
+                  <p className="text-sm text-red-400">{errors.companyCode}</p>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="login-email" className="text-white/90">Email</Label>
                 <Input

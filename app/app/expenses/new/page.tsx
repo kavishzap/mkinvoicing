@@ -13,6 +13,7 @@
  import { useToast } from "@/hooks/use-toast";
  import { addExpense, type ExpenseLineItem, type ExpensePayload } from "@/lib/expenses-service";
  import Link from "next/link";
+ import { AppPageShell } from "@/components/app-page-shell";
 
  type LineItemRow = {
    id: string;
@@ -191,25 +192,30 @@
    }, 0);
 
   return (
-     <div className="p-6 max-w-7xl mx-auto space-y-6">
-       <div className="flex items-center justify-between gap-4">
-         <div className="flex items-center gap-3">
+     <AppPageShell
+       className="max-w-7xl"
+       subtitle="Enter date, description, and line items—totals include tax per line."
+       actions={
+         <div className="flex flex-wrap items-center gap-2">
+           <Link href="/app/expenses">
+             <Button variant="ghost" size="icon" aria-label="Back to expenses">
+               <ArrowLeft className="h-4 w-4" />
+             </Button>
+           </Link>
            <Button
-             variant="ghost"
-             size="icon"
+             variant="outline"
+             type="button"
              onClick={() => router.push("/app/expenses")}
+             disabled={saving}
            >
-             <ArrowLeft className="h-4 w-4" />
+             Cancel
            </Button>
-           <div>
-             <h1 className="text-3xl font-bold tracking-tight">Add Expense</h1>
-             <p className="text-muted-foreground mt-1">
-               Create a new expense with detailed line items
-             </p>
-           </div>
+           <Button type="button" onClick={handleSave} disabled={saving}>
+             {saving ? "Saving..." : "Save Expense"}
+           </Button>
          </div>
-       </div>
-
+       }
+     >
        <Card>
          <CardHeader>
            <CardTitle>Expense Details</CardTitle>
@@ -399,20 +405,7 @@
            </div>
          </CardContent>
        </Card>
-
-       <div className="flex justify-end gap-2">
-         <Button
-           variant="outline"
-           onClick={() => router.push("/app/expenses")}
-           disabled={saving}
-         >
-           Cancel
-         </Button>
-         <Button onClick={handleSave} disabled={saving}>
-           {saving ? "Saving..." : "Save Expense"}
-         </Button>
-       </div>
-     </div>
+     </AppPageShell>
    );
  }
 

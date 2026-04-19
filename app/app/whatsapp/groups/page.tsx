@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { AppPageShell } from "@/components/app-page-shell";
 import { getActiveCompanyId } from "@/lib/active-company";
 import { listCustomersForCompany, type CustomerRow } from "@/lib/customers-service";
 import {
@@ -257,20 +258,16 @@ export default function WhatsAppGroupsPage() {
   const pages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit gap-1" asChild>
-            <Link href="/app/whatsapp">
-              <ArrowLeft className="h-4 w-4" />
-              WhatsApp
-            </Link>
+    <AppPageShell
+      leading={
+        <Link href="/app/whatsapp">
+          <Button variant="ghost" size="icon" aria-label="Back to WhatsApp">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-3xl font-bold tracking-tight">WhatsApp groups</h1>
-          <p className="text-muted-foreground">
-            Name a group and choose which customers belong to it (company-scoped).
-          </p>
-        </div>
+        </Link>
+      }
+      subtitle="Name a group and pick which customers belong to it—groups are scoped to your active company."
+      actions={
         <Button
           onClick={openCreate}
           className="shrink-0 gap-2"
@@ -279,8 +276,8 @@ export default function WhatsAppGroupsPage() {
           <Plus className="h-4 w-4" />
           New group
         </Button>
-      </div>
-
+      }
+    >
       {companyReady === false && (
         <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
           <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
@@ -543,6 +540,6 @@ export default function WhatsAppGroupsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

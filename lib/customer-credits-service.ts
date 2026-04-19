@@ -1,8 +1,10 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type CustomerCreditBalance = {
   user_id: string;
   customer_id: string;
+  company_id: string | null;
   balance: number;
   created_at: string;
   updated_at: string;
@@ -22,24 +24,26 @@ export async function addCustomerCredit(
     throw new Error("Delta must be positive to add customer credit");
   }
 
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
 
-  // Fetch existing balance (if any)
   const { data: existing, error: fetchError } = await supabase
     .from("customer_credit_balances")
     .select("*")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("customer_id", customerId)
     .maybeSingle();
 
   if (fetchError) throw fetchError;
 
   if (!existing) {
-    // Insert new row
     const { data, error } = await supabase
       .from("customer_credit_balances")
       .insert({
         user_id: userId,
+        company_id: companyId,
         customer_id: customerId,
         balance: delta,
       })
@@ -50,13 +54,12 @@ export async function addCustomerCredit(
     return data as CustomerCreditBalance;
   }
 
-  // Update existing balance
   const newBalance = Number(existing.balance || 0) + delta;
 
   const { data, error } = await supabase
     .from("customer_credit_balances")
     .update({ balance: newBalance })
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("customer_id", customerId)
     .select("*")
     .single();
@@ -68,11 +71,11 @@ export async function addCustomerCredit(
 export async function getCustomerCredit(
   customerId: string
 ): Promise<CustomerCreditBalance | null> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("customer_credit_balances")
     .select("*")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("customer_id", customerId)
     .maybeSingle();
 
@@ -92,13 +95,14 @@ export type CustomerCreditWithCustomer = CustomerCreditBalance & {
 export async function listCustomerCredits(): Promise<
   CustomerCreditWithCustomer[]
 > {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("customer_credit_balances")
     .select(
       `
       user_id,
       customer_id,
+      company_id,
       balance,
       created_at,
       updated_at,
@@ -110,7 +114,7 @@ export async function listCustomerCredits(): Promise<
       )
     `
     )
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .order("balance", { ascending: false });
 
   if (error) throw error;
@@ -118,6 +122,7 @@ export async function listCustomerCredits(): Promise<
   return (data || []).map((row: any) => ({
     user_id: row.user_id,
     customer_id: row.customer_id,
+    company_id: row.company_id ?? null,
     balance: Number(row.balance || 0),
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -135,6 +140,7 @@ export async function listCustomerCredits(): Promise<
 export type CustomerCreditSettlement = {
   id: string;
   user_id: string;
+  company_id: string | null;
   customer_id: string;
   invoice_id: string | null;
   amount: number;
@@ -145,11 +151,13 @@ export type CustomerCreditSettlement = {
 export async function listCustomerSettlements(
   customerId: string
 ): Promise<CustomerCreditSettlement[]> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("customer_credit_settlements")
-    .select("id,user_id,customer_id,invoice_id,amount,notes,created_at")
-    .eq("user_id", userId)
+    .select(
+      "id,user_id,company_id,customer_id,invoice_id,amount,notes,created_at"
+    )
+    .eq("company_id", companyId)
     .eq("customer_id", customerId)
     .order("created_at", { ascending: false });
 
@@ -157,6 +165,7 @@ export async function listCustomerSettlements(
   return (data || []).map((row: any) => ({
     id: row.id,
     user_id: row.user_id,
+    company_id: row.company_id ?? null,
     customer_id: row.customer_id,
     invoice_id: row.invoice_id ?? null,
     amount: Number(row.amount || 0),
@@ -171,18 +180,21 @@ export async function createCustomerSettlement(options: {
   amount: number;
   notes?: string | null;
 }): Promise<void> {
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
   const { customerId, invoiceId, amount, notes } = options;
 
   if (amount <= 0) {
     throw new Error("Settlement amount must be greater than zero.");
   }
 
-  // Insert settlement row
   const { error: insertError } = await supabase
     .from("customer_credit_settlements")
     .insert({
       user_id: userId,
+      company_id: companyId,
       customer_id: customerId,
       invoice_id: invoiceId ?? null,
       amount,
@@ -191,18 +203,16 @@ export async function createCustomerSettlement(options: {
 
   if (insertError) throw insertError;
 
-  // Decrease credit balance
   const { data: existing, error: fetchError } = await supabase
     .from("customer_credit_balances")
     .select("*")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("customer_id", customerId)
     .maybeSingle();
 
   if (fetchError) throw fetchError;
 
   if (!existing) {
-    // If no balance row exists, nothing to decrement
     return;
   }
 
@@ -212,9 +222,8 @@ export async function createCustomerSettlement(options: {
   const { error: updateError } = await supabase
     .from("customer_credit_balances")
     .update({ balance: newBalance })
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("customer_id", customerId);
 
   if (updateError) throw updateError;
 }
-

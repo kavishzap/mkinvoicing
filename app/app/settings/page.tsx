@@ -33,6 +33,8 @@ import {
   type Preferences,
 } from "@/lib/settings-service";
 import { supabase } from "@/lib/supabaseClient";
+import { CompanyRolesSettings } from "@/components/company-roles-settings";
+import { AppPageShell } from "@/components/app-page-shell";
 
 type FieldErrors = Partial<
   Record<
@@ -100,6 +102,8 @@ export default function SettingsPage() {
 
   // validation errors
   const [errors, setErrors] = useState<FieldErrors>({});
+
+  const [settingsTab, setSettingsTab] = useState("profile");
 
   useEffect(() => {
     (async () => {
@@ -204,6 +208,10 @@ export default function SettingsPage() {
         logoUrl: logoUrlToSave || "",
       });
 
+      const refreshed = await fetchProfile();
+      setProfile(refreshed);
+      setLogoPreview(refreshed.logoUrl || null);
+
       toast({
         title: "Profile saved",
         description: "Your profile has been updated successfully.",
@@ -244,40 +252,60 @@ export default function SettingsPage() {
   // simple skeletons
   if (loading) {
     return (
-      <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <AppPageShell compact className="max-w-5xl">
         <div>
-          <div className="h-7 w-48 bg-muted rounded animate-pulse" />
-          <div className="h-4 w-64 bg-muted rounded mt-2 animate-pulse" />
+          <div className="h-4 w-64 max-w-full bg-muted rounded animate-pulse" />
         </div>
-        <div className="grid gap-6">
+        <div className="grid gap-4">
           <div className="h-56 bg-muted rounded animate-pulse" />
           <div className="h-56 bg-muted rounded animate-pulse" />
           <div className="h-56 bg-muted rounded animate-pulse" />
         </div>
-      </div>
+      </AppPageShell>
     );
   }
 
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Company Settings</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your company details and invoice preferences
-        </p>
-      </div>
-
-      <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+    <AppPageShell
+      compact
+      className="max-w-5xl"
+      subtitle="Update how your business shows on documents, default invoice behaviour, and who can do what."
+      actions={
+        settingsTab === "profile" ? (
+          <Button
+            onClick={handleSaveProfile}
+            size="sm"
+            disabled={savingProfile}
+          >
+            {savingProfile ? "Saving..." : "Save Profile"}
+          </Button>
+        ) : settingsTab === "preferences" ? (
+          <Button
+            onClick={handleSavePreferences}
+            size="sm"
+            disabled={savingPrefs}
+          >
+            {savingPrefs ? "Saving..." : "Save Preferences"}
+          </Button>
+        ) : null
+      }
+    >
+      <Tabs
+        value={settingsTab}
+        onValueChange={setSettingsTab}
+        className="space-y-4"
+      >
+        <TabsList className="grid w-full max-w-2xl grid-cols-3">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="preferences">Invoice Preferences</TabsTrigger>
+          <TabsTrigger value="roles">Roles</TabsTrigger>
         </TabsList>
 
         {/* ========= PROFILE TAB ========= */}
-        <TabsContent value="profile" className="space-y-6">
-          <Card>
+        <TabsContent value="profile" className="space-y-4">
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Account Type</CardTitle>
               <CardDescription>
@@ -313,7 +341,7 @@ export default function SettingsPage() {
           </Card>
 
           {profile.accountType === "company" ? (
-            <Card>
+            <Card className="gap-4 py-4">
               <CardHeader>
                 <CardTitle>Company Information</CardTitle>
                 <CardDescription>
@@ -421,7 +449,7 @@ export default function SettingsPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card>
+            <Card className="gap-4 py-4">
               <CardHeader>
                 <CardTitle>Personal Information</CardTitle>
                 <CardDescription>
@@ -502,7 +530,7 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          <Card>
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Contact Information</CardTitle>
               <CardDescription>How clients can reach you</CardDescription>
@@ -544,7 +572,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Address</CardTitle>
               <CardDescription>
@@ -590,7 +618,7 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Bank Information</CardTitle>
               <CardDescription>
@@ -636,21 +664,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-
-          <div className="flex justify-end">
-            <Button
-              onClick={handleSaveProfile}
-              size="lg"
-              disabled={savingProfile}
-            >
-              {savingProfile ? "Saving..." : "Save Profile"}
-            </Button>
-          </div>
         </TabsContent>
 
         {/* ========= PREFERENCES TAB ========= */}
-        <TabsContent value="preferences" className="space-y-6">
-          <Card>
+        <TabsContent value="preferences" className="space-y-4">
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Currency & Format</CardTitle>
               <CardDescription>
@@ -734,7 +752,7 @@ export default function SettingsPage() {
               </div>
               <div className="rounded-lg bg-muted p-4">
                 <p className="text-sm text-muted-foreground">Preview:</p>
-                <p className="text-lg font-semibold mt-1">
+                <p className="text-base font-semibold mt-1">
                   {preferences.numberPrefix}-
                   {preferences.nextNumber
                     .toString()
@@ -744,7 +762,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card> */}
 
-          <Card>
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Payment Terms</CardTitle>
               <CardDescription>
@@ -774,7 +792,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Default Notes & Terms</CardTitle>
               <CardDescription>
@@ -814,18 +832,12 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
 
-          <div className="flex justify-end">
-            <Button
-              onClick={handleSavePreferences}
-              size="lg"
-              disabled={savingPrefs}
-            >
-              {savingPrefs ? "Saving..." : "Save Preferences"}
-            </Button>
-          </div>
+        <TabsContent value="roles" className="space-y-4">
+          <CompanyRolesSettings />
         </TabsContent>
       </Tabs>
-    </div>
+    </AppPageShell>
   );
 }

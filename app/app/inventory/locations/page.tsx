@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { getActiveCompanyId } from "@/lib/active-company";
+import { AppPageShell } from "@/components/app-page-shell";
 import {
   addLocation,
   deleteLocation,
@@ -283,30 +284,26 @@ export default function InventoryLocationsPage() {
   const end = Math.min(total, page * pageSize);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit gap-1" asChild>
-            <Link href="/app/inventory">
-              <ArrowLeft className="h-4 w-4" />
-              Inventory
-            </Link>
+    <AppPageShell
+      leading={
+        <Link href="/app/inventory">
+          <Button variant="ghost" size="icon" aria-label="Back to inventory">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-3xl font-bold tracking-tight">Locations</h1>
-          <p className="text-muted-foreground">
-            Warehouses and other sites for stock (company-scoped)
-          </p>
-        </div>
+        </Link>
+      }
+      subtitle="Maintain warehouses and sites where you hold stock—each location belongs to your active company."
+      actions={
         <Button
           onClick={() => openDialog()}
-          className="gap-2 shrink-0"
+          className="shrink-0 gap-2"
           disabled={companyReady !== true}
         >
           <Plus className="h-4 w-4" />
           Add location
         </Button>
-      </div>
-
+      }
+    >
       {companyReady === false && (
         <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
           <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
@@ -640,7 +637,7 @@ export default function InventoryLocationsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 

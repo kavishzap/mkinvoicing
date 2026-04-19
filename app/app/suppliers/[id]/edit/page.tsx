@@ -17,6 +17,7 @@ import {
   type SupplierFormData,
 } from "@/lib/supplier-form";
 import { getSupplier, updateSupplier } from "@/lib/suppliers-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 export default function EditSupplierPage() {
   const params = useParams<{ id: string }>();
@@ -97,79 +98,83 @@ export default function EditSupplierPage() {
 
   if (!id) {
     return (
-      <div className="p-6">
+      <AppPageShell>
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
             Invalid link.
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (!loading && notFound) {
     return (
-      <div className="p-6 max-w-lg mx-auto">
+      <AppPageShell className="max-w-lg">
         <Card>
-          <CardContent className="py-12 text-center space-y-4">
+          <CardContent className="space-y-4 py-12 text-center">
             <p className="font-medium">Supplier not found</p>
             <Button asChild>
               <Link href="/app/suppliers">Back to suppliers</Link>
             </Button>
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6 text-left">
-        <div className="h-10 w-64 bg-muted animate-pulse rounded" />
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl text-left`}>
+        <div className="h-10 w-64 animate-pulse rounded bg-muted" />
         <div className="grid gap-6 lg:grid-cols-2">
-          <div className="h-72 rounded-lg bg-muted animate-pulse" />
-          <div className="h-72 rounded-lg bg-muted animate-pulse" />
+          <div className="h-72 animate-pulse rounded-lg bg-muted" />
+          <div className="h-72 animate-pulse rounded-lg bg-muted" />
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
-          <div className="h-48 rounded-lg bg-muted animate-pulse" />
-          <div className="h-48 rounded-lg bg-muted animate-pulse" />
+          <div className="h-48 animate-pulse rounded-lg bg-muted" />
+          <div className="h-48 animate-pulse rounded-lg bg-muted" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 text-left">
-      <div className="flex items-center gap-4">
-        <Link href="/app/suppliers">
-          <Button variant="ghost" size="icon" type="button">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl text-left"
+      subtitle="Update this supplier’s contact or billing details, then save your changes."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/app/suppliers">
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              aria-label="Back to suppliers"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button variant="outline" type="button" asChild>
+            <Link href="/app/suppliers">Cancel</Link>
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Edit supplier</h1>
-          <p className="text-muted-foreground mt-1">
-            Update vendor details and save.
-          </p>
+          <Button type="submit" form="supplier-edit-form" disabled={saving}>
+            {saving ? "Saving…" : "Save changes"}
+          </Button>
         </div>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
+      }
+    >
+      <form
+        id="supplier-edit-form"
+        onSubmit={handleSubmit}
+        className="space-y-6"
+      >
         <SupplierFormFields
           formData={formData}
           setFormData={setFormData}
           errors={errors}
         />
-
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-6">
-          <Button variant="outline" type="button" asChild>
-            <Link href="/app/suppliers">Cancel</Link>
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
-          </Button>
-        </div>
       </form>
-    </div>
+    </AppPageShell>
   );
 }

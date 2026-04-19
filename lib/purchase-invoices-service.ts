@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 import type { Profile } from "@/lib/settings-service";
 import type { SupplierRow } from "@/lib/suppliers-service";
 import type { SalesOrderClientInfo } from "@/lib/sales-orders-service";
@@ -156,8 +157,10 @@ export async function createPurchaseInvoice(
   params: CreatePurchaseInvoicePayload
 ): Promise<string> {
   const { items, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase.rpc("create_purchase_invoice", {
     p_invoice: {
+      company_id: companyId,
       issue_date: inv.issue_date,
       due_date: inv.due_date,
       status: inv.status,
@@ -207,6 +210,7 @@ export async function listPurchaseInvoices(opts?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: PurchaseInvoiceListRow[]; total: number }> {
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
@@ -218,6 +222,7 @@ export async function listPurchaseInvoices(opts?: {
       "id, number, issue_date, due_date, status, currency, bill_to_snapshot, total, amount_paid, amount_due",
       { count: "exact" }
     )
+    .eq("company_id", companyId)
     .order("issue_date", { ascending: false })
     .range(from, to);
 
@@ -260,6 +265,7 @@ export async function listPurchaseInvoices(opts?: {
 export async function getPurchaseInvoice(
   id: string
 ): Promise<PurchaseInvoiceDetail | null> {
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("purchase_invoices")
     .select(
@@ -273,6 +279,7 @@ export async function getPurchaseInvoice(
     `
     )
     .eq("id", id)
+    .eq("company_id", companyId)
     .single();
 
   if (error) return null;
@@ -348,7 +355,12 @@ export async function getPurchaseInvoice(
 }
 
 export async function deletePurchaseInvoice(id: string): Promise<void> {
-  const { error } = await supabase.from("purchase_invoices").delete().eq("id", id);
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("purchase_invoices")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
   if (error) throw error;
 }
 
@@ -366,6 +378,7 @@ export async function updatePurchaseInvoice(
   params: UpdatePurchaseInvoicePayload
 ): Promise<void> {
   const { items, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
   const subtotal = items.reduce(
     (s, it) => s + Number(it.quantity) * Number(it.unit_price),
     0
@@ -413,7 +426,8 @@ export async function updatePurchaseInvoice(
         inv.created_from_purchase_order_id ?? null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (upErr) throw upErr;
 
@@ -429,6 +443,7 @@ export async function updatePurchaseInvoice(
     const sortOrder = it.sort_order ?? idx;
     return {
       purchase_invoice_id: id,
+      company_id: companyId,
       item: it.item,
       description: it.description ?? null,
       quantity: it.quantity,
@@ -458,11 +473,17 @@ export async function updatePurchaseInvoicePayment(
     status?: PurchaseInvoiceStatus;
   }
 ): Promise<void> {
-  const { error } = await supabase.from("purchase_invoices").update(payment).eq("id", id);
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("purchase_invoices")
+    .update(payment)
+    .eq("id", id)
+    .eq("company_id", companyId);
   if (error) throw error;
 }
 
 export async function cancelPurchaseInvoice(id: string): Promise<void> {
+  const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("purchase_invoices")
     .update({
@@ -470,6 +491,7 @@ export async function cancelPurchaseInvoice(id: string): Promise<void> {
       amount_paid: 0,
       amount_due: 0,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
   if (error) throw error;
 }

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type ExpenseLineItem = {
   item: string;
@@ -38,11 +39,11 @@ const COLUMNS =
 
 /** Fetch a single expense by id (scoped to current user) */
 export async function getExpense(id: string): Promise<ExpenseRow> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("expenses")
     .select(COLUMNS)
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("id", id)
     .single();
 
@@ -60,7 +61,7 @@ export async function listExpenses(opts?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: ExpenseRow[]; total: number }> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
@@ -69,7 +70,7 @@ export async function listExpenses(opts?: {
   let q = supabase
     .from("expenses")
     .select(COLUMNS, { count: "exact" })
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .order("expense_date", { ascending: false })
     .order("created_at", { ascending: false })
     .range(from, to);
@@ -90,7 +91,10 @@ export async function listExpenses(opts?: {
 
 /** Create expense */
 export async function addExpense(payload: ExpensePayload): Promise<ExpenseRow> {
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
   const lineItems = payload.line_items ?? [];
   const amount =
     lineItems.length > 0
@@ -105,6 +109,7 @@ export async function addExpense(payload: ExpensePayload): Promise<ExpenseRow> {
 
   const insert = {
     user_id: userId,
+    company_id: companyId,
     description,
     amount,
     currency: payload.currency ?? "MUR",
@@ -129,7 +134,7 @@ export async function updateExpense(
   id: string,
   payload: Partial<ExpensePayload>
 ): Promise<ExpenseRow> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const update: Record<string, unknown> = {};
   if (payload.line_items !== undefined) {
@@ -157,6 +162,7 @@ export async function updateExpense(
     .from("expenses")
     .update(update)
     .eq("id", id)
+    .eq("company_id", companyId)
     .select(COLUMNS)
     .single();
 
@@ -167,9 +173,13 @@ export async function updateExpense(
 
 /** Delete by id */
 export async function deleteExpense(id: string): Promise<void> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
 
-  const { error } = await supabase.from("expenses").delete().eq("id", id);
+  const { error } = await supabase
+    .from("expenses")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }

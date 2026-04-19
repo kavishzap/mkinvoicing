@@ -4,22 +4,31 @@ import type React from "react";
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
-import { Eye, EyeOff } from "lucide-react"; // ✅ added icons
+import {
+  clearActiveCompanyCache,
+  resolveCompanyIdForLogin,
+  setActiveCompanyCache,
+} from "@/lib/active-company";
+import {
+  clearRoleFeaturesCache,
+  getRoleFeatures,
+} from "@/lib/role-features-service";
+import { logLoginSessionDebug } from "@/lib/login-session-debug-log";
+import {
+  authInputClass,
+  authLabelClass,
+  authLinkClass,
+  authMutedLinkClass,
+  authPanelClass,
+  authPrimaryButtonClass,
+} from "@/lib/auth-ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,14 +36,21 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPwd, setShowPwd] = useState(false); // ✅ added state
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>(
-    {}
-  );
+  const [companyCode, setCompanyCode] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    companyCode?: string;
+  }>({});
   const [isLoading, setIsLoading] = useState(false);
 
   const validateForm = () => {
-    const newErrors: { email?: string; password?: string } = {};
+    const newErrors: {
+      email?: string;
+      password?: string;
+      companyCode?: string;
+    } = {};
 
     if (!email) {
       newErrors.email = "Email is required";
@@ -44,6 +60,10 @@ export default function LoginPage() {
 
     if (!password) {
       newErrors.password = "Password is required";
+    }
+
+    if (!companyCode.trim()) {
+      newErrors.companyCode = "Company code is required";
     }
 
     setErrors(newErrors);
@@ -56,6 +76,8 @@ export default function LoginPage() {
 
     try {
       setIsLoading(true);
+      clearActiveCompanyCache();
+      clearRoleFeaturesCache();
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -69,16 +91,50 @@ export default function LoginPage() {
         throw new Error(msg);
       }
 
+      const userId = data.user?.id;
+      if (!userId) {
+        await supabase.auth.signOut();
+        clearActiveCompanyCache();
+        throw new Error("Could not load your session. Please try again.");
+      }
+
+      const companyResult = await resolveCompanyIdForLogin(userId, companyCode);
+      if ("error" in companyResult) {
+        await supabase.auth.signOut();
+        clearActiveCompanyCache();
+        clearRoleFeaturesCache();
+        throw new Error(companyResult.error);
+      }
+
+      setActiveCompanyCache(userId, companyResult.companyId);
+
+      try {
+        const roleFeatures = await getRoleFeatures(
+          userId,
+          companyResult.companyId
+        );
+        if (data.user) {
+          await logLoginSessionDebug(
+            data.user,
+            companyResult.companyId,
+            roleFeatures
+          );
+        }
+      } catch {
+        /* non-fatal – provider will retry */
+      }
+
       toast({
         title: "Welcome back!",
         description: "You have successfully signed in.",
       });
 
       router.push("/app");
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: "Sign-in failed",
-        description: err?.message ?? "Invalid email or password.",
+        description:
+          err instanceof Error ? err.message : "Invalid email or password.",
         variant: "destructive",
       });
     } finally {
@@ -87,122 +143,134 @@ export default function LoginPage() {
   };
 
   return (
-    <Card className="shadow-lg border-border/50 max-w-md mx-auto">
-      {/* Brand Header */}
-      <CardHeader className="space-y-2">
-        <div className="flex flex-col items-center text-center">
-          <div className="pt-6 pb-2">
-            <Link href="/main" className="flex items-center justify-center gap-2 hover:opacity-80 transition">
-              <Image
-                src={Logo}
-                alt="MoLedger logo"
-                width={32}
-                height={32}
-                className="rounded-md shadow-sm"
-                priority
-              />
-              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
-            </Link>
-          </div>
-          <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
-          <CardDescription>
-            Enter your credentials to access your account
-          </CardDescription>
-          
-        </div>
-      </CardHeader>
-
-      <form onSubmit={handleSubmit} noValidate>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onBlur={validateForm}
-              className={errors.email ? "border-destructive" : ""}
-              autoComplete="email"
-            />
-            {errors.email && (
-              <p className="text-sm text-destructive">{errors.email}</p>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPwd ? "text" : "password"} // ✅ toggle type
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onBlur={validateForm}
-                className={
-                  errors.password ? "border-destructive pr-10" : "pr-10"
-                }
-                autoComplete="current-password"
-              />
-              <button
-                type="button"
-                aria-label={showPwd ? "Hide password" : "Show password"}
-                className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowPwd((s) => !s)} // ✅ toggle logic
-              >
-                {showPwd ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-            {errors.password && (
-              <p className="text-sm text-destructive">{errors.password}</p>
-            )}
-          </div>
-
-          <div className="flex items-center justify-end mb-3">
-            <Link
-              href="/auth/forgot-password"
-              className="text-sm text-primary hover:underline"
-            >
-              Forgot password?
-            </Link>
-          </div>
-        </CardContent>
-
-        <CardFooter className="flex flex-col space-y-4">
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? "Signing in..." : "Sign in"}
-          </Button>
-          <p className="text-sm text-center text-muted-foreground">
-            Don&apos;t have an account?{" "}
-            <Link
-              href="https://mojhoa.com"
-              className="text-primary hover:underline font-medium"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Contact admin
-            </Link>
-          </p>
-        </CardFooter>
-      </form>
-      <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <Link href="/main" className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition">
+    <div className={authPanelClass}>
+      <div className="mb-6 flex flex-col items-center text-center">
+        <Link
+          href="/main"
+          className="mb-5 inline-flex flex-col items-center gap-2 transition-opacity hover:opacity-90"
+        >
           <Image
-            src={Logo}
-            alt="MoLedger logo small"
-            width={18}
-            height={18}
-            className="rounded-sm"
+            src="/logo2.png"
+            alt="MoLedger"
+            width={160}
+            height={160}
+            className="h-11 w-auto object-contain sm:h-12"
+            priority
           />
-          <span>Back to home</span>
         </Link>
+        <h1 className="text-2xl font-bold tracking-tight">Sign in</h1>
+        <p className="mt-2 text-sm text-white/60">
+          Enter your credentials to access your account
+        </p>
       </div>
-    </Card>
+
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="company-code" className={authLabelClass}>
+            Company code
+          </Label>
+          <Input
+            id="company-code"
+            type="text"
+            placeholder="Your organization code"
+            value={companyCode}
+            onChange={(e) => setCompanyCode(e.target.value)}
+            onBlur={validateForm}
+            className={`${authInputClass} ${errors.companyCode ? "border-red-500" : ""}`}
+            autoComplete="organization"
+            spellCheck={false}
+          />
+          {errors.companyCode && (
+            <p className="text-sm text-red-400">{errors.companyCode}</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="email" className={authLabelClass}>
+            Email
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="name@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onBlur={validateForm}
+            className={`${authInputClass} ${errors.email ? "border-red-500" : ""}`}
+            autoComplete="email"
+          />
+          {errors.email && (
+            <p className="text-sm text-red-400">{errors.email}</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="password" className={authLabelClass}>
+            Password
+          </Label>
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPwd ? "text" : "password"}
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onBlur={validateForm}
+              className={`${authInputClass} pr-10 ${errors.password ? "border-red-500" : ""}`}
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              aria-label={showPwd ? "Hide password" : "Show password"}
+              className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+              onClick={() => setShowPwd((s) => !s)}
+            >
+              {showPwd ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+          {errors.password && (
+            <p className="text-sm text-red-400">{errors.password}</p>
+          )}
+        </div>
+
+        <div className="flex justify-end">
+          <Link href="/auth/forgot-password" className={authLinkClass}>
+            Forgot password?
+          </Link>
+        </div>
+
+        <Button
+          type="submit"
+          className={authPrimaryButtonClass}
+          disabled={isLoading}
+        >
+          {isLoading ? "Signing in…" : "Sign in"}
+        </Button>
+
+        <p className="text-center text-sm text-white/55">
+          Don&apos;t have an account?{" "}
+          <Link
+            href="https://mojhoa.com"
+            className="font-medium text-[#00f2ff] underline-offset-2 hover:underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Contact admin
+          </Link>
+        </p>
+
+        <Link
+          href="/main"
+          className={`flex items-center justify-center gap-2 ${authMutedLinkClass}`}
+        >
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          Back to home
+        </Link>
+      </form>
+    </div>
   );
 }

@@ -1,10 +1,10 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   Plus,
-  Search,
   Eye,
   Pencil,
   Trash2,
@@ -14,7 +14,6 @@ import {
   FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -23,14 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +39,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DataTable } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { QuotationStatusBadge } from "@/components/quotation-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -56,6 +49,7 @@ import {
   type QuotationListRow,
   type QuotationStatus,
 } from "@/lib/quotations-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function QuotationsPage() {
   const router = useRouter();
@@ -132,9 +126,160 @@ export default function QuotationsPage() {
       year: "numeric",
     });
 
-  const handleDuplicate = (id: string) => {
-    router.push(`/app/quotations/new?duplicate=${encodeURIComponent(id)}`);
-  };
+  const handleDuplicate = useCallback(
+    (id: string) => {
+      router.push(`/app/quotations/new?duplicate=${encodeURIComponent(id)}`);
+    },
+    [router],
+  );
+
+  const columns = useMemo<ColumnDef<QuotationListRow>[]>(
+    () => [
+      {
+        id: "number",
+        accessorFn: (r) => r.number,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Quotation #" />
+        ),
+        meta: {
+          searchValue: (row: QuotationListRow) =>
+            [row.number, row.clientName].filter(Boolean).join(" "),
+        },
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.number}</span>
+        ),
+      },
+      {
+        id: "clientName",
+        accessorFn: (r) => r.clientName ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Client" />
+        ),
+        meta: {
+          searchValue: (row: QuotationListRow) => row.clientName ?? "",
+        },
+        cell: ({ row }) => row.original.clientName || "—",
+      },
+      {
+        id: "issueDate",
+        accessorFn: (r) => new Date(r.issueDate).getTime(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Issue Date" />
+        ),
+        meta: { searchValue: (row: QuotationListRow) => row.issueDate },
+        cell: ({ row }) => formatDate(row.original.issueDate),
+      },
+      {
+        id: "validUntil",
+        accessorFn: (r) => new Date(r.validUntil).getTime(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Valid Until" />
+        ),
+        meta: { searchValue: (row: QuotationListRow) => row.validUntil },
+        cell: ({ row }) => formatDate(row.original.validUntil),
+      },
+      {
+        id: "status",
+        accessorFn: (r) => r.status,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Status" />
+        ),
+        meta: { searchValue: (row: QuotationListRow) => row.status },
+        cell: ({ row }) => (
+          <QuotationStatusBadge status={row.original.status} />
+        ),
+      },
+      {
+        id: "total",
+        accessorFn: (r) => Number(r.total),
+        header: ({ column }) => (
+          <div className="flex justify-end">
+            <DataTableColumnHeader column={column} title="Total" />
+          </div>
+        ),
+        meta: {
+          thClassName: "text-right",
+          tdClassName: "text-right font-medium",
+          searchValue: (row: QuotationListRow) =>
+            String(row.total) + " " + row.currency,
+        },
+        cell: ({ row }) =>
+          formatCurrency(row.original.total, row.original.currency),
+      },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Actions</span>,
+        meta: {
+          searchable: false,
+          thClassName: "w-[120px] text-right",
+          tdClassName: "text-right",
+        },
+        cell: ({ row }) => {
+          const q = row.original;
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => router.push(`/app/quotations/${q.id}`)}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  View
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(`/app/quotations/${q.id}/edit`)
+                  }
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleDuplicate(q.id)}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Duplicate (prefill new)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(
+                      `/app/sales-orders/new?convertFromQuotation=${encodeURIComponent(q.id)}`,
+                    )
+                  }
+                >
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  Convert to Sales Order
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(
+                      `/app/invoices/new?convertFromQuotation=${encodeURIComponent(q.id)}`,
+                    )
+                  }
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  Convert to Invoice
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setDeleteId(q.id)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          );
+        },
+      },
+    ],
+    [router, handleDuplicate],
+  );
 
   const confirmDelete = async () => {
     if (!deleteId) return;
@@ -156,16 +301,14 @@ export default function QuotationsPage() {
     }
   };
 
+  const quotationSubtitle =
+    "Send price proposals before you invoice—convert accepted quotes to orders or invoices when you’re ready.";
+
   if (isLoading && rows.length === 0) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Quotations</h1>
-            <p className="text-muted-foreground mt-1">
-              Create and manage sales quotations
-            </p>
-          </div>
+      <AppPageShell
+        subtitle={quotationSubtitle}
+        actions={
           <Button
             onClick={() => router.push("/app/quotations/new")}
             className="gap-2"
@@ -173,24 +316,20 @@ export default function QuotationsPage() {
             <Plus className="h-4 w-4" />
             Create Quotation
           </Button>
-        </div>
+        }
+      >
         <Card className="p-6">
           <div className="h-40 rounded bg-muted animate-pulse" />
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (!isLoading && total === 0 && !hasActiveFilters) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Quotations</h1>
-            <p className="text-muted-foreground mt-1">
-              Create and manage sales quotations
-            </p>
-          </div>
+      <AppPageShell
+        subtitle={quotationSubtitle}
+        actions={
           <Button
             onClick={() => router.push("/app/quotations/new")}
             className="gap-2"
@@ -198,9 +337,10 @@ export default function QuotationsPage() {
             <Plus className="h-4 w-4" />
             Create Quotation
           </Button>
-        </div>
+        }
+      >
         <Card className="p-12 text-center text-muted-foreground">
-          <p className="text-lg font-medium text-foreground mb-2">
+          <p className="text-base font-medium text-foreground mb-2">
             No quotations yet
           </p>
           <p className="mb-4">Create your first quotation to get started.</p>
@@ -209,19 +349,14 @@ export default function QuotationsPage() {
             Create Quotation
           </Button>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Quotations</h1>
-          <p className="text-muted-foreground mt-1">
-            Create, view, edit, and delete quotations
-          </p>
-        </div>
+    <AppPageShell
+      subtitle={quotationSubtitle}
+      actions={
         <Button
           onClick={() => router.push("/app/quotations/new")}
           className="gap-2"
@@ -229,196 +364,101 @@ export default function QuotationsPage() {
           <Plus className="h-4 w-4" />
           Create Quotation
         </Button>
-      </div>
-
+      }
+    >
       <Card className="p-6">
-        <div className="flex flex-col lg:flex-row gap-4 mb-6">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search by quotation # or client..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as QuotationStatus | "all")}
-          >
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Quotation #</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Issue Date</TableHead>
-                <TableHead>Valid Until</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead className="text-right w-[120px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-10 text-center text-sm text-muted-foreground"
-                  >
-                    {hasActiveFilters ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <div>No quotations match your filters.</div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSearchQuery("");
-                            setStatusFilter("all");
-                          }}
-                        >
-                          Clear filters
-                        </Button>
-                      </div>
-                    ) : (
-                      "No quotations."
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((q) => (
-                  <TableRow key={q.id}>
-                    <TableCell className="font-medium">{q.number}</TableCell>
-                    <TableCell>{q.clientName || "—"}</TableCell>
-                    <TableCell>{formatDate(q.issueDate)}</TableCell>
-                    <TableCell>{formatDate(q.validUntil)}</TableCell>
-                    <TableCell>
-                      <QuotationStatusBadge status={q.status} />
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(q.total, q.currency)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Open menu</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => router.push(`/app/quotations/${q.id}`)}
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              router.push(`/app/quotations/${q.id}/edit`)
-                            }
-                          >
-                            <Pencil className="h-4 w-4 mr-2" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleDuplicate(q.id)}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Duplicate (prefill new)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              router.push(
-                                `/app/sales-orders/new?convertFromQuotation=${encodeURIComponent(q.id)}`
-                              )
-                            }
-                          >
-                            <ShoppingCart className="h-4 w-4 mr-2" />
-                            Convert to Sales Order
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              router.push(
-                                `/app/invoices/new?convertFromQuotation=${encodeURIComponent(q.id)}`
-                              )
-                            }
-                          >
-                            <FileText className="h-4 w-4 mr-2" />
-                            Convert to Invoice
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => setDeleteId(q.id)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Rows per page:</span>
+        <DataTable
+          columns={columns}
+          data={rows}
+          manualFiltering
+          searchPlaceholder="Search by quotation # or client…"
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          toolbarLeft={
             <Select
-              value={String(itemsPerPage)}
-              onValueChange={(v) => setItemsPerPage(Number(v))}
+              value={statusFilter}
+              onValueChange={(v) =>
+                setStatusFilter(v as QuotationStatus | "all")
+              }
             >
-              <SelectTrigger className="w-[70px]">
-                <SelectValue />
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Page {currentPage} of {totalPages}
-            </span>
-            <div className="flex gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setCurrentPage((p) => Math.min(totalPages, p + 1))
-                }
-                disabled={currentPage >= totalPages}
-              >
-                Next
-              </Button>
+          }
+          getRowId={(r) => r.id}
+          emptyMessage={
+            hasActiveFilters ? (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div>No quotations match your filters.</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            ) : (
+              "No quotations."
+            )
+          }
+          footer={
+            <div className="flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Rows per page:
+                </span>
+                <Select
+                  value={String(itemsPerPage)}
+                  onValueChange={(v) => setItemsPerPage(Number(v))}
+                >
+                  <SelectTrigger className="w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
+                    disabled={currentPage >= totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          }
+        />
       </Card>
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
@@ -445,6 +485,6 @@ export default function QuotationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </AppPageShell>
   );
 }

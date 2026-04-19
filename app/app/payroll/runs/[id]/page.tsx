@@ -45,6 +45,7 @@ import {
 import { fetchProfile } from "@/lib/settings-service";
 import { generatePayslipPDF } from "@/lib/payslip-pdf";
 import { useToast } from "@/hooks/use-toast";
+import { AppPageShell } from "@/components/app-page-shell";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "MUR" }).format(amount);
@@ -145,20 +146,22 @@ export default function PayrollRunDetailPage() {
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center justify-center min-h-[200px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <AppPageShell className="max-w-7xl">
+        <div className="flex min-h-[200px] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </AppPageShell>
     );
   }
 
   if (!data) {
     return (
-      <div className="p-6">
+      <AppPageShell className="max-w-7xl">
         <p className="text-muted-foreground">Payroll run not found.</p>
         <Button variant="link" asChild>
           <Link href="/app/payroll/runs">Back to runs</Link>
         </Button>
-      </div>
+      </AppPageShell>
     );
   }
 
@@ -166,32 +169,24 @@ export default function PayrollRunDetailPage() {
   const paidCount = data.payslips.length - unpaidCount;
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/app/payroll/runs">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              {MONTH_NAMES[data.month - 1]} {data.year}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              {data.payslips.length} payslip(s) · {paidCount} paid · {unpaidCount} unpaid
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <AppPageShell
+      className="max-w-7xl"
+      leading={
+        <Link href="/app/payroll/runs">
+          <Button variant="ghost" size="icon" aria-label="Back to payroll runs">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle={`${MONTH_NAMES[data.month - 1]} ${data.year} · ${data.payslips.length} payslip(s), ${paidCount} paid, ${unpaidCount} unpaid — download PDFs or mark staff as paid.`}
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Total Gross</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xl font-bold">{formatCurrency(data.total_gross)}</p>
+            <p className="text-lg font-bold">{formatCurrency(data.total_gross)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -199,7 +194,7 @@ export default function PayrollRunDetailPage() {
             <CardTitle className="text-sm font-medium">Total Deductions</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xl font-bold">{formatCurrency(data.total_deductions)}</p>
+            <p className="text-lg font-bold">{formatCurrency(data.total_deductions)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -207,7 +202,7 @@ export default function PayrollRunDetailPage() {
             <CardTitle className="text-sm font-medium">Total Net</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xl font-bold text-green-600 dark:text-green-400">
+            <p className="text-lg font-bold text-green-600 dark:text-green-400">
               {formatCurrency(data.total_net)}
             </p>
           </CardContent>
@@ -344,6 +339,6 @@ export default function PayrollRunDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

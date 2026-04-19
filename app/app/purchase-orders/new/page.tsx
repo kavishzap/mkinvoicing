@@ -60,6 +60,7 @@ import {
   type PurchaseOrderLinePayload,
   type PurchaseOrderStatus,
 } from "@/lib/purchase-orders-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -492,9 +493,13 @@ function NewPurchaseOrderPageContent() {
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
   const showLogo = (profile as { logoUrl?: string })?.logoUrl;
 
+  const headerSubtitle = duplicatedFromNumber
+    ? `Copied from ${duplicatedFromNumber}. Next number ${purchaseOrderNumber} — save when you are ready to create a new order.`
+    : `Next number ${purchaseOrderNumber}. Choose a supplier, add line items, then save.`;
+
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -511,32 +516,22 @@ function NewPurchaseOrderPageContent() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/app/purchase-orders">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={headerSubtitle}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/app/purchase-orders">
+            <Button variant="ghost" size="icon" aria-label="Back to purchase orders">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={doCreatePurchaseOrder} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save & View"}
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Create Purchase Order
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Next number: <span className="font-medium">{purchaseOrderNumber}</span>
-          </p>
-          {duplicatedFromNumber && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Filled from{" "}
-              <span className="font-medium text-foreground">
-                {duplicatedFromNumber}
-              </span>{" "}
-              — save when ready to create a new purchase order.
-            </p>
-          )}
         </div>
-      </div>
-
+      }
+    >
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1107,7 +1102,7 @@ function NewPurchaseOrderPageContent() {
                 </div>
               </div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1116,12 +1111,6 @@ function NewPurchaseOrderPageContent() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={doCreatePurchaseOrder} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save & View"}
-        </Button>
       </div>
 
       <Dialog
@@ -1183,7 +1172,7 @@ function NewPurchaseOrderPageContent() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 
@@ -1191,7 +1180,7 @@ export default function NewPurchaseOrderPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
+        <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="h-56 rounded bg-muted animate-pulse" />

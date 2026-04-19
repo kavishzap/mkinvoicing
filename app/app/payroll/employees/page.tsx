@@ -30,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AppPageShell } from "@/components/app-page-shell";
 import {
   listEmployees,
   addEmployee,
@@ -252,25 +253,22 @@ export default function PayrollEmployeesPage() {
   const end = Math.min(total, page * pageSize);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/app/payroll">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Employees</h1>
-            <p className="text-muted-foreground mt-1">Manage employees and salary setup</p>
-          </div>
-        </div>
+    <AppPageShell
+      leading={
+        <Link href="/app/payroll">
+          <Button variant="ghost" size="icon" aria-label="Back to payroll">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle="Add or edit employees, set salaries, and manage advances for payroll runs."
+      actions={
         <Button onClick={() => openEmployeeDialog()} className="gap-2">
           <Plus className="h-4 w-4" />
           Add Employee
         </Button>
-      </div>
-
+      }
+    >
       <Card>
         <CardContent className="pt-6 space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -537,7 +535,7 @@ export default function PayrollEmployeesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 

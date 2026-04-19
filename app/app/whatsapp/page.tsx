@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { AppPageShell } from "@/components/app-page-shell";
 
 const cards = [
   {
@@ -30,14 +31,7 @@ export default function WhatsAppHubPage() {
   const router = useRouter();
 
   return (
-    <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">WhatsApp</h1>
-        <p className="text-muted-foreground mt-1">
-          Customer broadcast groups and catalogue posts for messaging
-        </p>
-      </div>
-
+    <AppPageShell subtitle="Set up broadcast groups and image posts, then share them to WhatsApp when you’re ready.">
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {cards.map((card) => {
           const Icon = card.icon;
@@ -51,7 +45,7 @@ export default function WhatsAppHubPage() {
             >
               <CardHeader className="flex flex-row items-start justify-between space-y-0">
                 <div className="space-y-1.5">
-                  <CardTitle className="flex items-center gap-2 text-lg">
+                  <CardTitle className="flex items-center gap-2 text-base">
                     <MessageCircle className="h-5 w-5 text-emerald-600" />
                     {card.title}
                   </CardTitle>
@@ -65,6 +59,6 @@ export default function WhatsAppHubPage() {
           );
         })}
       </div>
-    </div>
+    </AppPageShell>
   );
 }

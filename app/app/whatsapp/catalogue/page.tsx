@@ -35,6 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { AppPageShell } from "@/components/app-page-shell";
 import { getActiveCompanyId } from "@/lib/active-company";
 import { stripDataUrlPrefix } from "@/lib/products-service";
 import {
@@ -332,27 +333,22 @@ export default function WhatsAppCataloguePage() {
   const pages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <Button variant="ghost" size="sm" className="-ml-2 w-fit gap-1" asChild>
-            <Link href="/app/whatsapp">
-              <ArrowLeft className="h-4 w-4" />
-              WhatsApp
-            </Link>
+    <AppPageShell
+      leading={
+        <Link href="/app/whatsapp">
+          <Button variant="ghost" size="icon" aria-label="Back to WhatsApp">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-3xl font-bold tracking-tight">WhatsApp catalogue</h1>
-          <p className="text-muted-foreground">
-            Create posts with an image and description. WhatsApp only supports prefilled{" "}
-            <strong>text</strong> in links—attach the image after the chat opens (download + paperclip).
-          </p>
-        </div>
+        </Link>
+      }
+      subtitle="Create catalogue posts with an image and description; share links prefill text only—add the image in WhatsApp after the chat opens."
+      actions={
         <Button onClick={openCreate} className="gap-2 shrink-0" disabled={companyReady !== true}>
           <Plus className="h-4 w-4" />
           New post
         </Button>
-      </div>
-
+      }
+    >
       {companyReady === false && (
         <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
           <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
@@ -661,6 +657,6 @@ export default function WhatsAppCataloguePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type InvoiceStatus = "unpaid" | "paid" | "cancelled";
 export type PaymentMethod = "Cash" | "Card Payment" | "Credit Facilities" | "Bank Transfer" | null;
@@ -104,6 +105,7 @@ function mapPaymentToBreakdown(pm: PaymentMethod): keyof SalesBreakdown {
 }
 
 export async function getSalesReportData(filters: SalesReportFilters): Promise<SalesReportData> {
+  const companyId = await requireActiveCompanyId();
   let q = supabase
     .from("invoices")
     .select(
@@ -113,6 +115,7 @@ export async function getSalesReportData(filters: SalesReportFilters): Promise<S
       invoice_items ( item, quantity, unit_price, tax_percent )
     `
     )
+    .eq("company_id", companyId)
     .neq("status", "cancelled")
     .gte("issue_date", filters.startDate)
     .lte("issue_date", filters.endDate)

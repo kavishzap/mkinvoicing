@@ -43,6 +43,7 @@ import {
   type CustomerRow,
   type CustomerPayload,
 } from "@/lib/customers-service";
+import { AppPageShell } from "@/components/app-page-shell";
 // Customers chart removed per request
 
 type FormData = {
@@ -263,21 +264,15 @@ export default function CustomersPage() {
   const err = (k: keyof FormData) => (errors[k] ? "border-destructive" : "");
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your customer database
-          </p>
-        </div>
+    <AppPageShell
+      subtitle="Keep everyone you sell to in one place—use these records when you quote, invoice, or follow up."
+      actions={
         <Button onClick={() => handleOpenDialog()} className="gap-2">
           <Plus className="h-4 w-4" />
           Add Customer
         </Button>
-      </div>
-
+      }
+    >
       {/* Search + filters OR skeleton */}
       {loading ? (
         <SkeletonFilters />
@@ -527,7 +522,7 @@ export default function CustomersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type PaymentType = "monthly" | "daily" | "hourly";
 export type EmployeeStatus = "active" | "inactive";
@@ -57,7 +58,7 @@ export async function listEmployees(opts?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: EmployeeRow[]; total: number }> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 50);
   const from = (page - 1) * pageSize;
@@ -66,7 +67,7 @@ export async function listEmployees(opts?: {
   let q = supabase
     .from("employees")
     .select(COLUMNS, { count: "exact" })
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .order("full_name", { ascending: true })
     .range(from, to);
 
@@ -90,11 +91,11 @@ export async function listEmployees(opts?: {
 }
 
 export async function getEmployee(id: string): Promise<EmployeeRow | null> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("employees")
     .select(COLUMNS)
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("id", id)
     .single();
 
@@ -103,9 +104,13 @@ export async function getEmployee(id: string): Promise<EmployeeRow | null> {
 }
 
 export async function addEmployee(payload: EmployeePayload): Promise<EmployeeRow> {
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
   const insert = {
     user_id: userId,
+    company_id: companyId,
     full_name: payload.full_name.trim(),
     phone: payload.phone?.trim() || null,
     email: payload.email?.trim() || null,
@@ -133,7 +138,7 @@ export async function updateEmployee(
   id: string,
   payload: Partial<EmployeePayload>
 ): Promise<EmployeeRow> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
   const update: Record<string, unknown> = {};
   if (payload.full_name !== undefined) update.full_name = payload.full_name.trim();
   if (payload.phone !== undefined) update.phone = payload.phone?.trim() || null;
@@ -153,6 +158,7 @@ export async function updateEmployee(
     .from("employees")
     .update(update)
     .eq("id", id)
+    .eq("company_id", companyId)
     .select(COLUMNS)
     .single();
 
@@ -161,7 +167,11 @@ export async function updateEmployee(
 }
 
 export async function deleteEmployee(id: string): Promise<void> {
-  await getUserId();
-  const { error } = await supabase.from("employees").delete().eq("id", id);
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("employees")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
   if (error) throw error;
 }

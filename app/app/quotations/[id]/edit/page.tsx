@@ -57,6 +57,7 @@ import {
   type QuotationLinePayload,
   type QuotationStatus,
 } from "@/lib/quotations-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -493,7 +494,7 @@ export default function EditQuotationPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -510,23 +511,26 @@ export default function EditQuotationPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href={quotationId ? `/app/quotations/${quotationId}` : "/app/quotations"}>
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={`${quotationNumber} — Update customer, lines, or pricing, then save.`}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={
+              quotationId ? `/app/quotations/${quotationId}` : "/app/quotations"
+            }
+          >
+            <Button variant="ghost" size="icon" aria-label="Back to quotation">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={saveQuotation} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save changes"}
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Edit Quotation
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            <span className="font-medium">{quotationNumber}</span>
-          </p>
         </div>
-      </div>
-
+      }
+    >
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1097,7 +1101,7 @@ export default function EditQuotationPage() {
                 </div>
               </div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1106,12 +1110,6 @@ export default function EditQuotationPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={saveQuotation} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save changes"}
-        </Button>
       </div>
 
       <Dialog
@@ -1173,6 +1171,6 @@ export default function EditQuotationPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

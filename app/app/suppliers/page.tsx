@@ -29,6 +29,7 @@ import {
   setSupplierActive,
   type SupplierRow,
 } from "@/lib/suppliers-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function SuppliersPage() {
   const { toast } = useToast();
@@ -98,22 +99,17 @@ export default function SuppliersPage() {
   const end = Math.min(total, page * pageSize);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Suppliers</h1>
-          <p className="text-muted-foreground mt-1">
-            Vendors you buy from — add and edit on dedicated pages
-          </p>
-        </div>
+    <AppPageShell
+      subtitle="Vendors you purchase from—add them here so purchase orders and bills stay consistent."
+      actions={
         <Button asChild className="gap-2">
           <Link href="/app/suppliers/new">
             <Plus className="h-4 w-4" />
             Add supplier
           </Link>
         </Button>
-      </div>
-
+      }
+    >
       {loading ? (
         <div className="h-24 rounded-md border bg-muted/30 animate-pulse" />
       ) : (
@@ -284,6 +280,6 @@ export default function SuppliersPage() {
           </div>
         </div>
       )}
-    </div>
+    </AppPageShell>
   );
 }

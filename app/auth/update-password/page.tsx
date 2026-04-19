@@ -9,17 +9,15 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
-import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
+import {
+  authInputClass,
+  authLabelClass,
+  authMutedLinkClass,
+  authPanelClass,
+  authPrimaryButtonClass,
+} from "@/lib/auth-ui";
 
 export default function UpdatePasswordPage() {
   const router = useRouter();
@@ -37,7 +35,6 @@ export default function UpdatePasswordPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [ready, setReady] = useState(false);
 
-  // Ensure we have a recovery session from Supabase
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -86,10 +83,11 @@ export default function UpdatePasswordPage() {
       });
 
       router.replace("/auth/login");
-    } catch (err: any) {
+    } catch (err: unknown) {
       setErrors((prev) => ({
         ...prev,
-        general: err?.message ?? "Something went wrong.",
+        general:
+          err instanceof Error ? err.message : "Something went wrong.",
       }));
     } finally {
       setIsLoading(false);
@@ -97,129 +95,120 @@ export default function UpdatePasswordPage() {
   };
 
   return (
-    <Card className="shadow-lg border-border/50 max-w-md mx-auto">
-      {/* Logo / Header */}
-      <CardHeader className="space-y-2">
-        <div className="flex flex-col items-center text-center">
-          <div className="pt-6 pb-2">
-            <div className="flex items-center gap-2">
-              <Image
-                src={Logo}
-                alt="MoLedger logo"
-                width={32}
-                height={32}
-                className="rounded-md shadow-sm"
-                priority
-              />
-              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
-            </div>
-          </div>
-          <CardTitle className="text-2xl font-bold">
-            Set a new password
-          </CardTitle>
-          <CardDescription>
-            Enter and confirm your new password to continue
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <form onSubmit={handleSubmit} noValidate>
-        <CardContent className="space-y-4">
-          {!ready ? (
-            <p className="text-sm text-muted-foreground">
-              Checking recovery session…
-            </p>
-          ) : errors.general ? (
-            <div className="text-sm text-destructive">{errors.general}</div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="password">New password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPwd ? "text" : "password"}
-                    placeholder="At least 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className={
-                      errors.password ? "border-destructive pr-10" : "pr-10"
-                    }
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    aria-label={showPwd ? "Hide password" : "Show password"}
-                    className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowPwd((s) => !s)}
-                  >
-                    {showPwd ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-                {errors.password && (
-                  <p className="text-sm text-destructive">{errors.password}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirm">Confirm new password</Label>
-                <div className="relative">
-                  <Input
-                    id="confirm"
-                    type={showConfirm ? "text" : "password"}
-                    placeholder="Re-enter your new password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    className={
-                      errors.confirm ? "border-destructive pr-10" : "pr-10"
-                    }
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    aria-label={showConfirm ? "Hide password" : "Show password"}
-                    className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowConfirm((s) => !s)}
-                  >
-                    {showConfirm ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-                {errors.confirm && (
-                  <p className="text-sm text-destructive">{errors.confirm}</p>
-                )}
-              </div>
-            </>
-          )}
-        </CardContent>
-
-        <CardFooter className="flex flex-col space-y-4 mt-3">
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isLoading || !!errors.general || !ready}
-          >
-            {isLoading ? "Updating..." : "Update password"}
-          </Button>
-
-          <Link
-            href="/auth/login"
-            className="flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to sign in
-          </Link>
-        </CardFooter>
-      </form>
-      <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <span className="text-xs text-muted-foreground">MoLedger</span>
+    <div className={authPanelClass}>
+      <div className="mb-6 flex flex-col items-center text-center">
+        <Link
+          href="/main"
+          className="mb-5 inline-flex flex-col items-center gap-2 transition-opacity hover:opacity-90"
+        >
+          <Image
+            src="/logo2.png"
+            alt="MoLedger"
+            width={160}
+            height={160}
+            className="h-11 w-auto object-contain sm:h-12"
+            priority
+          />
+        </Link>
+        <h1 className="text-2xl font-bold tracking-tight">Set a new password</h1>
+        <p className="mt-2 text-sm text-white/60">
+          Enter and confirm your new password to continue
+        </p>
       </div>
-    </Card>
+
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        {!ready ? (
+          <p className="text-center text-sm text-white/50">
+            Checking recovery session…
+          </p>
+        ) : errors.general ? (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {errors.general}
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="password" className={authLabelClass}>
+                New password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPwd ? "text" : "password"}
+                  placeholder="At least 8 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={`${authInputClass} pr-10 ${errors.password ? "border-red-500" : ""}`}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  aria-label={showPwd ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+                  onClick={() => setShowPwd((s) => !s)}
+                >
+                  {showPwd ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              {errors.password && (
+                <p className="text-sm text-red-400">{errors.password}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirm" className={authLabelClass}>
+                Confirm new password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="confirm"
+                  type={showConfirm ? "text" : "password"}
+                  placeholder="Re-enter your new password"
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                  className={`${authInputClass} pr-10 ${errors.confirm ? "border-red-500" : ""}`}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  aria-label={showConfirm ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+                  onClick={() => setShowConfirm((s) => !s)}
+                >
+                  {showConfirm ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              {errors.confirm && (
+                <p className="text-sm text-red-400">{errors.confirm}</p>
+              )}
+            </div>
+          </>
+        )}
+
+        <Button
+          type="submit"
+          className={authPrimaryButtonClass}
+          disabled={isLoading || !!errors.general || !ready}
+        >
+          {isLoading ? "Updating…" : "Update password"}
+        </Button>
+
+        <Link
+          href="/auth/login"
+          className={`flex items-center justify-center gap-2 ${authMutedLinkClass}`}
+        >
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          Back to sign in
+        </Link>
+      </form>
+    </div>
   );
 }

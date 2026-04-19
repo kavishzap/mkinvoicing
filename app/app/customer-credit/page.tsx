@@ -25,6 +25,7 @@ import {
   type CustomerCreditSettlement,
   type CustomerCreditWithCustomer,
 } from "@/lib/customer-credits-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function CustomerCreditPage() {
   const router = useRouter();
@@ -99,29 +100,20 @@ export default function CustomerCreditPage() {
     });
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-amber-50 flex items-center justify-center">
-            <Coins className="h-5 w-5 text-amber-600" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Customer Credit
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Overview of overpayments stored as credit per customer
-            </p>
-          </div>
+    <AppPageShell
+      leading={
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/40">
+          <Coins className="h-5 w-5 text-amber-600" />
         </div>
-      </div>
-
+      }
+      subtitle="When customers overpay, store the difference here and apply it to their next invoice or refund it."
+    >
       {!loading && (
         <Card className="p-5">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Total Credit</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-700">
+              <p className="mt-1 text-xl font-bold text-emerald-700">
                 MUR {fmtMoney(totalBalance)}
               </p>
             </div>
@@ -520,7 +512,7 @@ export default function CustomerCreditPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 

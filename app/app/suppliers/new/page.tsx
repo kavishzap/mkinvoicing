@@ -15,6 +15,7 @@ import {
   type SupplierFormData,
 } from "@/lib/supplier-form";
 import { addSupplier } from "@/lib/suppliers-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function NewSupplierPage() {
   const router = useRouter();
@@ -56,37 +57,41 @@ export default function NewSupplierPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 text-left">
-      <div className="flex items-center gap-4">
-        <Link href="/app/suppliers">
-          <Button variant="ghost" size="icon" type="button">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl text-left"
+      subtitle="Fill in the supplier’s details and save—you can change them later from the list."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/app/suppliers">
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              aria-label="Back to suppliers"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button variant="outline" type="button" asChild>
+            <Link href="/app/suppliers">Cancel</Link>
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">New supplier</h1>
-          <p className="text-muted-foreground mt-1">
-            Enter vendor details — you can edit them anytime.
-          </p>
+          <Button type="submit" form="supplier-new-form" disabled={saving}>
+            {saving ? "Saving…" : "Save supplier"}
+          </Button>
         </div>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
+      }
+    >
+      <form
+        id="supplier-new-form"
+        onSubmit={handleSubmit}
+        className="space-y-6"
+      >
         <SupplierFormFields
           formData={formData}
           setFormData={setFormData}
           errors={errors}
         />
-
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-6">
-          <Button variant="outline" type="button" asChild>
-            <Link href="/app/suppliers">Cancel</Link>
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving…" : "Save supplier"}
-          </Button>
-        </div>
       </form>
-    </div>
+    </AppPageShell>
   );
 }

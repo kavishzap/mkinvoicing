@@ -1,5 +1,5 @@
 import type React from "react";
-import Image from "next/image";
+import Link from "next/link";
 
 export default function AuthLayout({
   children,
@@ -7,28 +7,25 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4 relative">
-      <div className="absolute inset-0 bg-[radial-gradient(circle,rgba(0,0,0,1.0)_1px,transparent_1px)] bg-[length:16px_16px] opacity-30 pointer-events-none" />
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-center relative">
-        <div className="flex justify-center lg:justify-end">
-          {children}
-        </div>
-        <div className="hidden lg:flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3">
-            <Image
-              src="/Resume%20folder-bro.png"
-              alt=""
-              width={500}
-              height={400}
-              className="object-contain max-h-[400px] w-full"
-              priority
-            />
-            <p className="text-xs text-muted-foreground">
-              Developed by Mojhoa Automations
-            </p>
-          </div>
-        </div>
+    <div className="relative flex min-h-dvh flex-col bg-[#06060a] text-white antialiased">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        aria-hidden
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 50% 0%, rgba(0, 242, 255, 0.08) 0%, transparent 55%)",
+        }}
+      />
+      <div className="relative flex flex-1 flex-col items-center justify-center px-4 py-10 sm:px-6">
+        {children}
       </div>
+      <p className="relative shrink-0 pb-8 text-center text-xs text-white/40">
+        <Link href="/main" className="transition-colors hover:text-white/70">
+          MoLedger
+        </Link>
+        {" · "}
+        <span className="text-white/35">Mojhoa Automations</span>
+      </p>
     </div>
   );
 }

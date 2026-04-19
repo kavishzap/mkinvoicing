@@ -41,12 +41,17 @@ import {
   type Preferences,
 } from "@/lib/settings-service";
 import { listCustomers, type CustomerRow } from "@/lib/customers-service";
-import { createInvoice, type LineItemPayload } from "@/lib/invoices-service";
+import {
+  createInvoice,
+  type InvoicePaymentMethod,
+  type LineItemPayload,
+} from "@/lib/invoices-service";
 import { getQuotation } from "@/lib/quotations-service";
 import {
   getSalesOrder,
   clientInfoFromBillSnapshot,
 } from "@/lib/sales-orders-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -154,7 +159,9 @@ function NewInvoicePageContent() {
   });
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Card Payment" | "Credit Facilities" | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<
+    InvoicePaymentMethod | null
+  >(null);
   const [amountPaid, setAmountPaid] = useState(0);
 
   // Errors
@@ -587,7 +594,7 @@ function NewInvoicePageContent() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -608,36 +615,30 @@ function NewInvoicePageContent() {
     );
   }
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/app/invoices">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Create Invoice
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Fill in the details to create a new invoice
-          </p>
-          {convertedFromSource && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Converting from{" "}
-              {convertedFromSource.type === "quotation"
-                ? "quotation"
-                : "sales order"}{" "}
-              <span className="font-medium text-foreground">
-                {convertedFromSource.number}
-              </span>{" "}
-              — save to create invoice with link.
-            </p>
-          )}
-        </div>
-      </div>
+  const headerSubtitle =
+    convertedFromSource != null
+      ? `Converting from ${
+          convertedFromSource.type === "quotation" ? "quotation" : "sales order"
+        } ${convertedFromSource.number} — review lines below, then save to create the invoice.`
+      : "Choose the customer, add lines, then save or send—totals and tax calculate for you.";
 
+  return (
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={headerSubtitle}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/app/invoices">
+            <Button variant="ghost" size="icon" aria-label="Back to invoices">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={doCreateUnpaid} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save & View"}
+          </Button>
+        </div>
+      }
+    >
       <div className="grid lg:grid-cols-2 gap-6">
         {/* From (your profile) */}
         <Card>
@@ -1180,7 +1181,7 @@ function NewInvoicePageContent() {
                 </div>
               </div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1194,13 +1195,7 @@ function NewInvoicePageContent() {
                     value={paymentMethod || ""}
                     onValueChange={(v) =>
                       setPaymentMethod(
-                        v === ""
-                          ? null
-                          : (v as
-                              | "Cash"
-                              | "Card Payment"
-                              | "Credit Facilities"
-                              | "Bank Transfer")
+                        v === "" ? null : (v as InvoicePaymentMethod)
                       )
                     }
                   >
@@ -1250,13 +1245,6 @@ function NewInvoicePageContent() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Save Button */}
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={doCreateUnpaid} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save & View"}
-        </Button>
       </div>
 
       {/* Customer Selection Dialog (Supabase-powered) */}
@@ -1318,7 +1306,7 @@ function NewInvoicePageContent() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 
@@ -1326,7 +1314,7 @@ export default function NewInvoicePage() {
   return (
     <Suspense
       fallback={
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
+        <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="h-56 rounded bg-muted animate-pulse" />

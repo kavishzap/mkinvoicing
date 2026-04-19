@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 function nameFromBillTo(bill?: { type?: string; company_name?: string; full_name?: string }) {
   if (!bill) return "Walk-in";
@@ -91,7 +92,7 @@ async function getUserId() {
 export async function getCustomerSupplierLedgerData(
   filters: CustomerSupplierLedgerFilters
 ): Promise<CustomerSupplierLedgerData> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const [invRes, piRes] = await Promise.all([
     supabase
@@ -103,6 +104,7 @@ export async function getCustomerSupplierLedgerData(
         invoice_items ( quantity, unit_price, tax_percent )
       `
       )
+      .eq("company_id", companyId)
       .neq("status", "cancelled")
       .gte("issue_date", filters.startDate)
       .lte("issue_date", filters.endDate)
@@ -110,6 +112,7 @@ export async function getCustomerSupplierLedgerData(
     supabase
       .from("purchase_invoices")
       .select("id, number, issue_date, status, currency, from_snapshot, amount_paid, amount_due, total")
+      .eq("company_id", companyId)
       .neq("status", "cancelled")
       .gte("issue_date", filters.startDate)
       .lte("issue_date", filters.endDate)

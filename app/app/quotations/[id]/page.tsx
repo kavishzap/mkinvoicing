@@ -16,6 +16,7 @@ import {
   type QuotationDetail,
 } from "@/lib/quotations-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function QuotationViewPage() {
   const params = useParams<{ id: string }>();
@@ -74,10 +75,10 @@ export default function QuotationViewPage() {
 
   if (!loading && !quotation) {
     return (
-      <div className="p-6">
+      <AppPageShell>
         <Card>
           <CardContent className="py-16 text-center">
-            <h2 className="text-2xl font-semibold mb-2">Quotation not found</h2>
+            <h2 className="text-xl font-semibold mb-2">Quotation not found</h2>
             <p className="text-muted-foreground mb-6">
               {error ?? "The quotation you're looking for doesn't exist."}
             </p>
@@ -86,19 +87,19 @@ export default function QuotationViewPage() {
             </Link>
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (loading || !quotation) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <AppPageShell className="max-w-7xl">
         <div className="flex items-center justify-between">
-          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
-          <div className="h-9 w-40 bg-muted rounded animate-pulse" />
+          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
         </div>
-        <div className="h-96 bg-muted rounded animate-pulse" />
-      </div>
+        <div className="h-96 animate-pulse rounded bg-muted" />
+      </AppPageShell>
     );
   }
 
@@ -150,32 +151,27 @@ export default function QuotationViewPage() {
     from.logoUrl || safeProfile.logoUrl || "/kredence.png";
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-4">
-          <Link href="/app/quotations">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Quotation {quotation.number}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              View details and export PDF
-            </p>
-          </div>
+    <AppPageShell
+      className="max-w-7xl"
+      leading={
+        <Link href="/app/quotations">
+          <Button variant="ghost" size="icon" aria-label="Back to quotations">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle={`${quotation.number}${billName ? ` · ${billName}` : ""} — Review pricing and terms, send a PDF, or convert to a sales order or invoice.`}
+      actions={
+        <div className="print:hidden">
+          <QuotationViewActions
+            quotationId={quotation.id}
+            quotation={quotation}
+            profile={profile}
+            logoSrc={logoSrc}
+          />
         </div>
-
-        <QuotationViewActions
-          quotationId={quotation.id}
-          quotation={quotation}
-          profile={profile}
-          logoSrc={logoSrc}
-        />
-      </div>
-
+      }
+    >
       <div className="lg:col-span-2 space-y-6">
         <Card className="shadow-lg">
           <CardContent className="p-8 space-y-8">
@@ -193,12 +189,12 @@ export default function QuotationViewPage() {
                     />
                   </div>
                 ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-xl mb-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg mb-3">
                     Q
                   </div>
                 )}
 
-                <h2 className="text-2xl font-bold">{fromName}</h2>
+                <h2 className="text-xl font-bold">{fromName}</h2>
                 {fromEmail && (
                   <p className="text-sm text-muted-foreground mt-1">{fromEmail}</p>
                 )}
@@ -214,7 +210,7 @@ export default function QuotationViewPage() {
                 )}
               </div>
               <div className="text-right">
-                <h3 className="text-3xl font-bold text-muted-foreground">
+                <h3 className="text-2xl font-bold text-muted-foreground">
                   QUOTATION
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -380,7 +376,7 @@ export default function QuotationViewPage() {
                     </div>
                   )}
                   <Separator />
-                  <div className="flex justify-between text-lg font-bold">
+                  <div className="flex justify-between text-base font-bold">
                     <span>Total</span>
                     <span>
                       {new Intl.NumberFormat("en-US", {
@@ -424,6 +420,6 @@ export default function QuotationViewPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AppPageShell>
   );
 }

@@ -16,6 +16,7 @@ import {
   type PurchaseInvoiceDetail,
 } from "@/lib/purchase-invoices-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function PurchaseInvoiceViewPage() {
   const params = useParams<{ id: string }>();
@@ -90,10 +91,10 @@ export default function PurchaseInvoiceViewPage() {
 
   if (!loading && !purchaseInvoice) {
     return (
-      <div className="p-6">
+      <AppPageShell>
         <Card>
           <CardContent className="py-16 text-center">
-            <h2 className="text-2xl font-semibold mb-2">
+            <h2 className="text-xl font-semibold mb-2">
               Purchase invoice not found
             </h2>
             <p className="text-muted-foreground mb-6">
@@ -104,19 +105,19 @@ export default function PurchaseInvoiceViewPage() {
             </Link>
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (loading || !purchaseInvoice) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <AppPageShell className="max-w-7xl">
         <div className="flex items-center justify-between">
-          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
-          <div className="h-9 w-40 bg-muted rounded animate-pulse" />
+          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
         </div>
-        <div className="h-96 bg-muted rounded animate-pulse" />
-      </div>
+        <div className="h-96 animate-pulse rounded bg-muted" />
+      </AppPageShell>
     );
   }
 
@@ -168,33 +169,28 @@ export default function PurchaseInvoiceViewPage() {
     from.logoUrl || safeProfile.logoUrl || "/kredence.png";
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-4">
-          <Link href="/app/purchase-invoices">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Purchase Invoice {purchaseInvoice.number}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              View details and export PDF
-            </p>
-          </div>
+    <AppPageShell
+      className="max-w-7xl"
+      leading={
+        <Link href="/app/purchase-invoices">
+          <Button variant="ghost" size="icon" aria-label="Back to purchase invoices">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle={`${purchaseInvoice.number}${billName ? ` · ${billName}` : ""} — Check supplier charges, record payments, and export or share the PDF.`}
+      actions={
+        <div className="print:hidden">
+          <PurchaseInvoiceViewActions
+            purchaseInvoiceId={purchaseInvoice.id}
+            purchaseInvoice={purchaseInvoice}
+            profile={profile}
+            logoSrc={logoSrc}
+            onRefresh={reload}
+          />
         </div>
-
-        <PurchaseInvoiceViewActions
-          purchaseInvoiceId={purchaseInvoice.id}
-          purchaseInvoice={purchaseInvoice}
-          profile={profile}
-          logoSrc={logoSrc}
-          onRefresh={reload}
-        />
-      </div>
-
+      }
+    >
       <div className="lg:col-span-2 space-y-6">
         <Card className="shadow-lg">
           <CardContent className="p-8 space-y-8">
@@ -212,12 +208,12 @@ export default function PurchaseInvoiceViewPage() {
                     />
                   </div>
                 ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-xl mb-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg mb-3">
                     P
                   </div>
                 )}
 
-                <h2 className="text-2xl font-bold">{fromName}</h2>
+                <h2 className="text-xl font-bold">{fromName}</h2>
                 {fromEmail && (
                   <p className="text-sm text-muted-foreground mt-1">{fromEmail}</p>
                 )}
@@ -233,7 +229,7 @@ export default function PurchaseInvoiceViewPage() {
                 )}
               </div>
               <div className="text-right">
-                <h3 className="text-3xl font-bold text-muted-foreground">
+                <h3 className="text-2xl font-bold text-muted-foreground">
                   PURCHASE INVOICE
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -420,7 +416,7 @@ export default function PurchaseInvoiceViewPage() {
                     </div>
                   )}
                   <Separator />
-                  <div className="flex justify-between text-lg font-bold">
+                  <div className="flex justify-between text-base font-bold">
                     <span>Total</span>
                     <span>{fmtMoney(total, purchaseInvoice.currency)}</span>
                   </div>
@@ -461,6 +457,6 @@ export default function PurchaseInvoiceViewPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AppPageShell>
   );
 }

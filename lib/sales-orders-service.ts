@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 import type { Profile } from "@/lib/settings-service";
 import type { CustomerRow } from "@/lib/customers-service";
 
@@ -178,6 +179,7 @@ export function clientInfoFromBillSnapshot(
  */
 export async function expireStaleSalesOrders(): Promise<void> {
   const today = new Date().toISOString().split("T")[0];
+  const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("sales_orders")
     .update({
@@ -185,7 +187,8 @@ export async function expireStaleSalesOrders(): Promise<void> {
       updated_at: new Date().toISOString(),
     })
     .lt("valid_until", today)
-    .eq("status", "active");
+    .eq("status", "active")
+    .eq("company_id", companyId);
 
   if (error) {
     // eslint-disable-next-line no-console
@@ -233,8 +236,10 @@ export async function createSalesOrder(
   params: CreateSalesOrderPayload
 ): Promise<string> {
   const { items, created_from_quotation_id, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase.rpc("create_sales_order", {
     p_sales_order: {
+      company_id: companyId,
       issue_date: inv.issue_date,
       valid_until: inv.valid_until,
       status: inv.status,
@@ -280,6 +285,7 @@ export async function listSalesOrders(opts?: {
   pageSize?: number;
 }): Promise<{ rows: SalesOrderListRow[]; total: number }> {
   await expireStaleSalesOrders();
+  const companyId = await requireActiveCompanyId();
 
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
@@ -292,6 +298,7 @@ export async function listSalesOrders(opts?: {
       "id, number, issue_date, valid_until, status, currency, bill_to_snapshot, total",
       { count: "exact" }
     )
+    .eq("company_id", companyId)
     .order("issue_date", { ascending: false })
     .range(from, to);
 
@@ -327,6 +334,7 @@ export async function listSalesOrders(opts?: {
 
 export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null> {
   await expireStaleSalesOrders();
+  const companyId = await requireActiveCompanyId();
 
   const { data, error } = await supabase
     .from("sales_orders")
@@ -339,6 +347,7 @@ export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null
     `
     )
     .eq("id", id)
+    .eq("company_id", companyId)
     .single();
 
   if (error) return null;
@@ -373,10 +382,12 @@ export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null
 }
 
 export async function deleteSalesOrder(id: string): Promise<void> {
+  const companyId = await requireActiveCompanyId();
   const { count: invCount, error: invErr } = await supabase
     .from("invoices")
     .select("id", { count: "exact", head: true })
-    .eq("created_from_sales_order_id", id);
+    .eq("created_from_sales_order_id", id)
+    .eq("company_id", companyId);
 
   if (invErr) throw invErr;
 
@@ -386,7 +397,11 @@ export async function deleteSalesOrder(id: string): Promise<void> {
     );
   }
 
-  const { error } = await supabase.from("sales_orders").delete().eq("id", id);
+  const { error } = await supabase
+    .from("sales_orders")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
   if (error) throw error;
 }
 
@@ -402,6 +417,7 @@ export async function updateSalesOrder(
   params: UpdateSalesOrderPayload
 ): Promise<void> {
   const { items, ...inv } = params;
+  const companyId = await requireActiveCompanyId();
   const subtotal = items.reduce(
     (s, it) => s + Number(it.quantity) * Number(it.unit_price),
     0
@@ -438,7 +454,8 @@ export async function updateSalesOrder(
       terms: inv.terms ?? null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (upErr) throw upErr;
 
@@ -454,6 +471,7 @@ export async function updateSalesOrder(
     const sortOrder = it.sort_order ?? idx;
     return {
       sales_order_id: id,
+      company_id: companyId,
       item: it.item,
       description: it.description ?? null,
       quantity: it.quantity,

@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type SupplierPayload = {
   type: "company" | "individual";
@@ -62,10 +63,12 @@ function mapRow(r: Record<string, unknown>): SupplierRow {
 
 function payloadToInsert(
   userId: string,
+  companyId: string,
   payload: SupplierPayload
 ): Record<string, unknown> {
   return {
     user_id: userId,
+    company_id: companyId,
     type: payload.type,
     company_name: payload.companyName ?? null,
     contact_name: payload.contactName ?? null,
@@ -92,7 +95,7 @@ export async function listSuppliers(opts?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: SupplierRow[]; total: number }> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
@@ -101,7 +104,7 @@ export async function listSuppliers(opts?: {
   let q = supabase
     .from("suppliers")
     .select(COLUMNS, { count: "exact" })
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -134,8 +137,11 @@ export async function listSuppliers(opts?: {
 export async function addSupplier(
   payload: SupplierPayload
 ): Promise<SupplierRow> {
-  const userId = await getUserId();
-  const insert = payloadToInsert(userId, payload);
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
+  const insert = payloadToInsert(userId, companyId, payload);
 
   const { data, error } = await supabase
     .from("suppliers")
@@ -149,11 +155,12 @@ export async function addSupplier(
 
 /** Single supplier by id (RLS ensures only your rows). */
 export async function getSupplier(id: string): Promise<SupplierRow | null> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("suppliers")
     .select(COLUMNS)
     .eq("id", id)
+    .eq("company_id", companyId)
     .maybeSingle();
 
   if (error) throw error;
@@ -165,7 +172,7 @@ export async function updateSupplier(
   id: string,
   payload: Partial<SupplierPayload>
 ): Promise<SupplierRow> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const update: Record<string, unknown> = {};
   if (payload.type) update.type = payload.type;
@@ -200,6 +207,7 @@ export async function updateSupplier(
     .from("suppliers")
     .update(update)
     .eq("id", id)
+    .eq("company_id", companyId)
     .select(COLUMNS)
     .single();
 
@@ -212,12 +220,13 @@ export async function setSupplierActive(
   id: string,
   active: boolean
 ): Promise<SupplierRow> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const { data, error } = await supabase
     .from("suppliers")
     .update({ is_active: active })
     .eq("id", id)
+    .eq("company_id", companyId)
     .select(COLUMNS)
     .single();
 

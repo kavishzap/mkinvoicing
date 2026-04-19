@@ -23,6 +23,7 @@ import {
 } from "@/lib/sales-report-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { generateSalesReportPDF } from "@/lib/sales-report-pdf";
+import { AppPageShell } from "@/components/app-page-shell";
 
 type ReportRange = "monthly" | "yearly" | "custom";
 
@@ -155,21 +156,16 @@ export default function SalesReportPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/app/reportings">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Sales Report</h1>
-            <p className="text-muted-foreground mt-1">
-              Total sales, paid amounts, outstanding, and breakdown by product and customer
-            </p>
-          </div>
-        </div>
+    <AppPageShell
+      leading={
+        <Link href="/app/reportings">
+          <Button variant="ghost" size="icon" aria-label="Back to reportings">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle="Filter by period to see sales totals, paid vs outstanding, and product or customer breakdown—then export a PDF."
+      actions={
         <Button
           variant="outline"
           size="sm"
@@ -189,8 +185,8 @@ export default function SalesReportPage() {
             </>
           )}
         </Button>
-      </div>
-
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Download Report</CardTitle>
@@ -251,7 +247,7 @@ export default function SalesReportPage() {
                     <CardTitle className="text-sm font-medium">Total Sales (Gross)</CardTitle>
                   </CardHeader>
                   <CardContent className="min-w-0 overflow-hidden">
-                    <p className="text-lg font-bold break-words">
+                    <p className="text-base font-bold break-words">
                       {formatCurrency(data.totalSalesGross, data.currency)}
                     </p>
                   </CardContent>
@@ -261,7 +257,7 @@ export default function SalesReportPage() {
                     <CardTitle className="text-sm font-medium">Total Discounts</CardTitle>
                   </CardHeader>
                   <CardContent className="min-w-0 overflow-hidden">
-                    <p className="text-lg font-bold break-words">
+                    <p className="text-base font-bold break-words">
                       {formatCurrency(data.totalDiscounts, data.currency)}
                     </p>
                   </CardContent>
@@ -271,7 +267,7 @@ export default function SalesReportPage() {
                     <CardTitle className="text-sm font-medium">Tax Collected</CardTitle>
                   </CardHeader>
                   <CardContent className="min-w-0 overflow-hidden">
-                    <p className="text-lg font-bold break-words">
+                    <p className="text-base font-bold break-words">
                       {formatCurrency(data.totalTaxCollected, data.currency)}
                     </p>
                   </CardContent>
@@ -281,7 +277,7 @@ export default function SalesReportPage() {
                     <CardTitle className="text-sm font-medium">Net Sales</CardTitle>
                   </CardHeader>
                   <CardContent className="min-w-0 overflow-hidden">
-                    <p className="text-lg font-bold break-words">
+                    <p className="text-base font-bold break-words">
                       {formatCurrency(data.netSales, data.currency)}
                     </p>
                   </CardContent>
@@ -291,7 +287,7 @@ export default function SalesReportPage() {
                     <CardTitle className="text-sm font-medium">Money In (Paid)</CardTitle>
                   </CardHeader>
                   <CardContent className="min-w-0 overflow-hidden">
-                    <p className="text-lg font-bold text-green-600 dark:text-green-400 break-words">
+                    <p className="text-base font-bold text-green-600 dark:text-green-400 break-words">
                       {formatCurrency(data.totalPaid, data.currency)}
                     </p>
                   </CardContent>
@@ -301,7 +297,7 @@ export default function SalesReportPage() {
                     <CardTitle className="text-sm font-medium">Money Pending</CardTitle>
                   </CardHeader>
                   <CardContent className="min-w-0 overflow-hidden">
-                    <p className="text-lg font-bold text-amber-600 dark:text-amber-400 break-words">
+                    <p className="text-base font-bold text-amber-600 dark:text-amber-400 break-words">
                       {formatCurrency(data.outstanding, data.currency)}
                     </p>
                   </CardContent>
@@ -579,6 +575,6 @@ export default function SalesReportPage() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

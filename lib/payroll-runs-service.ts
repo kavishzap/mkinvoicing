@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 import { addExpense } from "@/lib/expenses-service";
 import { getActiveAdvancesForEmployee } from "@/lib/employee-advances-service";
 import { updateAdvanceDeducted } from "@/lib/employee-advances-service";
@@ -58,7 +59,7 @@ export async function listPayrollRuns(opts?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: PayrollRunRow[]; total: number }> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 20);
   const from = (page - 1) * pageSize;
@@ -67,7 +68,7 @@ export async function listPayrollRuns(opts?: {
   let q = supabase
     .from("payroll_runs")
     .select("*", { count: "exact" })
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .order("year", { ascending: false })
     .order("month", { ascending: false })
     .range(from, to);
@@ -86,11 +87,11 @@ export async function listPayrollRuns(opts?: {
 }
 
 export async function getPayrollRun(id: string): Promise<PayrollRunWithPayslips | null> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data: run, error: runError } = await supabase
     .from("payroll_runs")
     .select("*")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("id", id)
     .single();
 
@@ -125,12 +126,15 @@ export async function getPayrollRun(id: string): Promise<PayrollRunWithPayslips 
 }
 
 export async function runPayroll(month: number, year: number): Promise<PayrollRunWithPayslips> {
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
 
   const { data: existing } = await supabase
     .from("payroll_runs")
     .select("id")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("month", month)
     .eq("year", year)
     .single();
@@ -140,7 +144,7 @@ export async function runPayroll(month: number, year: number): Promise<PayrollRu
   const { data: employees, error: empErr } = await supabase
     .from("employees")
     .select("id, full_name, basic_salary, transport_allowance, other_allowance, currency")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("status", "active");
 
   if (empErr) throw empErr;
@@ -153,6 +157,7 @@ export async function runPayroll(month: number, year: number): Promise<PayrollRu
     .from("payroll_runs")
     .insert({
       user_id: userId,
+      company_id: companyId,
       month,
       year,
       status: "processed",
@@ -203,6 +208,7 @@ export async function runPayroll(month: number, year: number): Promise<PayrollRu
 
     payslipInserts.push({
       payroll_run_id: payrollRun.id,
+      company_id: companyId,
       employee_id: emp.id,
       basic_salary: basic,
       transport_allowance: transport,
@@ -234,6 +240,7 @@ export async function runPayroll(month: number, year: number): Promise<PayrollRu
       await updateAdvanceDeducted(u.advanceId, u.amount);
       await supabase.from("payslip_advance_deductions").insert({
         payslip_id: ps.id,
+        company_id: companyId,
         advance_id: u.advanceId,
         amount: u.amount,
       });
@@ -248,7 +255,8 @@ export async function runPayroll(month: number, year: number): Promise<PayrollRu
       total_deductions: totalDeductions,
       total_net: totalNet,
     })
-    .eq("id", payrollRun.id);
+    .eq("id", payrollRun.id)
+    .eq("company_id", companyId);
 
   const result = await getPayrollRun(payrollRun.id);
   if (!result) throw new Error("Failed to load payroll run");
@@ -263,21 +271,22 @@ export async function markPayslipPaid(
     create_expense?: boolean;
   }
 ): Promise<void> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const { data: payslip, error: psErr } = await supabase
     .from("payslips")
     .select(`
       *,
-      payroll_run:payroll_runs(month, year, user_id),
+      payroll_run:payroll_runs(month, year, company_id),
       employee:employees(full_name)
     `)
     .eq("id", payslipId)
+    .eq("company_id", companyId)
     .single();
 
   if (psErr || !payslip) throw new Error("Payslip not found");
-  const pr = payslip.payroll_run as { user_id?: string };
-  if (pr?.user_id !== userId) throw new Error("Not authorized");
+  const pr = payslip.payroll_run as { company_id?: string };
+  if (pr?.company_id !== companyId) throw new Error("Not authorized");
 
   let expenseId: string | null = null;
   if (params.create_expense !== false) {
@@ -302,7 +311,8 @@ export async function markPayslipPaid(
       payment_date: params.payment_date,
       expense_id: expenseId,
     })
-    .eq("id", payslipId);
+    .eq("id", payslipId)
+    .eq("company_id", companyId);
 
   if (updateErr) throw updateErr;
 }

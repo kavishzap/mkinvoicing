@@ -1,10 +1,10 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   Plus,
-  Search,
   Eye,
   Pencil,
   Trash2,
@@ -13,7 +13,6 @@ import {
   FileInput,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -22,14 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +38,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DataTable } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { PurchaseOrderStatusBadge } from "@/components/purchase-order-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -55,6 +48,7 @@ import {
   type PurchaseOrderListRow,
   type PurchaseOrderStatus,
 } from "@/lib/purchase-orders-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
@@ -131,9 +125,154 @@ export default function PurchaseOrdersPage() {
       year: "numeric",
     });
 
-  const handleDuplicate = (id: string) => {
-    router.push(`/app/purchase-orders/new?duplicate=${encodeURIComponent(id)}`);
-  };
+  const handleDuplicate = useCallback(
+    (id: string) => {
+      router.push(
+        `/app/purchase-orders/new?duplicate=${encodeURIComponent(id)}`,
+      );
+    },
+    [router],
+  );
+
+  const columns = useMemo<ColumnDef<PurchaseOrderListRow>[]>(
+    () => [
+      {
+        id: "number",
+        accessorFn: (r) => r.number,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="PO #" />
+        ),
+        meta: {
+          searchValue: (row: PurchaseOrderListRow) =>
+            [row.number, row.supplierName].filter(Boolean).join(" "),
+        },
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.number}</span>
+        ),
+      },
+      {
+        id: "supplierName",
+        accessorFn: (r) => r.supplierName ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Supplier" />
+        ),
+        meta: {
+          searchValue: (row: PurchaseOrderListRow) => row.supplierName ?? "",
+        },
+        cell: ({ row }) => row.original.supplierName || "—",
+      },
+      {
+        id: "issueDate",
+        accessorFn: (r) => new Date(r.issueDate).getTime(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Issue Date" />
+        ),
+        meta: { searchValue: (row: PurchaseOrderListRow) => row.issueDate },
+        cell: ({ row }) => formatDate(row.original.issueDate),
+      },
+      {
+        id: "validUntil",
+        accessorFn: (r) => new Date(r.validUntil).getTime(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Valid Until" />
+        ),
+        meta: { searchValue: (row: PurchaseOrderListRow) => row.validUntil },
+        cell: ({ row }) => formatDate(row.original.validUntil),
+      },
+      {
+        id: "status",
+        accessorFn: (r) => r.status,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Status" />
+        ),
+        meta: { searchValue: (row: PurchaseOrderListRow) => row.status },
+        cell: ({ row }) => (
+          <PurchaseOrderStatusBadge status={row.original.status} />
+        ),
+      },
+      {
+        id: "total",
+        accessorFn: (r) => Number(r.total),
+        header: ({ column }) => (
+          <div className="flex justify-end">
+            <DataTableColumnHeader column={column} title="Total" />
+          </div>
+        ),
+        meta: {
+          thClassName: "text-right",
+          tdClassName: "text-right font-medium",
+          searchValue: (row: PurchaseOrderListRow) =>
+            String(row.total) + " " + row.currency,
+        },
+        cell: ({ row }) =>
+          formatCurrency(row.original.total, row.original.currency),
+      },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Actions</span>,
+        meta: {
+          searchable: false,
+          thClassName: "w-[120px] text-right",
+          tdClassName: "text-right",
+        },
+        cell: ({ row }) => {
+          const po = row.original;
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreHorizontal className="h-4 w-4" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(`/app/purchase-orders/${po.id}`)
+                  }
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  View
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(`/app/purchase-orders/${po.id}/edit`)
+                  }
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleDuplicate(po.id)}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Duplicate (prefill new)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    router.push(
+                      `/app/purchase-invoices/new?convertFromPurchaseOrder=${encodeURIComponent(po.id)}`,
+                    )
+                  }
+                >
+                  <FileInput className="mr-2 h-4 w-4" />
+                  Convert to Purchase Invoice
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setDeleteId(po.id)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          );
+        },
+      },
+    ],
+    [router, handleDuplicate],
+  );
 
   const confirmDelete = async () => {
     if (!deleteId) return;
@@ -155,16 +294,14 @@ export default function PurchaseOrdersPage() {
     }
   };
 
+  const purchaseOrderSubtitle =
+    "Record what you’re buying from suppliers—track approvals and match to bills later.";
+
   if (isLoading && rows.length === 0) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Purchase Orders</h1>
-            <p className="text-muted-foreground mt-1">
-              Create and manage purchase orders
-            </p>
-          </div>
+      <AppPageShell
+        subtitle={purchaseOrderSubtitle}
+        actions={
           <Button
             onClick={() => router.push("/app/purchase-orders/new")}
             className="gap-2"
@@ -172,24 +309,20 @@ export default function PurchaseOrdersPage() {
             <Plus className="h-4 w-4" />
             Create Purchase Order
           </Button>
-        </div>
+        }
+      >
         <Card className="p-6">
           <div className="h-40 rounded bg-muted animate-pulse" />
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (!isLoading && total === 0 && !hasActiveFilters) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Purchase Orders</h1>
-            <p className="text-muted-foreground mt-1">
-              Create and manage purchase orders
-            </p>
-          </div>
+      <AppPageShell
+        subtitle={purchaseOrderSubtitle}
+        actions={
           <Button
             onClick={() => router.push("/app/purchase-orders/new")}
             className="gap-2"
@@ -197,9 +330,10 @@ export default function PurchaseOrdersPage() {
             <Plus className="h-4 w-4" />
             Create Purchase Order
           </Button>
-        </div>
+        }
+      >
         <Card className="p-12 text-center text-muted-foreground">
-          <p className="text-lg font-medium text-foreground mb-2">
+          <p className="text-base font-medium text-foreground mb-2">
             No purchase orders yet
           </p>
           <p className="mb-4">Create your first purchase order to get started.</p>
@@ -208,19 +342,14 @@ export default function PurchaseOrdersPage() {
             Create Purchase Order
           </Button>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Purchase Orders</h1>
-          <p className="text-muted-foreground mt-1">
-            Create, view, edit, and delete purchase orders
-          </p>
-        </div>
+    <AppPageShell
+      subtitle={purchaseOrderSubtitle}
+      actions={
         <Button
           onClick={() => router.push("/app/purchase-orders/new")}
           className="gap-2"
@@ -228,186 +357,101 @@ export default function PurchaseOrdersPage() {
           <Plus className="h-4 w-4" />
           Create Purchase Order
         </Button>
-      </div>
-
+      }
+    >
       <Card className="p-6">
-        <div className="flex flex-col lg:flex-row gap-4 mb-6">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search by PO # or supplier..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as PurchaseOrderStatus | "all")}
-          >
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>PO #</TableHead>
-                <TableHead>Supplier</TableHead>
-                <TableHead>Issue Date</TableHead>
-                <TableHead>Valid Until</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead className="text-right w-[120px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-10 text-center text-sm text-muted-foreground"
-                  >
-                    {hasActiveFilters ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <div>No purchase orders match your filters.</div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSearchQuery("");
-                            setStatusFilter("all");
-                          }}
-                        >
-                          Clear filters
-                        </Button>
-                      </div>
-                    ) : (
-                      "No purchase orders."
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((so) => (
-                  <TableRow key={so.id}>
-                    <TableCell className="font-medium">{so.number}</TableCell>
-                    <TableCell>{so.supplierName || "—"}</TableCell>
-                    <TableCell>{formatDate(so.issueDate)}</TableCell>
-                    <TableCell>{formatDate(so.validUntil)}</TableCell>
-                    <TableCell>
-                      <PurchaseOrderStatusBadge status={so.status} />
-                    </TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(so.total, so.currency)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Open menu</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => router.push(`/app/purchase-orders/${so.id}`)}
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            View
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              router.push(`/app/purchase-orders/${so.id}/edit`)
-                            }
-                          >
-                            <Pencil className="h-4 w-4 mr-2" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleDuplicate(so.id)}
-                          >
-                            <Copy className="h-4 w-4 mr-2" />
-                            Duplicate (prefill new)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              router.push(
-                                `/app/purchase-invoices/new?convertFromPurchaseOrder=${encodeURIComponent(so.id)}`
-                              )
-                            }
-                          >
-                            <FileInput className="h-4 w-4 mr-2" />
-                            Convert to Purchase Invoice
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => setDeleteId(so.id)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Rows per page:</span>
+        <DataTable
+          columns={columns}
+          data={rows}
+          manualFiltering
+          searchPlaceholder="Search by PO # or supplier…"
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          toolbarLeft={
             <Select
-              value={String(itemsPerPage)}
-              onValueChange={(v) => setItemsPerPage(Number(v))}
+              value={statusFilter}
+              onValueChange={(v) =>
+                setStatusFilter(v as PurchaseOrderStatus | "all")
+              }
             >
-              <SelectTrigger className="w-[70px]">
-                <SelectValue />
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              Page {currentPage} of {totalPages}
-            </span>
-            <div className="flex gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setCurrentPage((p) => Math.min(totalPages, p + 1))
-                }
-                disabled={currentPage >= totalPages}
-              >
-                Next
-              </Button>
+          }
+          getRowId={(r) => r.id}
+          emptyMessage={
+            hasActiveFilters ? (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div>No purchase orders match your filters.</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            ) : (
+              "No purchase orders."
+            )
+          }
+          footer={
+            <div className="flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Rows per page:
+                </span>
+                <Select
+                  value={String(itemsPerPage)}
+                  onValueChange={(v) => setItemsPerPage(Number(v))}
+                >
+                  <SelectTrigger className="w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
+                    disabled={currentPage >= totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          }
+        />
       </Card>
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
@@ -434,6 +478,6 @@ export default function PurchaseOrdersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </AppPageShell>
   );
 }

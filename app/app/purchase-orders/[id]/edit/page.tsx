@@ -60,6 +60,7 @@ import {
   type PurchaseOrderLinePayload,
   type PurchaseOrderStatus,
 } from "@/lib/purchase-orders-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -483,7 +484,7 @@ export default function EditPurchaseOrderPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -500,23 +501,28 @@ export default function EditPurchaseOrderPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href={purchaseOrderId ? `/app/purchase-orders/${purchaseOrderId}` : "/app/purchase-orders"}>
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={`${purchaseOrderNumber} — Update supplier, lines, or delivery details, then save.`}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={
+              purchaseOrderId
+                ? `/app/purchase-orders/${purchaseOrderId}`
+                : "/app/purchase-orders"
+            }
+          >
+            <Button variant="ghost" size="icon" aria-label="Back to purchase order">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={savePurchaseOrder} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save changes"}
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Edit Purchase Order
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            <span className="font-medium">{purchaseOrderNumber}</span>
-          </p>
         </div>
-      </div>
-
+      }
+    >
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1087,7 +1093,7 @@ export default function EditPurchaseOrderPage() {
                 </div>
               </div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1096,12 +1102,6 @@ export default function EditPurchaseOrderPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={savePurchaseOrder} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save changes"}
-        </Button>
       </div>
 
       <Dialog
@@ -1163,6 +1163,6 @@ export default function EditPurchaseOrderPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

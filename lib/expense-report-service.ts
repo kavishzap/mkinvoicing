@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type ExpenseReportFilters = {
   startDate: string;
@@ -48,12 +49,12 @@ async function getUserId() {
 export async function getExpenseReportData(
   filters: ExpenseReportFilters
 ): Promise<ExpenseReportData> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const { data: rows, error } = await supabase
     .from("expenses")
     .select("id, description, amount, currency, expense_date")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .gte("expense_date", filters.startDate)
     .lte("expense_date", filters.endDate)
     .order("expense_date", { ascending: true });

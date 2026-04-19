@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { getReportData, type ReportData } from "@/lib/report-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import { AppPageShell } from "@/components/app-page-shell";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -488,21 +489,16 @@ export default function PnlReportPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/app/reportings">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">PnL Report</h1>
-            <p className="text-muted-foreground mt-1">
-              Revenue from paid invoices, purchase invoices (cost of purchases), expenses, and net profit
-            </p>
-          </div>
-        </div>
+    <AppPageShell
+      leading={
+        <Link href="/app/reportings">
+          <Button variant="ghost" size="icon" aria-label="Back to reportings">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle="Pick a period, review the figures below, and export a profit-and-loss PDF from invoices, purchases, and expenses."
+      actions={
         <Button
           variant="outline"
           size="sm"
@@ -522,8 +518,8 @@ export default function PnlReportPage() {
             </>
           )}
         </Button>
-      </div>
-
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Download Report</CardTitle>
@@ -583,7 +579,7 @@ export default function PnlReportPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">
+                    <p className="text-xl font-bold">
                       {reportData.currency}{" "}
                       {reportData.totalPaid.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -599,7 +595,7 @@ export default function PnlReportPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">
+                    <p className="text-xl font-bold">
                       {reportData.currency}{" "}
                       {reportData.totalPurchases.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -615,7 +611,7 @@ export default function PnlReportPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">
+                    <p className="text-xl font-bold">
                       {reportData.currency}{" "}
                       {reportData.totalExpense.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -631,7 +627,7 @@ export default function PnlReportPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">
+                    <p className="text-xl font-bold">
                       {reportData.currency}{" "}
                       {reportData.profitableIncome.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -879,6 +875,6 @@ export default function PnlReportPage() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

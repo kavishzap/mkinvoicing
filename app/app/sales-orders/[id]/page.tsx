@@ -16,6 +16,7 @@ import {
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function SalesOrderViewPage() {
   const params = useParams<{ id: string }>();
@@ -74,10 +75,10 @@ export default function SalesOrderViewPage() {
 
   if (!loading && !salesOrder) {
     return (
-      <div className="p-6">
+      <AppPageShell>
         <Card>
           <CardContent className="py-16 text-center">
-            <h2 className="text-2xl font-semibold mb-2">Sales order not found</h2>
+            <h2 className="text-xl font-semibold mb-2">Sales order not found</h2>
             <p className="text-muted-foreground mb-6">
               {error ?? "The sales order you're looking for doesn't exist."}
             </p>
@@ -86,19 +87,19 @@ export default function SalesOrderViewPage() {
             </Link>
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (loading || !salesOrder) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <AppPageShell className="max-w-7xl">
         <div className="flex items-center justify-between">
-          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
-          <div className="h-9 w-40 bg-muted rounded animate-pulse" />
+          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
         </div>
-        <div className="h-96 bg-muted rounded animate-pulse" />
-      </div>
+        <div className="h-96 animate-pulse rounded bg-muted" />
+      </AppPageShell>
     );
   }
 
@@ -150,32 +151,27 @@ export default function SalesOrderViewPage() {
     from.logoUrl || safeProfile.logoUrl || "/kredence.png";
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-4">
-          <Link href="/app/sales-orders">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Sales Order {salesOrder.number}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              View details and export PDF
-            </p>
-          </div>
+    <AppPageShell
+      className="max-w-7xl"
+      leading={
+        <Link href="/app/sales-orders">
+          <Button variant="ghost" size="icon" aria-label="Back to sales orders">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle={`${salesOrder.number}${billName ? ` · ${billName}` : ""} — Review lines and totals, export a PDF, or convert to an invoice when ready.`}
+      actions={
+        <div className="print:hidden">
+          <SalesOrderViewActions
+            salesOrderId={salesOrder.id}
+            salesOrder={salesOrder}
+            profile={profile}
+            logoSrc={logoSrc}
+          />
         </div>
-
-        <SalesOrderViewActions
-          salesOrderId={salesOrder.id}
-          salesOrder={salesOrder}
-          profile={profile}
-          logoSrc={logoSrc}
-        />
-      </div>
-
+      }
+    >
       <div className="lg:col-span-2 space-y-6">
         <Card className="shadow-lg">
           <CardContent className="p-8 space-y-8">
@@ -193,12 +189,12 @@ export default function SalesOrderViewPage() {
                     />
                   </div>
                 ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-xl mb-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg mb-3">
                     S
                   </div>
                 )}
 
-                <h2 className="text-2xl font-bold">{fromName}</h2>
+                <h2 className="text-xl font-bold">{fromName}</h2>
                 {fromEmail && (
                   <p className="text-sm text-muted-foreground mt-1">{fromEmail}</p>
                 )}
@@ -214,7 +210,7 @@ export default function SalesOrderViewPage() {
                 )}
               </div>
               <div className="text-right">
-                <h3 className="text-3xl font-bold text-muted-foreground">
+                <h3 className="text-2xl font-bold text-muted-foreground">
                   SALES ORDER
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -393,7 +389,7 @@ export default function SalesOrderViewPage() {
                     </div>
                   )}
                   <Separator />
-                  <div className="flex justify-between text-lg font-bold">
+                  <div className="flex justify-between text-base font-bold">
                     <span>Total</span>
                     <span>
                       {new Intl.NumberFormat("en-US", {
@@ -437,6 +433,6 @@ export default function SalesOrderViewPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AppPageShell>
   );
 }

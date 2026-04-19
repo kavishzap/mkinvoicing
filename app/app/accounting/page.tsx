@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { BookOpen, Users, Lock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { AppPageShell } from "@/components/app-page-shell";
 
 const accountingCards = [
   {
@@ -26,14 +27,7 @@ export default function AccountingPage() {
   const router = useRouter();
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Accounting</h1>
-        <p className="text-muted-foreground mt-1">
-          Access accounting ledgers and books
-        </p>
-      </div>
-
+    <AppPageShell subtitle="Jump into the ledger that matches what you’re reconciling—general entries or balances by contact.">
       <div className="grid grid-cols-1 gap-6">
         {accountingCards.map((card) => {
           const Icon = card.icon;
@@ -81,6 +75,6 @@ export default function AccountingPage() {
           );
         })}
       </div>
-    </div>
+    </AppPageShell>
   );
 }

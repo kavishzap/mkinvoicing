@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { AppPageShell } from "@/components/app-page-shell";
 
 const inventoryCards = [
   {
@@ -39,14 +40,7 @@ export default function InventoryPage() {
   const router = useRouter();
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Inventory</h1>
-        <p className="text-muted-foreground mt-1">
-          Products, storage locations, and stock in one place
-        </p>
-      </div>
-
+    <AppPageShell subtitle="Manage what you sell, where it sits, and how levels move between locations.">
       <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         {inventoryCards.map((card) => {
           const Icon = card.icon;
@@ -63,7 +57,7 @@ export default function InventoryPage() {
             >
               <CardHeader className="flex flex-row items-start justify-between space-y-0">
                 <div className="space-y-1.5">
-                  <CardTitle className="flex items-center gap-2 text-lg">
+                  <CardTitle className="flex items-center gap-2 text-base">
                     {card.title}
                     {card.locked && (
                       <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -94,6 +88,6 @@ export default function InventoryPage() {
           );
         })}
       </div>
-    </div>
+    </AppPageShell>
   );
 }

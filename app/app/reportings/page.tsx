@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { BarChart3, Receipt, TrendingUp, Lock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { AppPageShell } from "@/components/app-page-shell";
 
 const reportCards = [
   {
@@ -33,14 +34,7 @@ export default function ReportingsPage() {
   const router = useRouter();
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Reportings</h1>
-        <p className="text-muted-foreground mt-1">
-          Access sales, expense, and profit & loss reports
-        </p>
-      </div>
-
+    <AppPageShell subtitle="Pick profit & loss, sales, or expense reports—each opens in one click.">
       <div className="grid grid-cols-1 gap-6">
         {reportCards.map((card) => {
           const Icon = card.icon;
@@ -88,6 +82,6 @@ export default function ReportingsPage() {
           );
         })}
       </div>
-    </div>
+    </AppPageShell>
   );
 }

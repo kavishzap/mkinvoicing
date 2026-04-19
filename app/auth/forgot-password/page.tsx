@@ -9,17 +9,15 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabaseClient";
-import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
+import {
+  authInputClass,
+  authLabelClass,
+  authMutedLinkClass,
+  authPanelClass,
+  authPrimaryButtonClass,
+} from "@/lib/auth-ui";
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
@@ -49,12 +47,15 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
-      });
+      const { error: resetErr } = await supabase.auth.resetPasswordForEmail(
+        email,
+        {
+          redirectTo: `${window.location.origin}/auth/update-password`,
+        }
+      );
 
-      if (error) {
-        throw error;
+      if (resetErr) {
+        throw resetErr;
       }
 
       toast({
@@ -64,10 +65,11 @@ export default function ForgotPasswordPage() {
       });
 
       router.push("/auth/login");
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: "Error",
-        description: err?.message || "Something went wrong.",
+        description:
+          err instanceof Error ? err.message : "Something went wrong.",
         variant: "destructive",
       });
     } finally {
@@ -76,73 +78,60 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <Card className="shadow-lg border-border/50 max-w-md mx-auto">
-      {/* ✅ Logo/Header */}
-      <CardHeader className="space-y-2">
-        <div className="flex flex-col items-center text-center">
-          <div className="pt-6 pb-2">
-            <div className="flex items-center gap-2">
-              <Image
-                src={Logo}
-                alt="MoLedger logo"
-                width={32}
-                height={32}
-                className="rounded-md shadow-sm"
-                priority
-              />
-              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
-            </div>
-          </div>
-          <CardTitle className="text-2xl font-bold">Forgot password?</CardTitle>
-          <CardDescription>
-            Enter your email and we'll send you a reset link
-          </CardDescription>
-        </div>
-      </CardHeader>
-
-      <form onSubmit={handleSubmit} noValidate>
-        <CardContent className="space-y-4">
-          <div className="space-y-2 mb-4">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onBlur={validateEmail}
-              className={error ? "border-destructive" : ""}
-            />
-            {error && <p className="text-sm text-destructive">{error}</p>}
-          </div>
-        </CardContent>
-
-        <CardFooter className="flex flex-col space-y-4">
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? "Sending..." : "Send reset link"}
-          </Button>
-
-          <Link
-            href="/auth/login"
-            className="flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to sign in
-          </Link>
-        </CardFooter>
-      </form>
-      <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+    <div className={authPanelClass}>
+      <div className="mb-6 flex flex-col items-center text-center">
+        <Link
+          href="/main"
+          className="mb-5 inline-flex flex-col items-center gap-2 transition-opacity hover:opacity-90"
+        >
           <Image
-            src={Logo}
-            alt="MoLedger logo small"
-            width={18}
-            height={18}
-            className="rounded-sm"
+            src="/logo2.png"
+            alt="MoLedger"
+            width={160}
+            height={160}
+            className="h-11 w-auto object-contain sm:h-12"
+            priority
           />
-          <span>MoLedger</span>
-        </div>
+        </Link>
+        <h1 className="text-2xl font-bold tracking-tight">Forgot password?</h1>
+        <p className="mt-2 text-sm text-white/60">
+          Enter your email and we&apos;ll send you a reset link
+        </p>
       </div>
-    </Card>
+
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="email" className={authLabelClass}>
+            Email
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="name@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onBlur={validateEmail}
+            className={`${authInputClass} ${error ? "border-red-500" : ""}`}
+          />
+          {error && <p className="text-sm text-red-400">{error}</p>}
+        </div>
+
+        <Button
+          type="submit"
+          className={authPrimaryButtonClass}
+          disabled={isLoading}
+        >
+          {isLoading ? "Sending…" : "Send reset link"}
+        </Button>
+
+        <Link
+          href="/auth/login"
+          className={`flex items-center justify-center gap-2 ${authMutedLinkClass}`}
+        >
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          Back to sign in
+        </Link>
+      </form>
+    </div>
   );
 }

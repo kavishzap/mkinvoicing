@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { listPayrollRuns, runPayroll } from "@/lib/payroll-runs-service";
+import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 
 function formatCurrency(amount: number) {
@@ -85,21 +86,16 @@ export default function PayrollRunsPage() {
   const years = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center gap-4">
+    <AppPageShell
+      leading={
         <Link href="/app/payroll">
-          <Button variant="ghost" size="icon">
+          <Button variant="ghost" size="icon" aria-label="Back to payroll">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Run Payroll</h1>
-          <p className="text-muted-foreground mt-1">
-            Process monthly payroll and manage payslips
-          </p>
-        </div>
-      </div>
-
+      }
+      subtitle="Pick a month, run payroll to generate payslips, then open a run to pay staff or download PDFs."
+    >
       <Card>
         <CardHeader>
           <CardTitle>Process Payroll</CardTitle>
@@ -200,6 +196,6 @@ export default function PayrollRunsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

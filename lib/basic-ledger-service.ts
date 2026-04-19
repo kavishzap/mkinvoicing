@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 /** Chart of accounts (simplified for SME) */
 export const CHART_OF_ACCOUNTS = [
@@ -79,7 +80,7 @@ function computeInvoiceTotal(
 }
 
 export async function getBasicLedgerData(filters: BasicLedgerFilters): Promise<BasicLedgerData> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const [invRes, piRes, expRes] = await Promise.all([
     supabase
@@ -91,6 +92,7 @@ export async function getBasicLedgerData(filters: BasicLedgerFilters): Promise<B
         invoice_items ( quantity, unit_price, tax_percent )
       `
       )
+      .eq("company_id", companyId)
       .neq("status", "cancelled")
       .gte("issue_date", filters.startDate)
       .lte("issue_date", filters.endDate)
@@ -98,6 +100,7 @@ export async function getBasicLedgerData(filters: BasicLedgerFilters): Promise<B
     supabase
       .from("purchase_invoices")
       .select("id, number, issue_date, status, currency, from_snapshot, amount_paid, amount_due, total")
+      .eq("company_id", companyId)
       .neq("status", "cancelled")
       .gte("issue_date", filters.startDate)
       .lte("issue_date", filters.endDate)
@@ -105,7 +108,7 @@ export async function getBasicLedgerData(filters: BasicLedgerFilters): Promise<B
     supabase
       .from("expenses")
       .select("id, description, amount, currency, expense_date")
-      .eq("user_id", userId)
+      .eq("company_id", companyId)
       .gte("expense_date", filters.startDate)
       .lte("expense_date", filters.endDate)
       .order("expense_date", { ascending: true }),

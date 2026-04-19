@@ -31,6 +31,7 @@ import {
   getDashboardStats,
   getIncomeOverTime,
 } from "@/lib/dashboard-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 const chartConfig = {
   income: {
@@ -91,15 +92,7 @@ export default function DashboardPage() {
 
   if (loading || !stats) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">
-              Overview of your invoicing and expenses
-            </p>
-          </div>
-        </div>
+      <AppPageShell subtitle="See how sales, cash in, and costs look at a glance—then open any module from the sidebar.">
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <Card key={i}>
@@ -120,21 +113,12 @@ export default function DashboardPage() {
             <div className="h-64 bg-muted rounded animate-pulse" />
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Overview of your invoicing and expenses
-          </p>
-        </div>
-      </div>
-
+    <AppPageShell subtitle="See how sales, cash in, and costs look at a glance—then open any module from the sidebar.">
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" data-tour-id="dashboard">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -144,7 +128,7 @@ export default function DashboardPage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-xl font-bold">
               {formatCurrency(stats.netSales, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -161,7 +145,7 @@ export default function DashboardPage() {
             <Banknote className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">
+            <div className="text-xl font-bold text-green-600">
               {formatCurrency(stats.totalPaid, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -178,7 +162,7 @@ export default function DashboardPage() {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+            <div className="text-xl font-bold text-amber-600 dark:text-amber-400">
               {formatCurrency(stats.totalOverdue, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -195,7 +179,7 @@ export default function DashboardPage() {
             <Receipt className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-xl font-bold">
               {formatCurrency(stats.totalExpense, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -212,7 +196,7 @@ export default function DashboardPage() {
             <Coins className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-xl font-bold">
               {formatCurrency(stats.totalCustomerCredit, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -229,7 +213,7 @@ export default function DashboardPage() {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-xl font-bold">
               {stats.customerCount}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -246,7 +230,7 @@ export default function DashboardPage() {
             <Truck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <div className="text-xl font-bold">
               {stats.supplierCount}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -264,7 +248,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div
-              className={`text-2xl font-bold ${
+              className={`text-xl font-bold ${
                 stats.profitableIncome >= 0
                   ? "text-green-600"
                   : "text-red-600"
@@ -328,6 +312,6 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

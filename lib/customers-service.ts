@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-import { getActiveCompanyId } from "@/lib/active-company";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type CustomerPayload = {
   type: "company" | "individual";
@@ -43,7 +43,7 @@ export async function listCustomers(opts?: {
   page?: number; // 1-based
   pageSize?: number; // default 10
 }): Promise<{ rows: CustomerRow[]; total: number }> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
@@ -52,7 +52,7 @@ export async function listCustomers(opts?: {
   let q = supabase
     .from("customers")
     .select(COLUMNS, { count: "exact" })
-    .eq("user_id", userId) // redundant with RLS but helps avoid silent no-ops
+    .eq("company_id", companyId)
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -63,7 +63,6 @@ export async function listCustomers(opts?: {
   const term = opts?.search?.trim();
   if (term) {
     const s = `%${term}%`;
-    // search company name, full name, and email
     q = q.or(
       [
         `company_name.ilike.${s}`,
@@ -89,8 +88,7 @@ export async function listCustomers(opts?: {
 export async function listCustomersForCompany(opts?: {
   search?: string;
 }): Promise<CustomerRow[]> {
-  const companyId = await getActiveCompanyId();
-  if (!companyId) return [];
+  const companyId = await requireActiveCompanyId();
 
   let q = supabase
     .from("customers")
@@ -122,9 +120,13 @@ export async function listCustomersForCompany(opts?: {
 export async function addCustomer(
   payload: CustomerPayload
 ): Promise<CustomerRow> {
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
   const insert = {
     user_id: userId,
+    company_id: companyId,
     type: payload.type,
     company_name: payload.companyName || null,
     contact_name: payload.contactName || null,
@@ -155,7 +157,7 @@ export async function updateCustomer(
   id: string,
   payload: Partial<CustomerPayload>
 ): Promise<CustomerRow> {
-  await getUserId(); // ensure auth
+  const companyId = await requireActiveCompanyId();
 
   const update: Record<string, any> = {};
   if (payload.type) update.type = payload.type;
@@ -177,11 +179,11 @@ export async function updateCustomer(
     update.address_line_2 = payload.address_line_2 ?? null;
   if ("isActive" in payload) update.is_active = payload.isActive;
 
-  // Return updated row; if RLS blocks or id not found, data will be null.
   const { data, error } = await supabase
     .from("customers")
     .update(update)
     .eq("id", id)
+    .eq("company_id", companyId)
     .select(COLUMNS)
     .single();
 
@@ -195,12 +197,13 @@ export async function setCustomerActive(
   id: string,
   active: boolean
 ): Promise<CustomerRow> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
 
   const { data, error } = await supabase
     .from("customers")
     .update({ is_active: active })
     .eq("id", id)
+    .eq("company_id", companyId)
     .select(COLUMNS)
     .single();
 
@@ -219,14 +222,14 @@ export type CustomersByMonth = {
 export async function getCustomersByMonth(
   year?: number
 ): Promise<CustomersByMonth[]> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const y = year ?? new Date().getFullYear();
   const startDate = `${y}-01-01T00:00:00`;
   const endDate = `${y}-12-31T23:59:59`;
   const { data, error } = await supabase
     .from("customers")
     .select("created_at")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .gte("created_at", startDate)
     .lte("created_at", endDate);
 
@@ -264,13 +267,13 @@ export async function getCustomersByMonthForRange(
   startDate: string,
   endDate: string
 ): Promise<CustomersByMonth[]> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const start = `${startDate}T00:00:00`;
   const end = `${endDate}T23:59:59`;
   const { data, error } = await supabase
     .from("customers")
     .select("created_at")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .gte("created_at", start)
     .lte("created_at", end);
 
@@ -311,9 +314,13 @@ export async function getCustomersByMonthForRange(
 
 /** Delete by id */
 export async function deleteCustomer(id: string): Promise<void> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
 
-  const { error } = await supabase.from("customers").delete().eq("id", id);
+  const { error } = await supabase
+    .from("customers")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }

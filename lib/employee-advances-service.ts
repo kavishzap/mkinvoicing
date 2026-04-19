@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type AdvanceStatus = "active" | "fully_deducted";
 
@@ -35,11 +36,11 @@ function mapRow(r: Record<string, unknown>): EmployeeAdvanceRow {
 }
 
 export async function listAdvancesByEmployee(employeeId: string): Promise<EmployeeAdvanceRow[]> {
-  const userId = await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
     .from("employee_advances")
     .select("*")
-    .eq("user_id", userId)
+    .eq("company_id", companyId)
     .eq("employee_id", employeeId)
     .order("created_at", { ascending: false });
 
@@ -58,9 +59,13 @@ export async function addAdvance(params: {
   deduction_per_period: number;
   notes?: string;
 }): Promise<EmployeeAdvanceRow> {
-  const userId = await getUserId();
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
   const insert = {
     user_id: userId,
+    company_id: companyId,
     employee_id: params.employee_id,
     amount: Number(params.amount),
     amount_deducted: 0,
@@ -83,11 +88,12 @@ export async function updateAdvanceDeducted(
   id: string,
   amountDeducted: number
 ): Promise<void> {
-  await getUserId();
+  const companyId = await requireActiveCompanyId();
   const { data: existing } = await supabase
     .from("employee_advances")
     .select("amount, amount_deducted")
     .eq("id", id)
+    .eq("company_id", companyId)
     .single();
 
   if (!existing) throw new Error("Advance not found");
@@ -98,7 +104,8 @@ export async function updateAdvanceDeducted(
   const { error } = await supabase
     .from("employee_advances")
     .update({ amount_deducted: newDeducted, status })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("company_id", companyId);
 
   if (error) throw error;
 }

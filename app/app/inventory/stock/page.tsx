@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { AppPageShell } from "@/components/app-page-shell";
 import { getActiveCompanyId } from "@/lib/active-company";
 import { listActiveLocationsForSelect, type LocationOption } from "@/lib/locations-service";
 import { listProducts, type ProductRow } from "@/lib/products-service";
@@ -381,21 +382,16 @@ export default function InventoryStockPage() {
   const movPages = Math.max(1, Math.ceil(movTotal / movPageSize));
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="space-y-1">
-        <Button variant="ghost" size="sm" className="-ml-2 w-fit gap-1" asChild>
-          <Link href="/app/inventory">
+    <AppPageShell
+      leading={
+        <Link href="/app/inventory">
+          <Button variant="ghost" size="icon" aria-label="Back to inventory">
             <ArrowLeft className="h-4 w-4" />
-            Inventory
-          </Link>
-        </Button>
-        <h1 className="text-3xl font-bold tracking-tight">Stock management</h1>
-        <p className="text-muted-foreground">
-          View balances by location, transfer stock, record refills, and review movement history
-          (all changes go through <code className="rounded bg-muted px-1 text-xs">inventory_movements</code>).
-        </p>
-      </div>
-
+          </Button>
+        </Link>
+      }
+      subtitle="Check quantities by location, transfer or adjust stock, and browse movement history for this company."
+    >
       {companyReady === false && (
         <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
           <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
@@ -432,7 +428,7 @@ export default function InventoryStockPage() {
           <Card>
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <CardTitle className="text-lg">On-hand by location</CardTitle>
+                <CardTitle className="text-base">On-hand by location</CardTitle>
                 <CardDescription>
                   Current quantity per product and warehouse (from live balances).
                 </CardDescription>
@@ -576,7 +572,7 @@ export default function InventoryStockPage() {
         <TabsContent value="transfer">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Transfer between locations</CardTitle>
+              <CardTitle className="text-base">Transfer between locations</CardTitle>
               <CardDescription>
                 Moves quantity from one warehouse to another for the same product. Creates a history
                 entry and updates balances automatically.
@@ -681,7 +677,7 @@ export default function InventoryStockPage() {
         <TabsContent value="refill">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Refill / inbound stock</CardTitle>
+              <CardTitle className="text-base">Refill / inbound stock</CardTitle>
               <CardDescription>
                 Increase quantity at a location (new delivery, production, etc.).
               </CardDescription>
@@ -763,7 +759,7 @@ export default function InventoryStockPage() {
         <TabsContent value="adjust">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Stock out / adjustment</CardTitle>
+              <CardTitle className="text-base">Stock out / adjustment</CardTitle>
               <CardDescription>
                 Reduce quantity at one location (damage, shrinkage, samples). Does not move stock to
                 another location.
@@ -846,7 +842,7 @@ export default function InventoryStockPage() {
           <Card>
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <CardTitle className="text-lg">Movement history</CardTitle>
+                <CardTitle className="text-base">Movement history</CardTitle>
                 <CardDescription>Immutable log of transfers, refills, and stock-outs.</CardDescription>
               </div>
               <Button
@@ -950,6 +946,6 @@ export default function InventoryStockPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+    </AppPageShell>
   );
 }

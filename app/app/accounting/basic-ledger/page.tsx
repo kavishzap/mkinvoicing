@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { AppPageShell } from "@/components/app-page-shell";
 import {
   getBasicLedgerData,
   CHART_OF_ACCOUNTS,
@@ -156,21 +157,16 @@ export default function BasicLedgerPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/app/accounting">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Basic Accounting Ledger</h1>
-            <p className="text-muted-foreground mt-1">
-              Double-entry journal derived from sales, purchases, and expenses
-            </p>
-          </div>
-        </div>
+    <AppPageShell
+      leading={
+        <Link href="/app/accounting">
+          <Button variant="ghost" size="icon" aria-label="Back to accounting">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle="Review double-entry journal lines from sales, purchases, and expenses for the period—export a PDF when you need a file."
+      actions={
         <Button
           variant="outline"
           size="sm"
@@ -190,8 +186,8 @@ export default function BasicLedgerPage() {
             </>
           )}
         </Button>
-      </div>
-
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Ledger</CardTitle>
@@ -386,6 +382,6 @@ export default function BasicLedgerPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

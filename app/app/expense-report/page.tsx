@@ -22,6 +22,7 @@ import {
   type ExpenseReportFilters,
 } from "@/lib/expense-report-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import { AppPageShell } from "@/components/app-page-shell";
 import { generateExpenseReportPDF } from "@/lib/expense-report-pdf";
 
 type ReportRange = "monthly" | "yearly" | "custom";
@@ -147,21 +148,16 @@ export default function ExpenseReportPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/app/reportings">
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Expense Report</h1>
-            <p className="text-muted-foreground mt-1">
-              Total expenses, breakdown by category, and detailed expense list
-            </p>
-          </div>
-        </div>
+    <AppPageShell
+      leading={
+        <Link href="/app/reportings">
+          <Button variant="ghost" size="icon" aria-label="Back to reportings">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
+      subtitle="Choose a period to see expense totals, category breakdown, and line detail—then export a PDF."
+      actions={
         <Button
           variant="outline"
           size="sm"
@@ -181,8 +177,8 @@ export default function ExpenseReportPage() {
             </>
           )}
         </Button>
-      </div>
-
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Download Report</CardTitle>
@@ -243,7 +239,7 @@ export default function ExpenseReportPage() {
                     <CardTitle className="text-sm font-medium">Total Expenses</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">{formatCurrency(data.totalExpenses, data.currency)}</p>
+                    <p className="text-xl font-bold">{formatCurrency(data.totalExpenses, data.currency)}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -251,7 +247,7 @@ export default function ExpenseReportPage() {
                     <CardTitle className="text-sm font-medium">Expense Count</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">{data.expenseCount}</p>
+                    <p className="text-xl font-bold">{data.expenseCount}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -259,7 +255,7 @@ export default function ExpenseReportPage() {
                     <CardTitle className="text-sm font-medium">Average Daily Expense</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-bold">
+                    <p className="text-xl font-bold">
                       {formatCurrency(data.averageDailyExpense, data.currency)}
                     </p>
                   </CardContent>
@@ -419,6 +415,6 @@ export default function ExpenseReportPage() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }

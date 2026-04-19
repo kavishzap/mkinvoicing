@@ -2,7 +2,7 @@
  export const dynamic = "force-dynamic";
 
  import { useEffect, useState } from "react";
- import { useParams, useRouter } from "next/navigation";
+ import { useParams } from "next/navigation";
  import Link from "next/link";
  import { ArrowLeft, Download } from "lucide-react";
  import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { getExpense, type ExpenseRow } from "@/lib/expenses-service";
 import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 async function imageUrlToDataURL(
   url: string
@@ -197,7 +198,6 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
 
  export default function ExpenseViewPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { toast } = useToast();
   const id = params.id;
 
@@ -272,10 +272,10 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
 
   if (!loading && !expense) {
     return (
-      <div className="p-6">
+      <AppPageShell>
         <Card>
           <CardContent className="py-16 text-center">
-            <h2 className="text-2xl font-semibold mb-2">Expense not found</h2>
+            <h2 className="text-xl font-semibold mb-2">Expense not found</h2>
             <p className="text-muted-foreground mb-6">
               {error ?? "The expense you're looking for doesn't exist."}
             </p>
@@ -284,19 +284,19 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
             </Link>
           </CardContent>
         </Card>
-      </div>
+      </AppPageShell>
     );
   }
 
   if (loading || !expense) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <AppPageShell className="max-w-7xl">
         <div className="flex items-center justify-between">
-          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
-          <div className="h-9 w-40 bg-muted rounded animate-pulse" />
+          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
         </div>
-        <div className="h-80 bg-muted rounded animate-pulse" />
-      </div>
+        <div className="h-80 animate-pulse rounded bg-muted" />
+      </AppPageShell>
     );
   }
 
@@ -304,26 +304,17 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
   const ccy = expense.currency || "MUR";
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => router.push("/app/expenses")}
-          >
+    <AppPageShell
+      className="max-w-7xl"
+      leading={
+        <Link href="/app/expenses">
+          <Button variant="ghost" size="icon" aria-label="Back to expenses">
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              Expense {fmtDate(expense.expense_date)}
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              View expense details and line items
-            </p>
-          </div>
-        </div>
+        </Link>
+      }
+      subtitle={`${fmtDate(expense.expense_date)}${expense.description ? ` · ${expense.description}` : ""} — Review line items or download a PDF.`}
+      actions={
         <Button
           variant="outline"
           className="gap-2"
@@ -342,8 +333,8 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
           <Download className="h-4 w-4" />
           Download PDF
         </Button>
-      </div>
-
+      }
+    >
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle>Expense Summary</CardTitle>
@@ -462,7 +453,7 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
           </div>
         </CardContent>
       </Card>
-    </div>
+    </AppPageShell>
   );
 }
 

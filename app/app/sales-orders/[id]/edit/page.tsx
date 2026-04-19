@@ -57,6 +57,7 @@ import {
   type SalesOrderLinePayload,
   type SalesOrderStatus,
 } from "@/lib/sales-orders-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -493,7 +494,7 @@ export default function EditSalesOrderPage() {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -510,23 +511,28 @@ export default function EditSalesOrderPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href={salesOrderId ? `/app/sales-orders/${salesOrderId}` : "/app/sales-orders"}>
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={`${salesOrderNumber} — Update customer, lines, or totals, then save.`}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={
+              salesOrderId
+                ? `/app/sales-orders/${salesOrderId}`
+                : "/app/sales-orders"
+            }
+          >
+            <Button variant="ghost" size="icon" aria-label="Back to sales order">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={saveSalesOrder} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save changes"}
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Edit Sales Order
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            <span className="font-medium">{salesOrderNumber}</span>
-          </p>
         </div>
-      </div>
-
+      }
+    >
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1097,7 +1103,7 @@ export default function EditSalesOrderPage() {
                 </div>
               </div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1106,12 +1112,6 @@ export default function EditSalesOrderPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={saveSalesOrder} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save changes"}
-        </Button>
       </div>
 
       <Dialog
@@ -1173,6 +1173,6 @@ export default function EditSalesOrderPage() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }

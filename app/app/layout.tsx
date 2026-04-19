@@ -1,6 +1,12 @@
 import type React from "react"
 import { AppSidebar } from "@/components/app-sidebar"
+import { AppShellFooter } from "@/components/app-shell-footer"
 import { AppTopbar } from "@/components/app-topbar"
+import { AppFeaturesProvider } from "@/contexts/app-features-context"
+import { AppAccountProvider } from "@/contexts/app-account-context"
+import { SidebarCollapseProvider } from "@/contexts/sidebar-collapse-context"
+import { AppFeatureRouteGuard } from "@/components/app-feature-route-guard"
+import { AppPageActionsProvider } from "@/contexts/app-page-actions-context"
 
 export default function AppLayout({
   children,
@@ -8,12 +14,23 @@ export default function AppLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex h-screen overflow-hidden">
-      <AppSidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <AppTopbar />
-        <main className="flex-1 overflow-y-auto bg-background">{children}</main>
-      </div>
-    </div>
+    <AppFeaturesProvider>
+      <AppAccountProvider>
+        <SidebarCollapseProvider>
+        <AppPageActionsProvider>
+        <div className="flex h-screen overflow-hidden text-sm">
+          <AppSidebar />
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <AppTopbar />
+            <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-background">
+              <AppFeatureRouteGuard>{children}</AppFeatureRouteGuard>
+            </main>
+            <AppShellFooter />
+          </div>
+        </div>
+        </AppPageActionsProvider>
+        </SidebarCollapseProvider>
+      </AppAccountProvider>
+    </AppFeaturesProvider>
   )
 }

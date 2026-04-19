@@ -57,6 +57,7 @@ import {
   type QuotationLinePayload,
   type QuotationStatus,
 } from "@/lib/quotations-service";
+import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 
 type LineItem = {
   id: string;
@@ -502,9 +503,13 @@ function NewQuotationPageContent() {
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
   const showLogo = (profile as { logoUrl?: string })?.logoUrl;
 
+  const headerSubtitle = duplicatedFromNumber
+    ? `Copied from ${duplicatedFromNumber}. Next number ${quotationNumber} — save when you are ready to create a new quotation.`
+    : `Next number ${quotationNumber}. Choose a customer, add line items, then save.`;
+
   if (loading) {
     return (
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
         <div className="flex items-center justify-between">
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="flex gap-2">
@@ -521,32 +526,22 @@ function NewQuotationPageContent() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/app/quotations">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-4 w-4" />
+    <AppPageShell
+      className="max-w-7xl"
+      subtitle={headerSubtitle}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/app/quotations">
+            <Button variant="ghost" size="icon" aria-label="Back to quotations">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Button onClick={doCreateQuotation} disabled={saving} size="sm">
+            {saving ? "Saving..." : "Save & View"}
           </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Create Quotation
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Next number: <span className="font-medium">{quotationNumber}</span>
-          </p>
-          {duplicatedFromNumber && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Filled from{" "}
-              <span className="font-medium text-foreground">
-                {duplicatedFromNumber}
-              </span>{" "}
-              — save when ready to create a new quotation.
-            </p>
-          )}
         </div>
-      </div>
-
+      }
+    >
       <div className="grid lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -1117,7 +1112,7 @@ function NewQuotationPageContent() {
                 </div>
               </div>
               <Separator />
-              <div className="flex justify-between text-lg font-bold">
+              <div className="flex justify-between text-base font-bold">
                 <span>Total</span>
                 <span>
                   {preferences?.currency} {total.toFixed(2)}
@@ -1126,12 +1121,6 @@ function NewQuotationPageContent() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4">
-        <Button onClick={doCreateQuotation} disabled={saving} size="lg">
-          {saving ? "Saving..." : "Save & View"}
-        </Button>
       </div>
 
       <Dialog
@@ -1193,7 +1182,7 @@ function NewQuotationPageContent() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
 
@@ -1201,7 +1190,7 @@ export default function NewQuotationPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-6 max-w-7xl mx-auto space-y-6">
+        <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="h-56 rounded bg-muted animate-pulse" />

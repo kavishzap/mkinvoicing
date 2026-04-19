@@ -5,21 +5,19 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient"; // ✅ add your supabase client
-import Logo from "@/lib/ChatGPT_Image_Mar_16__2026__10_42_30_PM-removebg-preview.png";
+import { supabase } from "@/lib/supabaseClient";
+import {
+  authInputClass,
+  authLabelClass,
+  authMutedLinkClass,
+  authPanelClass,
+  authPrimaryButtonClass,
+} from "@/lib/auth-ui";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -69,13 +67,12 @@ export default function RegisterPage() {
 
       const { email, password, firstName, lastName } = formData;
 
-      // 👇 Supabase registration
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: { first_name: firstName, last_name: lastName },
-          emailRedirectTo: `${window.location.origin}/auth/login`, // where verification link lands (if enabled)
+          emailRedirectTo: `${window.location.origin}/auth/login`,
         },
       });
 
@@ -83,9 +80,7 @@ export default function RegisterPage() {
         throw error;
       }
 
-      // If email confirmations are enabled in Supabase, user must verify first.
-      // If disabled, they can sign in immediately.
-      const emailConfirmOn = true; // set this to match your Supabase Auth settings if you want to customize the message
+      const emailConfirmOn = true;
 
       toast({
         title: "Account created!",
@@ -95,11 +90,13 @@ export default function RegisterPage() {
       });
 
       router.push("/auth/login");
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: "Registration failed",
         description:
-          err?.message ?? "Something went wrong while creating your account.",
+          err instanceof Error
+            ? err.message
+            : "Something went wrong while creating your account.",
         variant: "destructive",
       });
     } finally {
@@ -112,171 +109,176 @@ export default function RegisterPage() {
   };
 
   return (
-    <Card className="shadow-lg border-border/50 max-w-md mx-auto">
-      {/* Brand Header */}
-      <CardHeader className="space-y-2">
-        <div className="flex flex-col items-center text-center">
-          <div className="pt-6 pb-2">
-            <Link href="/main" className="flex items-center justify-center gap-2 hover:opacity-80 transition">
-              <Image
-                src={Logo}
-                alt="MoLedger logo"
-                width={32}
-                height={32}
-                className="rounded-md shadow-sm"
-                priority
-              />
-              <span className="text-3xl font-bold tracking-tight">MoLedger</span>
-            </Link>
-          </div>
-          <CardTitle className="text-2xl font-bold">Register</CardTitle>
-          <CardDescription>
-            Create an account to get started
-          </CardDescription>
-          
-        </div>
-      </CardHeader>{" "}
-      <form onSubmit={handleSubmit} noValidate>
-        <CardContent className="space-y-4 pt-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First name</Label>
-              <Input
-                id="firstName"
-                placeholder="John"
-                value={formData.firstName}
-                onChange={(e) => handleChange("firstName", e.target.value)}
-                onBlur={validateForm}
-                className={errors.firstName ? "border-destructive" : ""}
-              />
-              {errors.firstName && (
-                <p className="text-sm text-destructive">{errors.firstName}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last name</Label>
-              <Input
-                id="lastName"
-                placeholder="Doe"
-                value={formData.lastName}
-                onChange={(e) => handleChange("lastName", e.target.value)}
-                onBlur={validateForm}
-                className={errors.lastName ? "border-destructive" : ""}
-              />
-              {errors.lastName && (
-                <p className="text-sm text-destructive">{errors.lastName}</p>
-              )}
-            </div>
-          </div>
+    <div className={authPanelClass}>
+      <div className="mb-6 flex flex-col items-center text-center">
+        <Link
+          href="/main"
+          className="mb-5 inline-flex flex-col items-center gap-2 transition-opacity hover:opacity-90"
+        >
+          <Image
+            src="/logo2.png"
+            alt="MoLedger"
+            width={160}
+            height={160}
+            className="h-11 w-auto object-contain sm:h-12"
+            priority
+          />
+        </Link>
+        <h1 className="text-2xl font-bold tracking-tight">Register</h1>
+        <p className="mt-2 text-sm text-white/60">
+          Create an account to get started
+        </p>
+      </div>
 
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+            <Label htmlFor="firstName" className={authLabelClass}>
+              First name
+            </Label>
             <Input
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              value={formData.email}
-              onChange={(e) => handleChange("email", e.target.value)}
+              id="firstName"
+              placeholder="John"
+              value={formData.firstName}
+              onChange={(e) => handleChange("firstName", e.target.value)}
               onBlur={validateForm}
-              className={errors.email ? "border-destructive" : ""}
-              autoComplete="email"
+              className={`${authInputClass} ${errors.firstName ? "border-red-500" : ""}`}
             />
-            {errors.email && (
-              <p className="text-sm text-destructive">{errors.email}</p>
+            {errors.firstName && (
+              <p className="text-sm text-red-400">{errors.firstName}</p>
             )}
           </div>
-
           <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <div className="relative">
-              <Input
-                id="password"
-                type={showPwd ? "text" : "password"}
-                placeholder="Create a password (min. 8 characters)"
-                value={formData.password}
-                onChange={(e) => handleChange("password", e.target.value)}
-                onBlur={validateForm}
-                className={
-                  errors.password ? "border-destructive pr-10" : "pr-10"
-                }
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                aria-label={showPwd ? "Hide password" : "Show password"}
-                className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowPwd((s) => !s)}
-              >
-                {showPwd ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-            {errors.password && (
-              <p className="text-sm text-destructive">{errors.password}</p>
+            <Label htmlFor="lastName" className={authLabelClass}>
+              Last name
+            </Label>
+            <Input
+              id="lastName"
+              placeholder="Doe"
+              value={formData.lastName}
+              onChange={(e) => handleChange("lastName", e.target.value)}
+              onBlur={validateForm}
+              className={`${authInputClass} ${errors.lastName ? "border-red-500" : ""}`}
+            />
+            {errors.lastName && (
+              <p className="text-sm text-red-400">{errors.lastName}</p>
             )}
           </div>
+        </div>
 
-          <div className="space-y-2 mb-4">
-            <Label htmlFor="confirmPassword">Confirm password</Label>
-            <div className="relative">
-              <Input
-                id="confirmPassword"
-                type={showConfirmPwd ? "text" : "password"}
-                placeholder="Confirm your password"
-                value={formData.confirmPassword}
-                onChange={(e) =>
-                  handleChange("confirmPassword", e.target.value)
-                }
-                onBlur={validateForm}
-                className={
-                  errors.confirmPassword ? "border-destructive pr-10" : "pr-10"
-                }
-                autoComplete="new-password"
-              />
-              <button
-                type="button"
-                aria-label={showConfirmPwd ? "Hide password" : "Show password"}
-                className="absolute inset-y-0 right-2 flex items-center px-2 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowConfirmPwd((s) => !s)}
-              >
-                {showConfirmPwd ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-            {errors.confirmPassword && (
-              <p className="text-sm text-destructive">
-                {errors.confirmPassword}
-              </p>
-            )}
-          </div>
-        </CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="email" className={authLabelClass}>
+            Email
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            placeholder="name@example.com"
+            value={formData.email}
+            onChange={(e) => handleChange("email", e.target.value)}
+            onBlur={validateForm}
+            className={`${authInputClass} ${errors.email ? "border-red-500" : ""}`}
+            autoComplete="email"
+          />
+          {errors.email && (
+            <p className="text-sm text-red-400">{errors.email}</p>
+          )}
+        </div>
 
-        <CardFooter className="flex flex-col space-y-4">
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? "Creating account..." : "Create account"}
-          </Button>
-          <p className="text-sm text-center text-muted-foreground">
-            Already have an account?{" "}
-            <Link
-              href="/auth/login"
-              className="text-primary hover:underline font-medium"
+        <div className="space-y-2">
+          <Label htmlFor="password" className={authLabelClass}>
+            Password
+          </Label>
+          <div className="relative">
+            <Input
+              id="password"
+              type={showPwd ? "text" : "password"}
+              placeholder="Create a password (min. 8 characters)"
+              value={formData.password}
+              onChange={(e) => handleChange("password", e.target.value)}
+              onBlur={validateForm}
+              className={`${authInputClass} pr-10 ${errors.password ? "border-red-500" : ""}`}
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              aria-label={showPwd ? "Hide password" : "Show password"}
+              className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+              onClick={() => setShowPwd((s) => !s)}
             >
-              Sign in
-            </Link>
-          </p>
-        </CardFooter>
-      </form>
-      <div className="flex flex-col items-center justify-center mt-4 mb-2">
-        <Link href="/main" className="text-xs text-muted-foreground hover:text-foreground transition">
+              {showPwd ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+          {errors.password && (
+            <p className="text-sm text-red-400">{errors.password}</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="confirmPassword" className={authLabelClass}>
+            Confirm password
+          </Label>
+          <div className="relative">
+            <Input
+              id="confirmPassword"
+              type={showConfirmPwd ? "text" : "password"}
+              placeholder="Confirm your password"
+              value={formData.confirmPassword}
+              onChange={(e) =>
+                handleChange("confirmPassword", e.target.value)
+              }
+              onBlur={validateForm}
+              className={`${authInputClass} pr-10 ${errors.confirmPassword ? "border-red-500" : ""}`}
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              aria-label={showConfirmPwd ? "Hide password" : "Show password"}
+              className="absolute inset-y-0 right-2 flex items-center px-2 text-white/50 hover:text-white"
+              onClick={() => setShowConfirmPwd((s) => !s)}
+            >
+              {showConfirmPwd ? (
+                <EyeOff className="h-4 w-4" />
+              ) : (
+                <Eye className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+          {errors.confirmPassword && (
+            <p className="text-sm text-red-400">{errors.confirmPassword}</p>
+          )}
+        </div>
+
+        <Button
+          type="submit"
+          className={authPrimaryButtonClass}
+          disabled={isLoading}
+        >
+          {isLoading ? "Creating account…" : "Create account"}
+        </Button>
+
+        <p className="text-center text-sm text-white/55">
+          Already have an account?{" "}
+          <Link
+            href="/auth/login"
+            className="font-medium text-[#00f2ff] underline-offset-2 hover:underline"
+          >
+            Sign in
+          </Link>
+        </p>
+
+        <Link
+          href="/main"
+          className={`flex items-center justify-center gap-2 ${authMutedLinkClass}`}
+        >
+          <ArrowLeft className="h-4 w-4 shrink-0" />
           Back to home
         </Link>
-      </div>
-    </Card>
+      </form>
+    </div>
   );
 }

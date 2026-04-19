@@ -34,6 +34,7 @@ import {
   listExpenses,
   type ExpenseRow,
 } from "@/lib/expenses-service";
+import { AppPageShell } from "@/components/app-page-shell";
 
 export default function ExpensesPage() {
   const router = useRouter();
@@ -115,24 +116,19 @@ export default function ExpensesPage() {
   const currencyForSummary = expenses[0]?.currency ?? "MUR";
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Expenses</h1>
-          <p className="text-muted-foreground mt-1">
-            Track and manage your expenses
-          </p>
-        </div>
+    <AppPageShell
+      subtitle="Record money going out—search and review spending whenever you reconcile."
+      actions={
         <Button onClick={() => router.push("/app/expenses/new")} className="gap-2">
           <Plus className="h-4 w-4" />
           Add Expense
         </Button>
-      </div>
-
+      }
+    >
       {!loading && (
         <Card className="p-5">
           <div className="text-sm text-muted-foreground">Total Expenses</div>
-          <div className="mt-1 text-2xl font-bold">
+          <div className="mt-1 text-xl font-bold">
             {currencyForSummary}{" "}
             {totalExpenseAmount.toLocaleString("en-US", {
               minimumFractionDigits: 2,
@@ -339,6 +335,6 @@ export default function ExpensesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppPageShell>
   );
 }
