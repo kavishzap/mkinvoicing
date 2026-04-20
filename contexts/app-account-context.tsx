@@ -37,6 +37,8 @@ export type AccountAnchor = "closed" | "topbar" | "sidebar";
 
 type AppAccountContextValue = {
   userChip: UserChip | null;
+  /** From `user_profiles.system_role` (admin / owner / member). */
+  systemRoleLabel: string | null;
   companyRoleLabel: string | null;
   companyName: string | null;
   /** Where the account popover is anchored; `closed` when not open. */
@@ -59,6 +61,7 @@ const AppAccountContext = createContext<AppAccountContextValue | null>(null);
 export function AppAccountProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [userChip, setUserChip] = useState<UserChip | null>(null);
+  const [systemRoleLabel, setSystemRoleLabel] = useState<string | null>(null);
   const [companyRoleLabel, setCompanyRoleLabel] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [accountAnchor, setAccountAnchor] = useState<AccountAnchor>("closed");
@@ -91,6 +94,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
       if (cancelled || !user) {
         if (!cancelled) {
           setUserChip(null);
+          setSystemRoleLabel(null);
           setCompanyRoleLabel(null);
           setCompanyName(null);
         }
@@ -99,7 +103,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
       const email = user.email ?? "";
       const { data: row } = await supabase
         .from("user_profiles")
-        .select("full_name, avatar_url, email")
+        .select("full_name, avatar_url, email, system_role, is_active")
         .eq("id", user.id)
         .maybeSingle();
       const meta = user.user_metadata as { full_name?: string } | undefined;
@@ -115,6 +119,19 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
           avatarUrl: (row?.avatar_url as string | null) ?? null,
         });
       }
+
+      const activeProfile = row?.is_active !== false;
+      const sr = (row?.system_role as string | null | undefined)?.toLowerCase();
+      let sysLabel: string | null = null;
+      if (row && activeProfile) {
+        if (sr === "admin") sysLabel = "Admin";
+        else if (sr === "owner") sysLabel = "Owner";
+        else if (sr === "member") sysLabel = "Member";
+        else if (sr) sysLabel = sr.charAt(0).toUpperCase() + sr.slice(1);
+      } else if (row && !activeProfile) {
+        sysLabel = "Inactive";
+      }
+      if (!cancelled) setSystemRoleLabel(sysLabel);
 
       let role: string | null = null;
       const companyId = await getActiveCompanyId();
@@ -176,6 +193,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
   const value = useMemo<AppAccountContextValue>(
     () => ({
       userChip,
+      systemRoleLabel,
       companyRoleLabel,
       companyName,
       accountAnchor,
@@ -191,6 +209,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
     }),
     [
       userChip,
+      systemRoleLabel,
       companyRoleLabel,
       companyName,
       accountAnchor,

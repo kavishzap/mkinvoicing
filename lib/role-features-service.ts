@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { isUserSystemAdmin } from "@/lib/user-system-role";
 
 export type RoleFeature = {
   code: string;
@@ -89,6 +90,20 @@ async function resolveRoleFeatures(
   userId: string,
   companyId: string
 ): Promise<RoleFeatureResult> {
+  if (await isUserSystemAdmin(userId)) {
+    const { data: allFeatures, error: allErr } = await supabase
+      .from("features")
+      .select("code, name, description")
+      .eq("is_active", true);
+    if (allErr) throw new Error(allErr.message);
+    const features: RoleFeature[] = (allFeatures ?? []).map((f) => ({
+      code: f.code,
+      name: f.name,
+      description: f.description,
+    }));
+    return { isOwner: true, features };
+  }
+
   const { data: membership, error: memErr } = await supabase
     .from("company_users")
     .select("role_id, is_owner")

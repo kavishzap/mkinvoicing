@@ -7,8 +7,13 @@ import { Button } from "@/components/ui/button";
 import { useAppAccount } from "@/contexts/app-account-context";
 
 export function AccountPopoverPanel() {
-  const { userChip, companyRoleLabel, closeAccountPanel, setLogoutOpen } =
-    useAppAccount();
+  const {
+    userChip,
+    systemRoleLabel,
+    companyRoleLabel,
+    closeAccountPanel,
+    setLogoutOpen,
+  } = useAppAccount();
 
   return (
     <div className="space-y-4">
@@ -23,7 +28,7 @@ export function AccountPopoverPanel() {
         </Avatar>
         <div>
           <p className="text-sm font-semibold leading-tight text-foreground">
-            Account
+            About you
           </p>
           <p className="text-xs text-muted-foreground">Signed in</p>
         </div>
@@ -39,7 +44,15 @@ export function AccountPopoverPanel() {
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Role
+            Your role
+          </dt>
+          <dd className="mt-0.5 break-words text-foreground">
+            {systemRoleLabel ?? "—"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            In this company
           </dt>
           <dd className="mt-0.5 break-words text-foreground">
             {companyRoleLabel ?? "—"}

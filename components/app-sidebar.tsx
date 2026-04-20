@@ -43,6 +43,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
   const { collapsed } = useSidebarCollapse();
   const {
     userChip,
+    systemRoleLabel,
     companyRoleLabel,
     accountAnchor,
     setAccountAnchor,
@@ -264,7 +265,9 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                     {userChip.name}
                   </p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {companyRoleLabel ?? "—"}
+                    {[systemRoleLabel, companyRoleLabel]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
                   </p>
                 </div>
               )}

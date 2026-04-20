@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
+import { isUserSystemAdmin } from "@/lib/user-system-role";
 
 const SESSION_KEY = "mkinv:active_company_id";
 const SESSION_USER_KEY = "mkinv:active_company_user_id";
@@ -38,10 +39,17 @@ function normalizeCompanyCode(code: string): string {
   return code.trim().toLowerCase();
 }
 
+/** Escape `%` / `_` / `\` so `ilike` is treated as exact match, not a pattern. */
+function escapeIlikeExact(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 /**
- * After password auth, confirms the user belongs to the company matching this code
- * (active `company_users` → `companies.company_code`), or owns that company.
- * Returns the resolved `company_id` for session caching.
+ * After password auth, resolves the company for this code:
+ * - **System admins** (`user_profiles.system_role === "admin"`): any active
+ *   company with a matching `company_code` (no `company_users` row required).
+ * - **Everyone else**: active `company_users` membership for that code, or
+ *   owns the company (`companies.owner_user_id`).
  */
 export async function resolveCompanyIdForLogin(
   userId: string,
@@ -50,6 +58,38 @@ export async function resolveCompanyIdForLogin(
   const target = normalizeCompanyCode(companyCodeRaw);
   if (!target) {
     return { error: "Company code is required." };
+  }
+
+  if (await isUserSystemAdmin(userId)) {
+    const trimmed = companyCodeRaw.trim();
+    const { data: adminMatches, error: adminErr } = await supabase
+      .from("companies")
+      .select("id, company_code")
+      .eq("is_active", true)
+      .ilike("company_code", escapeIlikeExact(trimmed));
+
+    if (adminErr) {
+      return {
+        error: adminErr.message || "Could not look up company for admin login.",
+      };
+    }
+    const rows = adminMatches ?? [];
+    const hits = rows.filter(
+      (r) => normalizeCompanyCode(r.company_code as string) === target
+    );
+    if (hits.length === 1) {
+      return { companyId: hits[0].id as string };
+    }
+    if (hits.length > 1) {
+      return {
+        error:
+          "Multiple companies matched this code. Ask a database admin to fix duplicate company codes.",
+      };
+    }
+    return {
+      error:
+        "Invalid company code, or that company is inactive. Check the code and try again.",
+    };
   }
 
   const { data: memberships, error: memErr } = await supabase
@@ -166,8 +206,9 @@ async function resolveActiveCompanyId(): Promise<string | null> {
 
 /**
  * Resolves the current user's primary company for multi-tenant tables.
- * Prefers an active company_users membership, then an owned companies row.
- * Cached per session for the lifetime of the logged-in user.
+ * Uses session cache from login (`setActiveCompanyCache`), else first active
+ * `company_users` row, else first owned `companies` row. System admins rely on
+ * login with a company code so the session cache is set.
  */
 export async function getActiveCompanyId(): Promise<string | null> {
   if (cachedCompanyId) return cachedCompanyId;

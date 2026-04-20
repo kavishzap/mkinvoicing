@@ -15,6 +15,65 @@ type CompanyRow = {
   country: string | null;
 };
 
+type CompanySettingsRow = CompanyRow & {
+  billing_contact_name: string | null;
+  billing_contact_email: string | null;
+  billing_contact_phone: string | null;
+};
+
+/** Settings → `companies` row only (matches public.companies columns). */
+export type ActiveCompanySettings = {
+  name: string;
+  company_logo_url: string;
+  brn: string;
+  vat_number: string;
+  email: string;
+  phone: string;
+  address_line_1: string;
+  address_line_2: string;
+  city: string;
+  country: string;
+  billing_contact_name: string;
+  billing_contact_email: string;
+  billing_contact_phone: string;
+};
+
+function companyRowToSettings(c: CompanySettingsRow): ActiveCompanySettings {
+  return {
+    name: c.name ?? "",
+    company_logo_url: c.company_logo_url ?? "",
+    brn: c.brn ?? "",
+    vat_number: c.vat_number ?? "",
+    email: c.email ?? "",
+    phone: c.phone ?? "",
+    address_line_1: c.address_line_1 ?? "",
+    address_line_2: c.address_line_2 ?? "",
+    city: c.city ?? "",
+    country: c.country ?? "",
+    billing_contact_name: c.billing_contact_name ?? "",
+    billing_contact_email: c.billing_contact_email ?? "",
+    billing_contact_phone: c.billing_contact_phone ?? "",
+  };
+}
+
+export function emptyActiveCompanySettings(): ActiveCompanySettings {
+  return {
+    name: "",
+    company_logo_url: "",
+    brn: "",
+    vat_number: "",
+    email: "",
+    phone: "",
+    address_line_1: "",
+    address_line_2: "",
+    city: "",
+    country: "",
+    billing_contact_name: "",
+    billing_contact_email: "",
+    billing_contact_phone: "",
+  };
+}
+
 function profileFromDbRow(row: Record<string, unknown>): Profile {
   return {
     accountType: (row.account_type ?? "company") as Profile["accountType"],
@@ -38,9 +97,12 @@ function profileFromDbRow(row: Record<string, unknown>): Profile {
   };
 }
 
-function mergeCompanyIntoProfile(p: Profile, c: CompanyRow): Profile {
+/**
+ * Maps `companies` row columns to the Profile shape used by Settings.
+ * Company mode must show these values only from this table—not from `profiles`.
+ */
+function profileFieldsFromCompanyRow(c: CompanyRow): Partial<Profile> {
   return {
-    ...p,
     companyName: c.name ?? "",
     logoUrl: c.company_logo_url ?? "",
     registrationId: c.brn ?? "",
@@ -51,6 +113,22 @@ function mergeCompanyIntoProfile(p: Profile, c: CompanyRow): Profile {
     address_line_2: c.address_line_2 ?? "",
     city: c.city ?? "",
     country: c.country ?? "",
+  };
+}
+
+/** Clears company-backed fields so we never show stale `profiles` copies in company mode. */
+function emptyCompanyTableProfileFields(): Partial<Profile> {
+  return {
+    companyName: "",
+    logoUrl: "",
+    registrationId: "",
+    vatNumber: "",
+    email: "",
+    phone: "",
+    address_line_1: "",
+    address_line_2: "",
+    city: "",
+    country: "",
   };
 }
 
@@ -132,72 +210,161 @@ export async function fetchProfile(): Promise<Profile> {
       .maybeSingle();
 
     if (cErr && cErr.code !== "PGRST116") throw cErr;
-    if (co) {
-      profile = mergeCompanyIntoProfile(profile, co as CompanyRow);
-    }
+    profile = {
+      ...profile,
+      ...(co
+        ? profileFieldsFromCompanyRow(co as CompanyRow)
+        : emptyCompanyTableProfileFields()),
+    };
   }
 
   return profile;
 }
 
-export async function upsertProfile(profile: Profile) {
-  const userId = await getCurrentUserId();
+/** Load the active `companies` row for the Settings company form (no `profiles` merge). */
+export async function fetchActiveCompanySettings(): Promise<ActiveCompanySettings> {
   const companyId = await getActiveCompanyId();
+  if (!companyId) {
+    throw new Error(
+      "No active company is selected. You cannot edit company details until a company is linked to this session.",
+    );
+  }
 
-  if (profile.accountType === "company" && !companyId) {
+  const { data, error } = await supabase
+    .from("companies")
+    .select(
+      "id, name, company_logo_url, brn, vat_number, email, phone, address_line_1, address_line_2, city, country, billing_contact_name, billing_contact_email, billing_contact_phone",
+    )
+    .eq("id", companyId)
+    .single();
+
+  if (error) throw error;
+  return companyRowToSettings(data as CompanySettingsRow);
+}
+
+/** Read-only subscription snapshot for Settings (from `companies` + `plans`). */
+export type CompanySubscriptionDetails = {
+  company_code: string;
+  company_is_active: boolean;
+  is_trial: boolean | null;
+  subscription_start_date: string;
+  subscription_end_date: string | null;
+  max_users_override: number | null;
+  plan_id: string;
+  plan_name: string;
+  plan_billing_cycle: string;
+  plan_currency: string | null;
+  plan_price: number;
+  plan_max_users: number;
+  plan_description: string | null;
+  plan_catalog_active: boolean;
+};
+
+type PlanEmbed = {
+  name: string;
+  billing_cycle: string;
+  currency: string | null;
+  description: string | null;
+  max_users: number;
+  price: number;
+  is_active: boolean;
+};
+
+export async function fetchCompanySubscriptionDetails(): Promise<CompanySubscriptionDetails> {
+  const companyId = await getActiveCompanyId();
+  if (!companyId) {
+    throw new Error(
+      "No active company is selected. You cannot load subscription details until a company is linked to this session.",
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("companies")
+    .select(
+      `
+      company_code,
+      is_active,
+      is_trial,
+      subscription_start_date,
+      subscription_end_date,
+      max_users_override,
+      plan_id,
+      plans ( name, billing_cycle, currency, description, max_users, price, is_active )
+    `,
+    )
+    .eq("id", companyId)
+    .single();
+
+  if (error) throw error;
+
+  const rawPlans = (data as { plans?: PlanEmbed | PlanEmbed[] | null }).plans;
+  const planRow: PlanEmbed | null = Array.isArray(rawPlans)
+    ? rawPlans[0] ?? null
+    : rawPlans ?? null;
+
+  return {
+    company_code: (data as { company_code: string }).company_code,
+    company_is_active: Boolean((data as { is_active: boolean }).is_active),
+    is_trial: (data as { is_trial: boolean | null }).is_trial,
+    subscription_start_date: (data as { subscription_start_date: string })
+      .subscription_start_date,
+    subscription_end_date: (data as { subscription_end_date: string | null })
+      .subscription_end_date,
+    max_users_override: (data as { max_users_override: number | null })
+      .max_users_override,
+    plan_id: (data as { plan_id: string }).plan_id,
+    plan_name: planRow?.name ?? "—",
+    plan_billing_cycle: planRow?.billing_cycle ?? "—",
+    plan_currency: planRow?.currency ?? null,
+    plan_price: planRow ? Number(planRow.price) : 0,
+    plan_max_users: planRow ? Number(planRow.max_users) : 0,
+    plan_description: planRow?.description ?? null,
+    plan_catalog_active: planRow?.is_active ?? false,
+  };
+}
+
+/** Persist Settings company form fields to `companies.company_logo_url` and related columns. */
+export async function updateActiveCompanySettings(
+  s: ActiveCompanySettings,
+): Promise<void> {
+  const companyId = await getActiveCompanyId();
+  if (!companyId) {
     throw new Error(
       "No active company is selected. You cannot save company details until a company is linked to this session.",
     );
   }
 
-  const isCompany = profile.accountType === "company" && !!companyId;
+  const { error } = await supabase
+    .from("companies")
+    .update({
+      name: s.name.trim() || "",
+      company_logo_url: s.company_logo_url.trim() || null,
+      brn: s.brn.trim() || null,
+      vat_number: s.vat_number.trim() || null,
+      email: s.email.trim() || null,
+      phone: s.phone.trim() || null,
+      address_line_1: s.address_line_1.trim() || null,
+      address_line_2: s.address_line_2.trim() || null,
+      city: s.city.trim() || null,
+      country: s.country.trim() || null,
+      billing_contact_name: s.billing_contact_name.trim() || null,
+      billing_contact_email: s.billing_contact_email.trim() || null,
+      billing_contact_phone: s.billing_contact_phone.trim() || null,
+    })
+    .eq("id", companyId);
 
-  if (isCompany) {
-    const { error: cErr } = await supabase
-      .from("companies")
-      .update({
-        name: profile.companyName?.trim() || "",
-        company_logo_url: profile.logoUrl?.trim() || null,
-        brn: profile.registrationId?.trim() || null,
-        vat_number: profile.vatNumber?.trim() || null,
-        email: profile.email?.trim() || null,
-        phone: profile.phone?.trim() || null,
-        address_line_1: profile.address_line_1?.trim() || null,
-        address_line_2: profile.address_line_2?.trim() || null,
-        city: profile.city?.trim() || null,
-        country: profile.country?.trim() || null,
-      })
-      .eq("id", companyId);
-    if (cErr) throw cErr;
+  if (error) throw error;
+}
 
-    const profilePayload = {
-      id: userId,
-      account_type: profile.accountType,
-      vat_registered: profile.vatRegistered ?? false,
-      full_name: profile.fullName || null,
-      tax_id: profile.taxId || null,
-      street: profile.street || null,
-      postal: profile.postal || null,
-      bank_name: profile.bank_name || null,
-      bank_acc_num: profile.bank_acc_num || null,
-      company_name: null,
-      logo_url: null,
-      registration_id: null,
-      vat_number: null,
-      email: null,
-      phone: null,
-      city: null,
-      country: null,
-      address_line_1: null,
-      address_line_2: null,
-    };
-
-    const { error } = await supabase
-      .from("profiles")
-      .upsert(profilePayload, { onConflict: "id" });
-    if (error) throw error;
-    return;
+/** Writes a personal `profiles` row only (not used for active-company document identity). */
+export async function upsertProfile(profile: Profile) {
+  if (profile.accountType === "company") {
+    throw new Error(
+      "Company details are saved with updateActiveCompanySettings from Settings.",
+    );
   }
+
+  const userId = await getCurrentUserId();
 
   const payload = {
     id: userId,
