@@ -1,6 +1,6 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,10 +38,6 @@ import { getActiveCompanyId } from "@/lib/active-company";
 import { supabase } from "@/lib/supabaseClient";
 import { CompanyRolesSettings } from "@/components/company-roles-settings";
 import { AppPageShell } from "@/components/app-page-shell";
-
-type CompanyFieldErrors = Partial<
-  Record<keyof ActiveCompanySettings, string>
->;
 
 function formatSubscriptionDate(iso: string | null): string {
   if (!iso) return "—";
@@ -96,10 +92,19 @@ export default function SettingsPage() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // validation errors
-  const [errors, setErrors] = useState<CompanyFieldErrors>({});
-
   const [settingsTab, setSettingsTab] = useState("profile");
+  const [isLogoDragOver, setIsLogoDragOver] = useState(false);
+  const hasSavedLogo = !!company.company_logo_url;
+  const hasPendingLogo = !!logoFile;
+  const logoActionLabel = hasSavedLogo ? "Update logo" : "Add logo";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "roles" || t === "profile" || t === "preferences") {
+      setSettingsTab(t);
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -134,40 +139,18 @@ export default function SettingsPage() {
     })();
   }, [toast]);
 
-  const requiredCompanyFields = useMemo(
-    () =>
-      [
-        "name",
-        "brn",
-        "email",
-        "phone",
-        "address_line_1",
-      ] as const satisfies readonly (keyof ActiveCompanySettings)[],
-    []
-  );
-
-  const validateCompany = (): boolean => {
-    const next: CompanyFieldErrors = {};
-    const isEmpty = (v?: string) => !v || v.trim() === "";
-
-    for (const field of requiredCompanyFields) {
-      if (isEmpty(company[field])) {
-        next[field] = "Required";
-      }
+  const handleLogoSelected = (f: File | null) => {
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file type",
+        description: "Please choose an image file for the company logo.",
+        variant: "destructive",
+      });
+      return;
     }
-
-    if (company.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(company.email)) {
-      next.email = "Invalid email";
-    }
-    if (
-      company.billing_contact_email &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(company.billing_contact_email)
-    ) {
-      next.billing_contact_email = "Invalid email";
-    }
-
-    setErrors(next);
-    return Object.keys(next).length === 0;
+    setLogoFile(f);
+    setLogoPreview(URL.createObjectURL(f));
   };
 
   const uploadCompanyLogoIfNeeded = async (): Promise<string | null> => {
@@ -202,10 +185,10 @@ export default function SettingsPage() {
       });
       return;
     }
-    if (!validateCompany()) {
+    if (!logoFile) {
       toast({
-        title: "Missing fields",
-        description: "Please fill all required fields.",
+        title: "No logo selected",
+        description: "Choose a logo file before saving.",
         variant: "destructive",
       });
       return;
@@ -288,22 +271,19 @@ export default function SettingsPage() {
     );
   }
 
-  const err = (k: keyof ActiveCompanySettings) =>
-    errors[k] ? "border-destructive" : "";
-
   return (
     <AppPageShell
       compact
-      className="max-w-5xl"
+      className="max-w-[1400px]"
       subtitle="Update how your business shows on documents, default invoice behaviour, and who can do what."
       actions={
         settingsTab === "profile" ? (
           <Button
             onClick={handleSaveCompany}
             size="sm"
-            disabled={savingProfile || noActiveCompany}
+            disabled={savingProfile || noActiveCompany || !logoFile}
           >
-            {savingProfile ? "Saving..." : "Save company"}
+            {savingProfile ? "Saving..." : logoActionLabel}
           </Button>
         ) : settingsTab === "preferences" ? (
           <Button
@@ -321,7 +301,7 @@ export default function SettingsPage() {
         onValueChange={setSettingsTab}
         className="space-y-4"
       >
-        <TabsList className="grid w-full max-w-2xl grid-cols-3">
+        <TabsList className="grid w-full max-w-3xl grid-cols-3">
           <TabsTrigger value="profile">Company</TabsTrigger>
           <TabsTrigger value="preferences">Invoice Preferences</TabsTrigger>
           <TabsTrigger value="roles">Roles</TabsTrigger>
@@ -341,36 +321,37 @@ export default function SettingsPage() {
               </CardHeader>
             </Card>
           ) : (
-            <>
+            <div className="grid gap-4 xl:grid-cols-2">
               {subscription ? (
-                <Card className="gap-4 py-4">
-                  <CardHeader>
-                    <CardTitle>Subscription</CardTitle>
-                    <CardDescription>
-                      Plan and billing window from your company and linked
-                      plan (read-only).
+                <Card className="gap-0 py-4 h-full flex flex-col min-h-0">
+                  <CardHeader className="space-y-1 pb-3">
+                    <CardTitle className="text-base">Subscription</CardTitle>
+                    <CardDescription className="text-xs leading-snug">
+                      Plan and billing (read-only).
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="grid gap-6 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
+                  <CardContent className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 pt-0 flex-1">
+                    <div className="space-y-0.5 min-w-0">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         Company code
                       </p>
-                      <p className="font-mono text-sm">{subscription.company_code}</p>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Company status
+                      <p className="font-mono text-xs break-all leading-snug">
+                        {subscription.company_code}
                       </p>
-                      <p className="text-sm">
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Status
+                      </p>
+                      <p className="text-sm leading-snug">
                         {subscription.company_is_active ? "Active" : "Inactive"}
                       </p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         Trial
                       </p>
-                      <p className="text-sm">
+                      <p className="text-sm leading-snug">
                         {subscription.is_trial === null
                           ? "—"
                           : subscription.is_trial
@@ -378,115 +359,109 @@ export default function SettingsPage() {
                             : "No"}
                       </p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        User seats (effective)
+                    <div className="space-y-0.5 sm:col-span-2 lg:col-span-1">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        User seats
                       </p>
-                      <p className="text-sm">
+                      <p className="text-sm leading-snug">
                         {subscription.max_users_override != null
                           ? subscription.max_users_override
                           : subscription.plan_max_users}{" "}
-                        <span className="text-muted-foreground">
+                        <span className="text-muted-foreground text-xs">
                           {subscription.max_users_override != null
-                            ? "(override)"
-                            : "(plan limit)"}
+                            ? "override"
+                            : "plan limit"}
                         </span>
                       </p>
                     </div>
-                    <div className="space-y-1 sm:col-span-2">
-                      <p className="text-xs font-medium text-muted-foreground">
+                    <div className="space-y-0.5 sm:col-span-2 lg:col-span-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         Plan
                       </p>
-                      <p className="text-sm font-medium">{subscription.plan_name}</p>
+                      <p className="text-sm font-medium leading-snug">
+                        {subscription.plan_name}
+                      </p>
                       {subscription.plan_description ? (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-snug">
                           {subscription.plan_description}
                         </p>
                       ) : null}
-                      <p className="text-xs text-muted-foreground">
-                        Plan ID:{" "}
-                        <span className="font-mono">{subscription.plan_id}</span>
-                      </p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         Billing cycle
                       </p>
-                      <p className="text-sm capitalize">
+                      <p className="text-sm capitalize leading-snug">
                         {subscription.plan_billing_cycle}
                       </p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                         Plan price
                       </p>
-                      <p className="text-sm">
+                      <p className="text-sm leading-snug">
                         {formatPlanPrice(
                           subscription.plan_price,
                           subscription.plan_currency
                         )}
                       </p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Subscription start
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Start
                       </p>
-                      <p className="text-sm">
+                      <p className="text-sm leading-snug">
                         {formatSubscriptionDate(
                           subscription.subscription_start_date
                         )}
                       </p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Subscription end
+                    <div className="space-y-0.5">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        End
                       </p>
-                      <p className="text-sm">
+                      <p className="text-sm leading-snug">
                         {formatSubscriptionDate(
                           subscription.subscription_end_date
                         )}
                       </p>
                     </div>
-                    <div className="space-y-1 sm:col-span-2">
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Plan catalog
+                    <div className="space-y-0.5 sm:col-span-2 lg:col-span-3">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Catalog
                       </p>
-                      <p className="text-sm">
+                      <p className="text-sm leading-snug">
                         {subscription.plan_catalog_active
-                          ? "This plan is currently offered"
-                          : "This plan is not active in the catalog"}
+                          ? "Offered in catalog"
+                          : "Not in active catalog"}
                       </p>
                     </div>
                   </CardContent>
                 </Card>
               ) : null}
 
-              <Card className="gap-4 py-4">
+              <Card
+                className={`gap-4 py-4 h-full ${subscription ? "" : "xl:col-span-2"}`}
+              >
                 <CardHeader>
                   <CardTitle>Company</CardTitle>
                   <CardDescription>
-                    Fields map to the active company record (shown on
-                    invoices).
+                    Company details are read-only here. Only the logo can be
+                    updated.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
+                <CardContent className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="co-name">Company name *</Label>
                     <Input
                       id="co-name"
                       value={company.name}
-                      onChange={(e) =>
-                        setCompany({ ...company, name: e.target.value })
-                      }
                       placeholder="Acme Corporation"
-                      className={err("name")}
+                      disabled
                     />
-                    {errors.name && (
-                      <p className="text-xs text-destructive">{errors.name}</p>
-                    )}
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="co-logo-file">Company logo</Label>
                     <p className="text-xs text-muted-foreground">
                       Upload replaces the public URL stored in{" "}
@@ -495,39 +470,78 @@ export default function SettingsPage() {
                       </span>{" "}
                       on save.
                     </p>
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border bg-muted">
-                        {logoPreview ? (
-                          <Image
-                            src={logoPreview}
-                            alt="Company logo preview"
-                            width={80}
-                            height={80}
-                            className="object-contain"
-                          />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            No logo
-                          </span>
-                        )}
+                    <p className="text-xs text-muted-foreground">
+                      {hasSavedLogo
+                        ? hasPendingLogo
+                          ? "New logo selected. Save to replace the current logo."
+                          : "Current logo is shown below. Choose a file to replace it."
+                        : hasPendingLogo
+                          ? "Logo selected. Save to add it to your company profile."
+                          : "No logo yet. Choose a file to add one."}
+                    </p>
+                    <div
+                      className={`rounded-lg border-2 border-dashed p-4 transition-colors ${
+                        isLogoDragOver
+                          ? "border-primary bg-primary/5"
+                          : "border-muted-foreground/30"
+                      }`}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setIsLogoDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        setIsLogoDragOver(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsLogoDragOver(false);
+                        handleLogoSelected(e.dataTransfer.files?.[0] ?? null);
+                      }}
+                    >
+                      <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:items-center sm:text-left">
+                        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border bg-muted">
+                          {logoPreview ? (
+                            <Image
+                              src={logoPreview}
+                              alt="Company logo preview"
+                              width={80}
+                              height={80}
+                              className="object-contain"
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              No logo
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">
+                            Drag and drop your logo here
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            PNG, JPG, or SVG recommended. Max ~5MB.
+                          </p>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            {hasSavedLogo ? "Replace logo" : "Choose logo"}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex-1 space-y-2">
-                        <Input
-                          ref={fileInputRef}
-                          id="co-logo-file"
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            setLogoFile(f);
-                            if (f) setLogoPreview(URL.createObjectURL(f));
-                          }}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Max ~5MB recommended. Current URL is saved on the
-                          company after you click Save company.
-                        </p>
-                      </div>
+                      <Input
+                        ref={fileInputRef}
+                        id="co-logo-file"
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        onChange={(e) => {
+                          handleLogoSelected(e.target.files?.[0] ?? null);
+                        }}
+                      />
                     </div>
                   </div>
 
@@ -536,15 +550,9 @@ export default function SettingsPage() {
                     <Input
                       id="co-brn"
                       value={company.brn}
-                      onChange={(e) =>
-                        setCompany({ ...company, brn: e.target.value })
-                      }
                       placeholder="123456789"
-                      className={err("brn")}
+                      disabled
                     />
-                    {errors.brn && (
-                      <p className="text-xs text-destructive">{errors.brn}</p>
-                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -552,16 +560,14 @@ export default function SettingsPage() {
                     <Input
                       id="co-vat"
                       value={company.vat_number}
-                      onChange={(e) =>
-                        setCompany({ ...company, vat_number: e.target.value })
-                      }
                       placeholder="VAT123456789"
+                      disabled
                     />
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="gap-4 py-4">
+              <Card className="gap-4 py-4 h-full">
                 <CardHeader>
                   <CardTitle>Billing contact</CardTitle>
                   <CardDescription>
@@ -574,13 +580,8 @@ export default function SettingsPage() {
                     <Input
                       id="co-bill-name"
                       value={company.billing_contact_name}
-                      onChange={(e) =>
-                        setCompany({
-                          ...company,
-                          billing_contact_name: e.target.value,
-                        })
-                      }
                       placeholder="Contact name"
+                      disabled
                     />
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
@@ -590,40 +591,24 @@ export default function SettingsPage() {
                         id="co-bill-email"
                         type="email"
                         value={company.billing_contact_email}
-                        onChange={(e) =>
-                          setCompany({
-                            ...company,
-                            billing_contact_email: e.target.value,
-                          })
-                        }
                         placeholder="billing@example.com"
-                        className={err("billing_contact_email")}
+                        disabled
                       />
-                      {errors.billing_contact_email && (
-                        <p className="text-xs text-destructive">
-                          {errors.billing_contact_email}
-                        </p>
-                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="co-bill-phone">Phone</Label>
                       <Input
                         id="co-bill-phone"
                         value={company.billing_contact_phone}
-                        onChange={(e) =>
-                          setCompany({
-                            ...company,
-                            billing_contact_phone: e.target.value,
-                          })
-                        }
                         placeholder="+230 …"
+                        disabled
                       />
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="gap-4 py-4">
+              <Card className="gap-4 py-4 h-full">
                 <CardHeader>
                   <CardTitle>Contact</CardTitle>
                   <CardDescription>Company email and phone.</CardDescription>
@@ -636,40 +621,24 @@ export default function SettingsPage() {
                         id="co-email"
                         type="email"
                         value={company.email}
-                        onChange={(e) =>
-                          setCompany({ ...company, email: e.target.value })
-                        }
                         placeholder="hello@example.com"
-                        className={err("email")}
+                        disabled
                       />
-                      {errors.email && (
-                        <p className="text-xs text-destructive">
-                          {errors.email}
-                        </p>
-                      )}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="co-phone">Phone *</Label>
                       <Input
                         id="co-phone"
                         value={company.phone}
-                        onChange={(e) =>
-                          setCompany({ ...company, phone: e.target.value })
-                        }
                         placeholder="+230 5xx xx xx"
-                        className={err("phone")}
+                        disabled
                       />
-                      {errors.phone && (
-                        <p className="text-xs text-destructive">
-                          {errors.phone}
-                        </p>
-                      )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="gap-4 py-4">
+              <Card className="gap-4 py-4 xl:col-span-2">
                 <CardHeader>
                   <CardTitle>Address</CardTitle>
                   <CardDescription>
@@ -682,40 +651,18 @@ export default function SettingsPage() {
                     <Input
                       id="co-addr1"
                       value={company.address_line_1}
-                      onChange={(e) =>
-                        setCompany({
-                          ...company,
-                          address_line_1: e.target.value,
-                        })
-                      }
                       placeholder="e.g. 123 Business Street, Port Louis"
-                      className={err("address_line_1")}
+                      disabled
                     />
-                    {errors.address_line_1 && (
-                      <p className="text-xs text-destructive">
-                        {errors.address_line_1}
-                      </p>
-                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="co-addr2">Address line 2 (optional)</Label>
                     <Input
                       id="co-addr2"
                       value={company.address_line_2}
-                      onChange={(e) =>
-                        setCompany({
-                          ...company,
-                          address_line_2: e.target.value,
-                        })
-                      }
                       placeholder="Suite, building, etc."
-                      className={err("address_line_2")}
+                      disabled
                     />
-                    {errors.address_line_2 && (
-                      <p className="text-xs text-destructive">
-                        {errors.address_line_2}
-                      </p>
-                    )}
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
@@ -723,11 +670,8 @@ export default function SettingsPage() {
                       <Input
                         id="co-city"
                         value={company.city}
-                        onChange={(e) =>
-                          setCompany({ ...company, city: e.target.value })
-                        }
                         placeholder="City"
-                        className={err("city")}
+                        disabled
                       />
                     </div>
                     <div className="space-y-2">
@@ -735,146 +679,19 @@ export default function SettingsPage() {
                       <Input
                         id="co-country"
                         value={company.country}
-                        onChange={(e) =>
-                          setCompany({ ...company, country: e.target.value })
-                        }
                         placeholder="Country"
-                        className={err("country")}
+                        disabled
                       />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            </>
+            </div>
           )}
         </TabsContent>
 
         {/* ========= PREFERENCES TAB ========= */}
         <TabsContent value="preferences" className="space-y-4">
-          <Card className="gap-4 py-4">
-            <CardHeader>
-              <CardTitle>Currency & Format</CardTitle>
-              <CardDescription>
-                Set your default currency and date format
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="currency">Currency</Label>
-                  <Select
-                    value={preferences.currency}
-                    onValueChange={(v) =>
-                      setPreferences({ ...preferences, currency: v })
-                    }
-                  >
-                    <SelectTrigger id="currency">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USD">USD - US Dollar</SelectItem>
-                      <SelectItem value="EUR">EUR - Euro</SelectItem>
-                      <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                      <SelectItem value="MUR">MUR - Mauritian Rupee</SelectItem>
-                      <SelectItem value="CAD">CAD - Canadian Dollar</SelectItem>
-                      <SelectItem value="AUD">
-                        AUD - Australian Dollar
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Invoice Numbering - Commented out for later use */}
-          {/* <Card>
-            <CardHeader>
-              <CardTitle>Invoice Numbering</CardTitle>
-              <CardDescription>
-                Configure how your invoices are numbered
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid sm:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="numberPrefix">Prefix</Label>
-                  <Input
-                    id="numberPrefix"
-                    value={preferences.numberPrefix}
-                    onChange={(e) =>
-                      setPreferences({
-                        ...preferences,
-                        numberPrefix: e.target.value,
-                      })
-                    }
-                    placeholder="INV"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="numberPadding">Padding</Label>
-                  <Select
-                    value={preferences.numberPadding.toString()}
-                    onValueChange={(v) =>
-                      setPreferences({
-                        ...preferences,
-                        numberPadding: Number(v),
-                      })
-                    }
-                  >
-                    <SelectTrigger id="numberPadding">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="3">3 digits (001)</SelectItem>
-                      <SelectItem value="4">4 digits (0001)</SelectItem>
-                      <SelectItem value="5">5 digits (00001)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="rounded-lg bg-muted p-4">
-                <p className="text-sm text-muted-foreground">Preview:</p>
-                <p className="text-base font-semibold mt-1">
-                  {preferences.numberPrefix}-
-                  {preferences.nextNumber
-                    .toString()
-                    .padStart(preferences.numberPadding, "0")}
-                </p>
-              </div>
-            </CardContent>
-          </Card> */}
-
-          <Card className="gap-4 py-4">
-            <CardHeader>
-              <CardTitle>Payment Terms</CardTitle>
-              <CardDescription>
-                Default payment terms for new invoices
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <Label htmlFor="paymentTerms">Default Payment Terms</Label>
-                <Select
-                  value={preferences.paymentTerms.toString()}
-                  onValueChange={(v) =>
-                    setPreferences({ ...preferences, paymentTerms: Number(v) })
-                  }
-                >
-                  <SelectTrigger id="paymentTerms">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">Net 7 (Due in 7 days)</SelectItem>
-                    <SelectItem value="14">Net 14 (Due in 14 days)</SelectItem>
-                    <SelectItem value="30">Net 30 (Due in 30 days)</SelectItem>
-                    <SelectItem value="60">Net 60 (Due in 60 days)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className="gap-4 py-4">
             <CardHeader>
               <CardTitle>Default Notes & Terms</CardTitle>

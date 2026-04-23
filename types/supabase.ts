@@ -872,6 +872,7 @@ export type Database = {
           id: string
           is_active: boolean
           is_default: boolean
+          map_link: string | null
           name: string
           postal: string | null
           updated_at: string
@@ -889,6 +890,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_default?: boolean
+          map_link?: string | null
           name: string
           postal?: string | null
           updated_at?: string
@@ -906,6 +908,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_default?: boolean
+          map_link?: string | null
           name?: string
           postal?: string | null
           updated_at?: string

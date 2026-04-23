@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Search,
@@ -15,6 +15,7 @@ import {
   Unlock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -36,6 +37,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   addCustomer,
   deleteCustomer,
+  deleteCustomers,
   getCustomersByMonth,
   listCustomers,
   setCustomerActive,
@@ -85,6 +87,9 @@ export default function CustomersPage() {
   );
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   // Customers per month chart removed per request
@@ -118,6 +123,38 @@ export default function CustomersPage() {
   useEffect(() => {
     setPage(1);
   }, [searchQuery, includeInactive, pageSize]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [searchQuery, includeInactive, pageSize]);
+
+  const pageIds = useMemo(() => customers.map((c) => c.id), [customers]);
+  const allPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
+  const headerCheckboxState: boolean | "indeterminate" =
+    allPageSelected ? true : somePageSelected ? "indeterminate" : false;
+
+  function toggleSelectAllOnPage(checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        for (const id of pageIds) next.add(id);
+      } else {
+        for (const id of pageIds) next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleRowSelected(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
 
   function handleOpenDialog(customer?: CustomerRow) {
     if (customer) {
@@ -184,6 +221,7 @@ export default function CustomersPage() {
     });
     setCustomers(rows);
     setTotal(total);
+    return { rows, total };
   }
 
   function validate() {
@@ -249,11 +287,42 @@ export default function CustomersPage() {
         variant: "destructive",
       });
     } finally {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       // If last item on last page deleted, move back a page otherwise reload
       if (customers.length === 1 && page > 1) setPage((p) => p - 1);
-      else reload();
-      loadChart();
+      else void reload();
       setConfirmDeleteId(null);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      setBulkDeleting(true);
+      await deleteCustomers(ids);
+      toast({
+        title: "Customers deleted",
+        description: `Removed ${ids.length} customer(s).`,
+      });
+      setSelectedIds(new Set());
+      setConfirmBulkDeleteOpen(false);
+      const countOnPage = customers.filter((c) => ids.includes(c.id)).length;
+      const allOnPageGone = countOnPage === customers.length && customers.length > 0;
+      if (allOnPageGone && page > 1) setPage((p) => p - 1);
+      else void reload();
+    } catch (e: any) {
+      toast({
+        title: "Delete failed",
+        description: e?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -318,10 +387,41 @@ export default function CustomersPage() {
       {loading ? (
         <SkeletonTable rows={Math.min(pageSize, 6)} />
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <>
+          {customers.length > 0 ? (
+            <div className="flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-muted-foreground">
+                {selectedIds.size > 0 ? (
+                  <>
+                    <span className="font-medium text-foreground">{selectedIds.size}</span> selected
+                  </>
+                ) : (
+                  <>Select rows to delete multiple customers at once.</>
+                )}
+              </span>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                disabled={selectedIds.size === 0}
+                onClick={() => setConfirmBulkDeleteOpen(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete selected
+              </Button>
+            </div>
+          ) : null}
+          <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-muted-foreground">
               <tr>
+                <th className="w-10 p-3 text-left">
+                  <Checkbox
+                    aria-label="Select all on this page"
+                    checked={headerCheckboxState}
+                    onCheckedChange={(v) => toggleSelectAllOnPage(v === true)}
+                  />
+                </th>
                 <th className="text-left p-3">Type</th>
                 <th className="text-left p-3">Name</th>
                 <th className="text-left p-3">Email</th>
@@ -334,6 +434,13 @@ export default function CustomersPage() {
             <tbody>
               {customers.map((c) => (
                 <tr key={c.id} className="border-t">
+                  <td className="p-3 align-middle">
+                    <Checkbox
+                      aria-label={`Select ${c.type === "company" ? c.companyName : c.fullName}`}
+                      checked={selectedIds.has(c.id)}
+                      onCheckedChange={(v) => toggleRowSelected(c.id, v === true)}
+                    />
+                  </td>
                   <td className="p-3">
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
                       {c.type === "company" ? (
@@ -405,7 +512,7 @@ export default function CustomersPage() {
               {customers.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="p-8 text-center text-muted-foreground"
                   >
                     <div className="flex flex-col items-center gap-2">
@@ -420,6 +527,7 @@ export default function CustomersPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Pagination footer OR skeleton */}
@@ -518,6 +626,27 @@ export default function CustomersPage() {
               onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmBulkDeleteOpen} onOpenChange={setConfirmBulkDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete selected customers</DialogTitle>
+            <DialogDescription>
+              Delete{" "}
+              <span className="font-medium text-foreground">{selectedIds.size}</span>{" "}
+              customer{selectedIds.size === 1 ? "" : "s"}? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmBulkDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void handleBulkDelete()} disabled={bulkDeleting}>
+              {bulkDeleting ? "Deleting…" : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -737,6 +866,9 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
       <table className="w-full text-sm">
         <thead className="bg-muted/50 text-muted-foreground">
           <tr>
+            <th className="w-10 p-3 text-left">
+              <div className="h-4 w-4 rounded border bg-muted/80 animate-pulse" />
+            </th>
             <th className="text-left p-3">Type</th>
             <th className="text-left p-3">Name</th>
             <th className="text-left p-3">Email</th>
@@ -749,6 +881,9 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
         <tbody>
           {Array.from({ length: rows }).map((_, i) => (
             <tr key={i} className="border-t">
+              <td className="p-3">
+                <div className="h-4 w-4 rounded border bg-muted animate-pulse" />
+              </td>
               <td className="p-3">
                 <div className="h-5 w-16 bg-muted rounded animate-pulse" />
               </td>

@@ -5,6 +5,7 @@ export type LocationPayload = {
   name: string;
   code?: string | null;
   description?: string | null;
+  map_link?: string | null;
   address_line_1?: string | null;
   address_line_2?: string | null;
   city?: string | null;
@@ -21,6 +22,7 @@ export type LocationRow = {
   name: string;
   code: string;
   description: string;
+  map_link: string;
   address_line_1: string;
   address_line_2: string;
   city: string;
@@ -33,7 +35,7 @@ export type LocationRow = {
 };
 
 const COLUMNS =
-  "id,company_id,user_id,name,code,description,address_line_1,address_line_2,city,postal,country,is_active,is_default,created_at,updated_at";
+  "id,company_id,user_id,name,code,description,map_link,address_line_1,address_line_2,city,postal,country,is_active,is_default,created_at,updated_at";
 
 async function getUserId() {
   const { data, error } = await supabase.auth.getUser();
@@ -102,6 +104,20 @@ export async function listLocations(opts?: {
   };
 }
 
+export async function getLocation(id: string): Promise<LocationRow> {
+  const companyId = await requireCompanyId();
+  const { data, error } = await supabase
+    .from("locations")
+    .select(COLUMNS)
+    .eq("id", id)
+    .eq("company_id", companyId)
+    .single();
+
+  if (error) throw error;
+  if (!data) throw new Error("Location not found or not accessible");
+  return mapRow(data);
+}
+
 export async function addLocation(
   payload: LocationPayload
 ): Promise<LocationRow> {
@@ -118,6 +134,7 @@ export async function addLocation(
     name: payload.name.trim(),
     code: payload.code?.trim() || null,
     description: payload.description?.trim() || null,
+    map_link: payload.map_link?.trim() || null,
     address_line_1: payload.address_line_1?.trim() || null,
     address_line_2: payload.address_line_2?.trim() || null,
     city: payload.city?.trim() || null,
@@ -153,6 +170,7 @@ export async function updateLocation(
   if ("code" in payload) update.code = payload.code?.trim() || null;
   if ("description" in payload)
     update.description = payload.description?.trim() || null;
+  if ("map_link" in payload) update.map_link = payload.map_link?.trim() || null;
   if ("address_line_1" in payload)
     update.address_line_1 = payload.address_line_1?.trim() || null;
   if ("address_line_2" in payload)
@@ -236,6 +254,7 @@ function mapRow(r: Record<string, unknown>): LocationRow {
     name: String(r.name ?? ""),
     code: String(r.code ?? ""),
     description: String(r.description ?? ""),
+    map_link: String(r.map_link ?? ""),
     address_line_1: String(r.address_line_1 ?? ""),
     address_line_2: String(r.address_line_2 ?? ""),
     city: String(r.city ?? ""),

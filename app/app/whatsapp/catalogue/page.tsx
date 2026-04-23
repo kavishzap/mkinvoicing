@@ -10,8 +10,6 @@ import {
   ImageIcon,
   Share2,
   MessageCircle,
-  Download,
-  Copy,
   ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,8 +51,6 @@ import {
   type WhatsAppGroupRow,
 } from "@/lib/whatsapp-groups-service";
 import {
-  copyTextToClipboard,
-  downloadBase64Image,
   openWhatsAppChat,
   toWhatsAppDigits,
 } from "@/lib/whatsapp-share";
@@ -64,8 +60,7 @@ const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function defaultShareBody(description: string): string {
-  const d = description.trim();
-  return `${d}${d ? "\n\n" : ""}📎 Tip: use Download image, then attach with the paperclip in WhatsApp. Or paste if your browser copied the image.`;
+  return description.trim();
 }
 
 export default function WhatsAppCataloguePage() {
@@ -257,36 +252,6 @@ export default function WhatsAppCataloguePage() {
 
   function membersMissingPhone() {
     return shareMembers.filter((m) => !toWhatsAppDigits(m.phone));
-  }
-
-  async function handleCopyShareText() {
-    try {
-      await copyTextToClipboard(shareMessage);
-      toast({ title: "Copied", description: "Message text copied to clipboard." });
-    } catch {
-      toast({ title: "Copy failed", variant: "destructive" });
-    }
-  }
-
-  function handleDownloadImage() {
-    if (!sharePost?.imageBase64 || !sharePost.imageMimeType) {
-      toast({
-        title: "No image",
-        description: "This post has no image to download.",
-        variant: "destructive",
-      });
-      return;
-    }
-    const ext =
-      sharePost.imageMimeType === "image/jpeg"
-        ? "jpg"
-        : sharePost.imageMimeType.split("/")[1] || "png";
-    downloadBase64Image(
-      sharePost.imageBase64,
-      sharePost.imageMimeType,
-      `catalogue-${sharePost.id}.${ext}`
-    );
-    toast({ title: "Download started" });
   }
 
   function openOneChat(m: WhatsAppGroupMemberRow) {
@@ -571,16 +536,6 @@ export default function WhatsAppCataloguePage() {
                 <Textarea rows={6} value={shareMessage} onChange={(e) => setShareMessage(e.target.value)} />
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" className="gap-1" onClick={handleCopyShareText}>
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy text
-                </Button>
-                {sharePost.imageBase64 && (
-                  <Button type="button" variant="outline" size="sm" className="gap-1" onClick={handleDownloadImage}>
-                    <Download className="h-3.5 w-3.5" />
-                    Download image
-                  </Button>
-                )}
                 <Button
                   type="button"
                   size="sm"

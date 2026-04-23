@@ -12,14 +12,12 @@ import {
   MapPin,
   Lock,
   Unlock,
-  Star,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,68 +36,11 @@ import { useToast } from "@/hooks/use-toast";
 import { getActiveCompanyId } from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
 import {
-  addLocation,
   deleteLocation,
   listLocations,
   setLocationActive,
-  updateLocation,
   type LocationRow,
-  type LocationPayload,
 } from "@/lib/locations-service";
-
-type FormState = {
-  name: string;
-  code: string;
-  description: string;
-  address_line_1: string;
-  address_line_2: string;
-  city: string;
-  postal: string;
-  country: string;
-  is_default: boolean;
-};
-
-function emptyForm(): FormState {
-  return {
-    name: "",
-    code: "",
-    description: "",
-    address_line_1: "",
-    address_line_2: "",
-    city: "",
-    postal: "",
-    country: "",
-    is_default: false,
-  };
-}
-
-function rowToForm(row: LocationRow): FormState {
-  return {
-    name: row.name,
-    code: row.code,
-    description: row.description,
-    address_line_1: row.address_line_1,
-    address_line_2: row.address_line_2,
-    city: row.city,
-    postal: row.postal,
-    country: row.country,
-    is_default: row.isDefault,
-  };
-}
-
-function formToPayload(form: FormState): LocationPayload {
-  return {
-    name: form.name,
-    code: form.code.trim() || null,
-    description: form.description.trim() || null,
-    address_line_1: form.address_line_1.trim() || null,
-    address_line_2: form.address_line_2.trim() || null,
-    city: form.city.trim() || null,
-    postal: form.postal.trim() || null,
-    country: form.country.trim() || null,
-    is_default: form.is_default,
-  };
-}
 
 export default function InventoryLocationsPage() {
   const { toast } = useToast();
@@ -112,14 +53,8 @@ export default function InventoryLocationsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<LocationRow | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm());
-  const [nameError, setNameError] = useState("");
-
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,62 +117,6 @@ export default function InventoryLocationsPage() {
     setTotal(res.total);
   }
 
-  function openDialog(loc?: LocationRow) {
-    if (loc) {
-      setEditing(loc);
-      setForm(rowToForm(loc));
-    } else {
-      setEditing(null);
-      setForm(emptyForm());
-    }
-    setNameError("");
-    setDialogOpen(true);
-  }
-
-  function validate(): boolean {
-    if (!form.name.trim()) {
-      setNameError("Name is required");
-      return false;
-    }
-    setNameError("");
-    return true;
-  }
-
-  async function handleSave() {
-    if (!validate()) return;
-    try {
-      setSaving(true);
-      const payload = formToPayload(form);
-      if (editing) {
-        await updateLocation(editing.id, {
-          ...payload,
-          is_active: editing.isActive,
-        });
-        toast({
-          title: "Location updated",
-          description: "Changes have been saved.",
-        });
-      } else {
-        await addLocation({ ...payload, is_active: true });
-        toast({
-          title: "Location added",
-          description: "The new location is available for stock.",
-        });
-      }
-      await reload();
-      setDialogOpen(false);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
-        title: "Save failed",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function handleToggleActive(loc: LocationRow) {
     try {
       await setLocationActive(loc.id, !loc.isActive);
@@ -294,13 +173,11 @@ export default function InventoryLocationsPage() {
       }
       subtitle="Maintain warehouses and sites where you hold stock—each location belongs to your active company."
       actions={
-        <Button
-          onClick={() => openDialog()}
-          className="shrink-0 gap-2"
-          disabled={companyReady !== true}
-        >
-          <Plus className="h-4 w-4" />
-          Add location
+        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+          <Link href="/app/inventory/locations/new">
+            <Plus className="h-4 w-4" />
+            Add location
+          </Link>
         </Button>
       }
     >
@@ -367,7 +244,7 @@ export default function InventoryLocationsPage() {
                 <th className="p-3 text-left">Code</th>
                 <th className="p-3 text-left">City</th>
                 <th className="p-3 text-left">Country</th>
-                <th className="p-3 text-left">Default</th>
+                <th className="p-3 text-left">Primary</th>
                 <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-right">Actions</th>
               </tr>
@@ -383,9 +260,8 @@ export default function InventoryLocationsPage() {
                   <td className="p-3">{loc.country || "—"}</td>
                   <td className="p-3">
                     {loc.isDefault ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
-                        <Star className="h-3 w-3 fill-primary" />
-                        Default
+                      <span className="inline-flex items-center text-emerald-600">
+                        <Check className="h-4 w-4" />
                       </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
@@ -410,9 +286,11 @@ export default function InventoryLocationsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openDialog(loc)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit
+                        <DropdownMenuItem asChild>
+                          <Link href={`/app/inventory/locations/${loc.id}/edit`}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToggleActive(loc)}>
                           {loc.isActive ? (
@@ -494,127 +372,6 @@ export default function InventoryLocationsPage() {
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit location" : "Add location"}
-            </DialogTitle>
-            <DialogDescription>
-              {editing
-                ? "Update this warehouse or site."
-                : "Create a location to use with stock later."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="loc-name">Name *</Label>
-              <Input
-                id="loc-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Main warehouse"
-                className={nameError ? "border-destructive" : ""}
-              />
-              {nameError && (
-                <p className="text-xs text-destructive">{nameError}</p>
-              )}
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="loc-code">Code</Label>
-                <Input
-                  id="loc-code"
-                  value={form.code}
-                  onChange={(e) => setForm({ ...form, code: e.target.value })}
-                  placeholder="WH-01"
-                />
-              </div>
-              <div className="flex items-end gap-2 pb-0.5">
-                <Checkbox
-                  id="loc-default"
-                  checked={form.is_default}
-                  onCheckedChange={(v) =>
-                    setForm({ ...form, is_default: v === true })
-                  }
-                />
-                <Label htmlFor="loc-default" className="text-sm font-normal">
-                  Default location for this company
-                </Label>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loc-desc">Description</Label>
-              <Textarea
-                id="loc-desc"
-                value={form.description}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-                placeholder="Optional notes"
-                rows={3}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loc-a1">Address line 1</Label>
-              <Input
-                id="loc-a1"
-                value={form.address_line_1}
-                onChange={(e) =>
-                  setForm({ ...form, address_line_1: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loc-a2">Address line 2</Label>
-              <Input
-                id="loc-a2"
-                value={form.address_line_2}
-                onChange={(e) =>
-                  setForm({ ...form, address_line_2: e.target.value })
-                }
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="loc-city">City</Label>
-                <Input
-                  id="loc-city"
-                  value={form.city}
-                  onChange={(e) => setForm({ ...form, city: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="loc-postal">Postal code</Label>
-                <Input
-                  id="loc-postal"
-                  value={form.postal}
-                  onChange={(e) => setForm({ ...form, postal: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="loc-country">Country</Label>
-              <Input
-                id="loc-country"
-                value={form.country}
-                onChange={(e) => setForm({ ...form, country: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : editing ? "Save changes" : "Add location"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={!!confirmDeleteId} onOpenChange={() => setConfirmDeleteId(null)}>
         <DialogContent>
           <DialogHeader>
@@ -667,7 +424,7 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
             <th className="p-3 text-left">Code</th>
             <th className="p-3 text-left">City</th>
             <th className="p-3 text-left">Country</th>
-            <th className="p-3 text-left">Default</th>
+            <th className="p-3 text-left">Primary</th>
             <th className="p-3 text-left">Status</th>
             <th className="p-3 text-right">Actions</th>
           </tr>

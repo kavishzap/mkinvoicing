@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,17 +11,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -48,12 +38,15 @@ import { clearRoleFeaturesCache } from "@/lib/role-features-service";
 import {
   type CompanyRole,
   type PlanAllowedFeature,
-  createCompanyRole,
   deleteCompanyRole,
   getPlanAllowedFeatures,
   listCompanyRoles,
   updateCompanyRole,
 } from "@/lib/company-roles-service";
+
+function isOwnerRoleName(name: string | null | undefined): boolean {
+  return (name ?? "").trim().toLowerCase() === "owner";
+}
 
 export function CompanyRolesSettings() {
   const { toast } = useToast();
@@ -62,15 +55,6 @@ export function CompanyRolesSettings() {
   const [saving, setSaving] = useState(false);
   const [planFeatures, setPlanFeatures] = useState<PlanAllowedFeature[]>([]);
   const [roles, setRoles] = useState<CompanyRole[]>([]);
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<CompanyRole | null>(null);
-  const [formName, setFormName] = useState("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formActive, setFormActive] = useState(true);
-  const [selectedFeatureIds, setSelectedFeatureIds] = useState<Set<string>>(
-    () => new Set()
-  );
 
   const [deleteTarget, setDeleteTarget] = useState<CompanyRole | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -99,81 +83,6 @@ export function CompanyRolesSettings() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const openCreate = () => {
-    setEditing(null);
-    setFormName("");
-    setFormDescription("");
-    setFormActive(true);
-    setSelectedFeatureIds(new Set());
-    setDialogOpen(true);
-  };
-
-  const openEdit = (role: CompanyRole) => {
-    setEditing(role);
-    setFormName(role.name);
-    setFormDescription(role.description ?? "");
-    setFormActive(role.is_active);
-    setSelectedFeatureIds(new Set(role.featureIds));
-    setDialogOpen(true);
-  };
-
-  const toggleFeature = (id: string, checked: boolean) => {
-    setSelectedFeatureIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  };
-
-  const handleSaveDialog = async () => {
-    const name = formName.trim();
-    if (!name) {
-      toast({
-        title: "Name required",
-        description: "Enter a role name.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const featureIds = Array.from(selectedFeatureIds);
-    setSaving(true);
-    try {
-      if (editing) {
-        const payload: Parameters<typeof updateCompanyRole>[1] = {
-          featureIds,
-        };
-        if (!editing.is_system) {
-          payload.name = name;
-          payload.description = formDescription.trim() || null;
-        }
-        payload.is_active = formActive;
-        await updateCompanyRole(editing.id, payload);
-        toast({ title: "Role updated", description: "Changes saved." });
-      } else {
-        await createCompanyRole({
-          name,
-          description: formDescription.trim() || null,
-          featureIds,
-        });
-        toast({ title: "Role created", description: "The new role is ready." });
-      }
-      setDialogOpen(false);
-      clearRoleFeaturesCache();
-      await reloadAppFeatures();
-      await load();
-    } catch (err) {
-      toast({
-        title: "Save failed",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -239,9 +148,11 @@ export function CompanyRolesSettings() {
               subscription plan are available.
             </CardDescription>
           </div>
-          <Button type="button" onClick={openCreate} className="shrink-0">
-            <Plus className="mr-2 h-4 w-4" />
-            Create role
+          <Button type="button" className="shrink-0" asChild>
+            <Link href="/app/settings/roles/new">
+              <Plus className="mr-2 h-4 w-4" />
+              Create role
+            </Link>
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -291,7 +202,7 @@ export function CompanyRolesSettings() {
                       <TableCell>
                         <Switch
                           checked={role.is_active}
-                          disabled={togglingId === role.id}
+                          disabled={togglingId === role.id || isOwnerRoleName(role.name)}
                           onCheckedChange={(v) => handleRowActiveToggle(role, v)}
                           aria-label={`Toggle ${role.name} active`}
                         />
@@ -307,16 +218,22 @@ export function CompanyRolesSettings() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => openEdit(role)}
-                          aria-label={`Edit ${role.name}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        {!isOwnerRoleName(role.name) && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            asChild
+                          >
+                            <Link
+                              href={`/app/settings/roles/${role.id}/edit`}
+                              aria-label={`Edit ${role.name}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        )}
                         {!role.is_system && (
                           <Button
                             type="button"
@@ -338,102 +255,6 @@ export function CompanyRolesSettings() {
           </div>
         </CardContent>
       </Card>
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit role" : "Create role"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="role-name">Name</Label>
-              <Input
-                id="role-name"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                disabled={!!editing?.is_system}
-                placeholder="e.g. Sales, Accountant"
-              />
-              {editing?.is_system && (
-                <p className="text-xs text-muted-foreground">
-                  System role names cannot be changed.
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="role-desc">Description</Label>
-              <Textarea
-                id="role-desc"
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-                disabled={!!editing?.is_system}
-                placeholder="Optional"
-                rows={2}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
-              <div>
-                <p className="text-sm font-medium">Active</p>
-                <p className="text-xs text-muted-foreground">
-                  Inactive roles cannot be assigned to new users.
-                </p>
-              </div>
-              <Switch checked={formActive} onCheckedChange={setFormActive} />
-            </div>
-            <div className="space-y-2">
-              <Label>Features (from your plan)</Label>
-              <div className="max-h-56 overflow-y-auto rounded-md border p-3 space-y-3">
-                {planFeatures.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No features available for your plan.
-                  </p>
-                ) : (
-                  planFeatures.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-start gap-3 space-y-0"
-                    >
-                      <Checkbox
-                        id={`feat-${f.id}`}
-                        checked={selectedFeatureIds.has(f.id)}
-                        onCheckedChange={(c) =>
-                          toggleFeature(f.id, c === true)
-                        }
-                        className="mt-0.5"
-                      />
-                      <label
-                        htmlFor={`feat-${f.id}`}
-                        className="flex flex-col gap-0.5 text-sm leading-snug cursor-pointer"
-                      >
-                        <span className="font-medium">{f.name}</span>
-                        {f.description ? (
-                          <span className="text-xs text-muted-foreground">
-                            {f.description}
-                          </span>
-                        ) : null}
-                      </label>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button type="button" onClick={handleSaveDialog} disabled={saving}>
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <AlertDialog
         open={!!deleteTarget}

@@ -33,10 +33,12 @@ export type ProductRow = {
   updated_at: string;
 };
 
-const LIST_COLUMNS =
-  "id,company_id,user_id,sku,name,description,unit,cost_price,sale_price,currency,is_active,image_mime_type,created_at,updated_at";
+const BASE_COLUMNS =
+  "id,company_id,user_id,sku,name,description,unit,cost_price,sale_price,currency,is_active,created_at,updated_at";
 
-const FULL_COLUMNS = `${LIST_COLUMNS},image_base64`;
+const LIST_COLUMNS = BASE_COLUMNS;
+
+const FULL_COLUMNS = `${BASE_COLUMNS},image_mime_type,image_base64`;
 
 async function getUserId() {
   const { data, error } = await supabase.auth.getUser();
@@ -141,6 +143,39 @@ export async function addProduct(payload: ProductPayload): Promise<ProductRow> {
 
   if (error) throw error;
   return mapRow(data, true);
+}
+
+export async function addProductsBulk(
+  payloads: ProductPayload[]
+): Promise<{ inserted: number }> {
+  if (payloads.length === 0) return { inserted: 0 };
+  const userId = await getUserId();
+  const companyId = await requireCompanyId();
+
+  const rows = payloads.map((payload) => {
+    const img = normalizeImageFields(
+      payload.imageBase64 ?? null,
+      payload.imageMimeType ?? null
+    );
+    return {
+      company_id: companyId,
+      user_id: userId,
+      name: payload.name.trim(),
+      sku: payload.sku?.trim() || null,
+      description: payload.description?.trim() || null,
+      unit: (payload.unit ?? "pcs").trim() || "pcs",
+      cost_price: payload.costPrice ?? 0,
+      sale_price: payload.salePrice ?? 0,
+      currency: (payload.currency ?? "MUR").trim() || "MUR",
+      is_active: payload.is_active ?? true,
+      image_base64: img.base64,
+      image_mime_type: img.mime,
+    };
+  });
+
+  const { error } = await supabase.from("products").insert(rows);
+  if (error) throw error;
+  return { inserted: rows.length };
 }
 
 export async function updateProduct(

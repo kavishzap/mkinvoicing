@@ -3,7 +3,6 @@ import {
   BarChart3,
   BookOpen,
   ClipboardList,
-  Coins,
   FileInput,
   FileText,
   LayoutDashboard,
@@ -38,6 +37,7 @@ export const FEATURE_CODES = {
   accounting: "accounting",
   companyTeam: "company_team",
   companySettings: "company_settings",
+  dataCenter: "data_center",
 } as const;
 
 export type FeatureCode = (typeof FEATURE_CODES)[keyof typeof FEATURE_CODES];
@@ -106,6 +106,7 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/accounting": "Accounting",
   "/app/company-team": "Company Team",
   "/app/settings": "Company Settings",
+  "/app/data-center": "Data Center",
 };
 
 /**
@@ -153,12 +154,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     section: "sales",
   },
   {
-    requires: FEATURE_CODES.customerCredit,
-    href: "/app/customer-credit",
-    icon: Coins,
-    section: "sales",
-  },
-  {
     requires: FEATURE_CODES.purchaseOrders,
     href: "/app/purchase-orders",
     icon: ClipboardList,
@@ -181,12 +176,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.expenses,
     href: "/app/expenses",
     icon: Receipt,
-    section: "operations",
-  },
-  {
-    requires: FEATURE_CODES.payroll,
-    href: "/app/payroll",
-    icon: Wallet,
     section: "operations",
   },
   {
@@ -217,6 +206,12 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.companySettings,
     href: "/app/settings",
     icon: Settings,
+    section: "company",
+  },
+  {
+    requires: FEATURE_CODES.dataCenter,
+    href: "/app/data-center",
+    icon: Wallet,
     section: "company",
   },
 ];
@@ -251,6 +246,7 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   { prefix: "/app/accounting", requires: FEATURE_CODES.accounting },
   { prefix: "/app/settings", requires: FEATURE_CODES.companySettings },
   { prefix: "/app/company-team", requires: FEATURE_CODES.companyTeam },
+  { prefix: "/app/data-center", requires: FEATURE_CODES.dataCenter },
   { prefix: "/app", requires: FEATURE_CODES.dashboard },
 ];
 
@@ -270,6 +266,21 @@ export function resolveCurrentNavLabel(
   pathname: string,
   featureNameFn: (code: string) => string | null
 ): string {
+  if (
+    pathname.startsWith("/app/inventory/products/") &&
+    pathname.endsWith("/edit")
+  ) {
+    return "Edit product";
+  }
+  if (pathname === "/app/settings/roles/new") {
+    return "Create role";
+  }
+  if (
+    pathname.startsWith("/app/settings/roles/") &&
+    pathname.endsWith("/edit")
+  ) {
+    return "Edit role";
+  }
   const code = requiredFeatureForPath(pathname);
   if (!code) return "MoLedger";
   const item = APP_NAV_ITEMS.find((i) => i.requires === code);

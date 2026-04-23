@@ -19,6 +19,10 @@ export type CompanyRole = {
   featureIds: string[];
 };
 
+function isOwnerRoleName(name: string | null | undefined): boolean {
+  return (name ?? "").trim().toLowerCase() === "owner";
+}
+
 /** Features enabled for the company's subscription plan (`plan_features` + `features`). */
 export async function getPlanAllowedFeatures(
   companyId: string
@@ -112,6 +116,48 @@ export async function listCompanyRoles(): Promise<CompanyRole[]> {
   });
 }
 
+export async function getCompanyRoleById(roleId: string): Promise<CompanyRole> {
+  const companyId = await requireActiveCompanyId();
+
+  const { data: role, error } = await supabase
+    .from("company_roles")
+    .select(
+      `
+      id,
+      company_id,
+      name,
+      description,
+      is_active,
+      is_system,
+      created_at,
+      role_features ( feature_id )
+    `
+    )
+    .eq("id", roleId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!role) throw new Error("Role not found for this company.");
+
+  const rf = role.role_features as unknown;
+  const pairs = Array.isArray(rf) ? rf : [];
+  const featureIds = pairs
+    .map((x: { feature_id?: string }) => x.feature_id)
+    .filter(Boolean) as string[];
+
+  return {
+    id: role.id as string,
+    company_id: role.company_id as string,
+    name: role.name as string,
+    description: (role.description as string | null) ?? null,
+    is_active: role.is_active as boolean,
+    is_system: role.is_system as boolean | null,
+    created_at: (role.created_at as string | null) ?? null,
+    featureIds,
+  };
+}
+
 async function assertRoleBelongsToCompany(
   roleId: string,
   companyId: string
@@ -200,11 +246,14 @@ export async function updateCompanyRole(
 
   const { data: existing, error: exErr } = await supabase
     .from("company_roles")
-    .select("is_system")
+    .select("is_system, name")
     .eq("id", roleId)
     .single();
 
   if (exErr || !existing) throw new Error(exErr?.message ?? "Role not found.");
+  if (isOwnerRoleName(existing.name as string | undefined)) {
+    throw new Error("The Owner role cannot be edited.");
+  }
 
   if (payload.featureIds) {
     const allowed = await getPlanAllowedFeatures(companyId);

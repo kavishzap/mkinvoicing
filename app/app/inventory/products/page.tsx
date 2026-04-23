@@ -55,7 +55,6 @@ import {
   replaceProductLocationStocks,
 } from "@/lib/product-location-stocks-service";
 import {
-  addProduct,
   deleteProduct,
   getProduct,
   listProducts,
@@ -73,6 +72,20 @@ const ALLOWED_MIME = new Set([
   "image/webp",
   "image/gif",
 ]);
+const UNIT_OPTIONS = [
+  "pcs",
+  "kg",
+  "g",
+  "lb",
+  "oz",
+  "l",
+  "ml",
+  "m",
+  "cm",
+  "box",
+  "pack",
+  "set",
+] as const;
 
 const NONE_LOC = "__none__";
 
@@ -103,7 +116,7 @@ function emptyForm(): FormState {
     name: "",
     sku: "",
     description: "",
-    unit: "ea",
+    unit: "pcs",
     costPrice: "0",
     salePrice: "0",
     currency: "MUR",
@@ -117,7 +130,7 @@ function rowToForm(row: ProductRow): FormState {
     name: row.name,
     sku: row.sku,
     description: row.description,
-    unit: row.unit || "ea",
+    unit: row.unit || "pcs",
     costPrice: String(row.costPrice ?? 0),
     salePrice: String(row.salePrice ?? 0),
     currency: row.currency || "MUR",
@@ -133,7 +146,7 @@ function formToPayload(form: FormState): ProductPayload {
     name: form.name,
     sku: form.sku.trim() || null,
     description: form.description.trim() || null,
-    unit: form.unit.trim() || "ea",
+    unit: form.unit.trim() || "pcs",
     costPrice: cost,
     salePrice: sale,
     currency: form.currency.trim() || "MUR",
@@ -310,6 +323,7 @@ export default function InventoryProductsPage() {
   }
 
   async function openDialog(productId?: string) {
+    if (!productId) return;
     setNameError("");
     setEditingId(productId ?? null);
     setDialogOpen(true);
@@ -317,13 +331,6 @@ export default function InventoryProductsPage() {
 
     try {
       const opts = await listActiveLocationsForSelect();
-
-      if (!productId) {
-        setLocationOptions(opts);
-        setForm(emptyForm());
-        setStockLines([]);
-        return;
-      }
 
       const [p, stocks] = await Promise.all([
         getProduct(productId),
@@ -458,6 +465,7 @@ export default function InventoryProductsPage() {
   }
 
   async function handleSave() {
+    if (!editingId) return;
     if (!validate()) return;
     const stockPayload = parseStockLines(stockLines, toast);
     if (stockPayload === null) return;
@@ -465,20 +473,11 @@ export default function InventoryProductsPage() {
     try {
       setSaving(true);
       const payload = formToPayload(form);
-      const isEdit = Boolean(editingId);
-
-      let productId = editingId;
-      if (productId) {
-        await updateProduct(productId, payload);
-      } else {
-        const created = await addProduct({ ...payload, is_active: true });
-        productId = created.id;
-      }
-
-      await replaceProductLocationStocks(productId, stockPayload);
+      await updateProduct(editingId, payload);
+      await replaceProductLocationStocks(editingId, stockPayload);
 
       toast({
-        title: isEdit ? "Product updated" : "Product added",
+        title: "Product updated",
         description:
           stockPayload.length > 0
             ? `Stock saved for ${stockPayload.length} location(s).`
@@ -549,13 +548,11 @@ export default function InventoryProductsPage() {
       }
       subtitle="Add or edit catalogue items and optional images—stock quantities follow per location."
       actions={
-        <Button
-          onClick={() => openDialog()}
-          className="shrink-0 gap-2"
-          disabled={companyReady !== true}
-        >
-          <Plus className="h-4 w-4" />
-          Add product
+        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+          <Link href="/app/inventory/products/new">
+            <Plus className="h-4 w-4" />
+            Add product
+          </Link>
         </Button>
       }
     >
@@ -620,7 +617,6 @@ export default function InventoryProductsPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-muted-foreground">
               <tr>
-                <th className="p-3 text-left">Image</th>
                 <th className="p-3 text-left">Name</th>
                 <th className="p-3 text-left">SKU</th>
                 <th className="p-3 text-left">Unit</th>
@@ -633,16 +629,6 @@ export default function InventoryProductsPage() {
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id} className="border-t">
-                  <td className="p-3">
-                    {p.imageMimeType ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        <ImageIcon className="h-3.5 w-3.5" />
-                        Yes
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
                   <td className="p-3 font-medium">{p.name}</td>
                   <td className="p-3 text-muted-foreground">{p.sku || "—"}</td>
                   <td className="p-3">{p.unit}</td>
@@ -671,9 +657,11 @@ export default function InventoryProductsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openDialog(p.id)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit
+                        <DropdownMenuItem asChild>
+                          <Link href={`/app/inventory/products/${p.id}/edit`}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToggleActive(p)}>
                           {p.isActive ? (
@@ -703,7 +691,7 @@ export default function InventoryProductsPage() {
               {rows.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={7}
                     className="p-8 text-center text-muted-foreground"
                   >
                     <div className="flex flex-col items-center gap-2">
@@ -756,11 +744,9 @@ export default function InventoryProductsPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {editingId ? "Edit product" : "Add product"}
-            </DialogTitle>
+            <DialogTitle>Edit product</DialogTitle>
             <DialogDescription>
               Set optional image (Base64) and how much of this product you hold
               at each warehouse location.
@@ -772,245 +758,256 @@ export default function InventoryProductsPage() {
               Loading…
             </div>
           ) : (
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="p-name">Name *</Label>
-                <Input
-                  id="p-name"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="Widget A"
-                  className={nameError ? "border-destructive" : ""}
-                />
-                {nameError && (
-                  <p className="text-xs text-destructive">{nameError}</p>
-                )}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-6 py-2 lg:grid-cols-2 lg:items-start">
+              <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="p-sku">SKU</Label>
+                  <Label htmlFor="p-name">Name *</Label>
                   <Input
-                    id="p-sku"
-                    value={form.sku}
-                    onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                    placeholder="SKU-001"
+                    id="p-name"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    placeholder="Widget A"
+                    className={nameError ? "border-destructive" : ""}
                   />
+                  {nameError && (
+                    <p className="text-xs text-destructive">{nameError}</p>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="p-unit">Unit</Label>
-                  <Input
-                    id="p-unit"
-                    value={form.unit}
-                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                    placeholder="ea, box, kg…"
-                  />
-                </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="p-desc">Description</Label>
-                <Textarea
-                  id="p-desc"
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm({ ...form, description: e.target.value })
-                  }
-                  rows={3}
-                  placeholder="Optional"
-                />
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="p-cost">Cost price</Label>
-                  <Input
-                    id="p-cost"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={form.costPrice}
-                    onChange={(e) =>
-                      setForm({ ...form, costPrice: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="p-sale">Sale price</Label>
-                  <Input
-                    id="p-sale"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={form.salePrice}
-                    onChange={(e) =>
-                      setForm({ ...form, salePrice: e.target.value })
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <MapPin className="h-4 w-4 text-muted-foreground" />
-                    Stock by location
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1 shrink-0"
-                    onClick={addStockLine}
-                    disabled={locationOptions.length === 0}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Add line
-                  </Button>
-                </div>
-                {locationOptions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Create at least one active location under Inventory → Locations
-                    to split stock by warehouse.
-                  </p>
-                ) : stockLines.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No lines yet. Use &quot;Add line&quot; to record quantity per
-                    location (optional).
-                  </p>
-                ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    {stockLines.map((line, idx) => {
-                      const rowOpts = locationsForRow(
-                        idx,
-                        stockLines,
-                        locationOptions
-                      );
-                      return (
-                        <div
-                          key={line.key}
-                          className="flex flex-col gap-2 sm:flex-row sm:items-end"
-                        >
-                          <div className="min-w-0 flex-1 space-y-1.5">
-                            <Label className="text-xs text-muted-foreground">
-                              Location
-                            </Label>
-                            <Select
-                              value={line.locationId || NONE_LOC}
-                              onValueChange={(v) =>
-                                updateStockLine(line.key, {
-                                  locationId: v === NONE_LOC ? "" : v,
-                                })
-                              }
-                            >
-                              <SelectTrigger className="w-full min-w-0">
-                                <SelectValue placeholder="Choose location" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value={NONE_LOC}>
-                                  Choose location
-                                </SelectItem>
-                                {rowOpts.map((opt) => (
-                                  <SelectItem key={opt.id} value={opt.id}>
-                                    {opt.name}
-                                    {opt.code ? ` (${opt.code})` : ""}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="w-full space-y-1.5 sm:w-32">
-                            <Label className="text-xs text-muted-foreground">
-                              Quantity
-                            </Label>
-                            <Input
-                              type="number"
-                              min={0}
-                              step="any"
-                              value={line.quantity}
-                              onChange={(e) =>
-                                updateStockLine(line.key, {
-                                  quantity: e.target.value,
-                                })
-                              }
-                            />
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="shrink-0 self-end text-muted-foreground hover:text-destructive"
-                            onClick={() => removeStockLine(line.key)}
-                            aria-label="Remove line"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="p-curr">Currency</Label>
-                <Input
-                  id="p-curr"
-                  value={form.currency}
-                  onChange={(e) =>
-                    setForm({ ...form, currency: e.target.value.toUpperCase() })
-                  }
-                  placeholder="MUR"
-                  maxLength={8}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Image</Label>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                  <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
-                    {previewUrl ? (
-                      <img
-                        src={previewUrl}
-                        alt=""
-                        className="h-full w-full object-contain"
-                      />
-                    ) : (
-                      <ImageIcon className="h-8 w-8 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="flex flex-1 flex-col gap-2">
+                    <Label htmlFor="p-sku">SKU</Label>
                     <Input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      onChange={(e) =>
-                        handleImageFile(e.target.files?.[0] ?? null)
-                      }
-                      className="cursor-pointer text-sm"
+                      id="p-sku"
+                      value={form.sku}
+                      onChange={(e) => setForm({ ...form, sku: e.target.value })}
+                      placeholder="SKU-001"
                     />
-                    {(form.imageBase64 || form.imageMimeType) && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="w-fit gap-1"
-                        onClick={() =>
-                          setForm((f) => ({
-                            ...f,
-                            imageBase64: null,
-                            imageMimeType: null,
-                          }))
-                        }
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        Remove image
-                      </Button>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      PNG, JPEG, WebP, or GIF. Max 4 MB file size. Stored as
-                      Base64 only (no Supabase Storage).
-                    </p>
                   </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="p-unit">Unit</Label>
+                    <Select
+                      value={form.unit}
+                      onValueChange={(v) => setForm({ ...form, unit: v })}
+                    >
+                      <SelectTrigger id="p-unit">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {UNIT_OPTIONS.map((unit) => (
+                          <SelectItem key={unit} value={unit}>
+                            {unit}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="p-desc">Description</Label>
+                  <Textarea
+                    id="p-desc"
+                    value={form.description}
+                    onChange={(e) =>
+                      setForm({ ...form, description: e.target.value })
+                    }
+                    rows={4}
+                    placeholder="Optional"
+                  />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="p-cost">Cost price</Label>
+                    <Input
+                      id="p-cost"
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={form.costPrice}
+                      onChange={(e) =>
+                        setForm({ ...form, costPrice: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="p-sale">Sale price</Label>
+                    <Input
+                      id="p-sale"
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={form.salePrice}
+                      onChange={(e) =>
+                        setForm({ ...form, salePrice: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="p-curr">Currency</Label>
+                  <Input
+                    id="p-curr"
+                    value={form.currency}
+                    onChange={(e) =>
+                      setForm({ ...form, currency: e.target.value.toUpperCase() })
+                    }
+                    placeholder="MUR"
+                    maxLength={8}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Image</Label>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
+                      {previewUrl ? (
+                        <img
+                          src={previewUrl}
+                          alt=""
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="flex min-w-0 flex-1 flex-col gap-2">
+                      <Input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(e) =>
+                          handleImageFile(e.target.files?.[0] ?? null)
+                        }
+                        className="cursor-pointer text-sm"
+                      />
+                      {(form.imageBase64 || form.imageMimeType) && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="w-fit gap-1"
+                          onClick={() =>
+                            setForm((f) => ({
+                              ...f,
+                              imageBase64: null,
+                              imageMimeType: null,
+                            }))
+                          }
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Remove image
+                        </Button>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        PNG, JPEG, WebP, or GIF. Max 4 MB file size. Stored as
+                        Base64 only (no Supabase Storage).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                      Stock by location
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1 shrink-0"
+                      onClick={addStockLine}
+                      disabled
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add line
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Stock by location is read-only here.
+                  </p>
+                  {locationOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Create at least one active location under Inventory →
+                      Locations to split stock by warehouse.
+                    </p>
+                  ) : stockLines.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No lines yet. Use &quot;Add line&quot; to record quantity per
+                      location (optional).
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {stockLines.map((line, idx) => {
+                        const rowOpts = locationsForRow(
+                          idx,
+                          stockLines,
+                          locationOptions
+                        );
+                        return (
+                          <div
+                            key={line.key}
+                            className="flex flex-col gap-2 sm:flex-row sm:items-end"
+                          >
+                            <div className="min-w-0 flex-1 space-y-1.5">
+                              <Label className="text-xs text-muted-foreground">
+                                Location
+                              </Label>
+                              <Select
+                                value={line.locationId || NONE_LOC}
+                                onValueChange={() => {}}
+                                disabled
+                              >
+                                <SelectTrigger className="w-full min-w-0">
+                                  <SelectValue placeholder="Choose location" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={NONE_LOC}>
+                                    Choose location
+                                  </SelectItem>
+                                  {rowOpts.map((opt) => (
+                                    <SelectItem key={opt.id} value={opt.id}>
+                                      {opt.name}
+                                      {opt.code ? ` (${opt.code})` : ""}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="w-full space-y-1.5 sm:w-32">
+                              <Label className="text-xs text-muted-foreground">
+                                Quantity
+                              </Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={line.quantity}
+                                onChange={() => {}}
+                                disabled
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="shrink-0 self-end text-muted-foreground hover:text-destructive"
+                              onClick={() => {}}
+                              aria-label="Remove line"
+                              disabled
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1021,7 +1018,7 @@ export default function InventoryProductsPage() {
               Cancel
             </Button>
             <Button onClick={handleSave} disabled={saving || dialogLoading}>
-              {saving ? "Saving…" : editingId ? "Save changes" : "Add product"}
+              {saving ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1074,7 +1071,6 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
       <table className="w-full text-sm">
         <thead className="bg-muted/50 text-muted-foreground">
           <tr>
-            <th className="p-3 text-left">Image</th>
             <th className="p-3 text-left">Name</th>
             <th className="p-3 text-left">SKU</th>
             <th className="p-3 text-left">Unit</th>
@@ -1087,7 +1083,7 @@ function SkeletonTable({ rows = 6 }: { rows?: number }) {
         <tbody>
           {Array.from({ length: rows }).map((_, i) => (
             <tr key={i} className="border-t">
-              {Array.from({ length: 8 }).map((__, j) => (
+              {Array.from({ length: 7 }).map((__, j) => (
                 <td key={j} className="p-3">
                   <div className="h-5 animate-pulse rounded bg-muted" />
                 </td>

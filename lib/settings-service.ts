@@ -250,7 +250,6 @@ export type CompanySubscriptionDetails = {
   subscription_start_date: string;
   subscription_end_date: string | null;
   max_users_override: number | null;
-  plan_id: string;
   plan_name: string;
   plan_billing_cycle: string;
   plan_currency: string | null;
@@ -288,7 +287,6 @@ export async function fetchCompanySubscriptionDetails(): Promise<CompanySubscrip
       subscription_start_date,
       subscription_end_date,
       max_users_override,
-      plan_id,
       plans ( name, billing_cycle, currency, description, max_users, price, is_active )
     `,
     )
@@ -312,7 +310,6 @@ export async function fetchCompanySubscriptionDetails(): Promise<CompanySubscrip
       .subscription_end_date,
     max_users_override: (data as { max_users_override: number | null })
       .max_users_override,
-    plan_id: (data as { plan_id: string }).plan_id,
     plan_name: planRow?.name ?? "—",
     plan_billing_cycle: planRow?.billing_cycle ?? "—",
     plan_currency: planRow?.currency ?? null,

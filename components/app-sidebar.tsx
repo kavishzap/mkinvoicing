@@ -120,7 +120,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex flex-1 flex-col min-h-0 px-2 py-2">
-        <div className="space-y-1 flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        <div className="space-y-1 flex-1 min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {status === "loading" ? (
             <div
               className={cn(

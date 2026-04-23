@@ -152,6 +152,105 @@ export async function addCustomer(
   return mapRow(data);
 }
 
+export async function addCustomersBulk(
+  payloads: CustomerPayload[]
+): Promise<{ inserted: number }> {
+  if (payloads.length === 0) return { inserted: 0 };
+  const [userId, companyId] = await Promise.all([
+    getUserId(),
+    requireActiveCompanyId(),
+  ]);
+
+  const rows = payloads.map((payload) => ({
+    user_id: userId,
+    company_id: companyId,
+    type: payload.type,
+    company_name: payload.companyName || null,
+    contact_name: payload.contactName || null,
+    full_name: payload.fullName || null,
+    email: (payload.email || "").toLowerCase(),
+    phone: payload.phone || null,
+    street: payload.street || null,
+    city: payload.city || null,
+    postal: payload.postal || null,
+    country: payload.country || null,
+    address_line_1: payload.address_line_1 || null,
+    address_line_2: payload.address_line_2 || null,
+    is_active: payload.isActive ?? true,
+  }));
+
+  const { error } = await supabase.from("customers").insert(rows);
+  if (error) throw error;
+  return { inserted: rows.length };
+}
+
+/** Normalize customer name for import duplicate checks (within file vs existing DB). */
+export function normalizeCustomerImportDedupeValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Stable key: `individual:{norm}` or `company:{norm}` — must match import preview logic. */
+export function customerPayloadImportDedupeKey(
+  payload: CustomerPayload
+): string | null {
+  if (payload.type === "company") {
+    const n = normalizeCustomerImportDedupeValue(payload.companyName ?? "");
+    return n ? `company:${n}` : null;
+  }
+  const n = normalizeCustomerImportDedupeValue(payload.fullName ?? "");
+  return n ? `individual:${n}` : null;
+}
+
+const IMPORT_DEDUPE_PAGE = 1000;
+
+/**
+ * Dedupe keys for every customer already stored for the active company (active and inactive),
+ * using the same rules as bulk import preview (`customerPayloadImportDedupeKey`).
+ */
+export async function getExistingCustomerImportDedupeKeys(): Promise<
+  Set<string>
+> {
+  const companyId = await requireActiveCompanyId();
+  const keys = new Set<string>();
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("type, full_name, company_name")
+      .eq("company_id", companyId)
+      .range(from, from + IMPORT_DEDUPE_PAGE - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+
+    for (const r of data as {
+      type: string;
+      full_name?: string | null;
+      company_name?: string | null;
+    }[]) {
+      const payload: CustomerPayload =
+        r.type === "company"
+          ? {
+              type: "company",
+              companyName: r.company_name ?? "",
+              email: "",
+            }
+          : {
+              type: "individual",
+              fullName: r.full_name ?? "",
+              email: "",
+            };
+      const k = customerPayloadImportDedupeKey(payload);
+      if (k) keys.add(k);
+    }
+
+    if (data.length < IMPORT_DEDUPE_PAGE) break;
+    from += IMPORT_DEDUPE_PAGE;
+  }
+
+  return keys;
+}
+
 /** Update customer by id */
 export async function updateCustomer(
   id: string,
@@ -320,6 +419,21 @@ export async function deleteCustomer(id: string): Promise<void> {
     .from("customers")
     .delete()
     .eq("id", id)
+    .eq("company_id", companyId);
+
+  if (error) throw error;
+}
+
+/** Delete many by id (scoped to the active company). */
+export async function deleteCustomers(ids: string[]): Promise<void> {
+  const uniq = [...new Set(ids)].filter(Boolean);
+  if (uniq.length === 0) return;
+  const companyId = await requireActiveCompanyId();
+
+  const { error } = await supabase
+    .from("customers")
+    .delete()
+    .in("id", uniq)
     .eq("company_id", companyId);
 
   if (error) throw error;
