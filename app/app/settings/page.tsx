@@ -289,7 +289,7 @@ export default function SettingsPage() {
           <Button
             onClick={handleSavePreferences}
             size="sm"
-            disabled={savingPrefs}
+            disabled={savingPrefs || noActiveCompany}
           >
             {savingPrefs ? "Saving..." : "Save Preferences"}
           </Button>

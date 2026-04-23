@@ -8,7 +8,8 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
+import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
+import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
 import { SalesOrderViewActions } from "@/components/sales-order-view-actions";
 import {
   getSalesOrder,
@@ -264,10 +265,22 @@ export default function SalesOrderViewPage() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-muted-foreground">
-                    Status
+                    Fulfillment
                   </p>
                   <div className="mt-1">
-                    <SalesOrderStatusBadge status={salesOrder.status} />
+                    <SalesOrderFulfillmentStatusBadge
+                      status={salesOrder.fulfillment_status}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-muted-foreground">
+                    Payment
+                  </p>
+                  <div className="mt-1">
+                    <SalesOrderPaymentStatusBadge
+                      status={salesOrder.payment_status}
+                    />
                   </div>
                 </div>
                 {salesOrder.created_from_quotation_id && (

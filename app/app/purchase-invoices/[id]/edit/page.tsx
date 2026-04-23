@@ -61,6 +61,7 @@ import {
   type PurchaseInvoiceStatus,
 } from "@/lib/purchase-invoices-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 
 type LineItem = {
   id: string;
@@ -1145,22 +1146,11 @@ export default function EditPurchaseInvoicePage() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-muted-foreground">Discount</span>
                 <div className="flex items-center gap-2">
-                  <Select
+                  <DiscountTypeToggle
                     value={discount.type}
-                    onValueChange={(v: "value" | "percent") =>
-                      setDiscount({ ...discount, type: v })
-                    }
-                  >
-                    <SelectTrigger className="w-[80px] h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="value">
-                        {preferences?.currency}
-                      </SelectItem>
-                      <SelectItem value="percent">%</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onChange={(t) => setDiscount({ ...discount, type: t })}
+                    currencyLabel={preferences?.currency ?? ""}
+                  />
                   <Input
                     type="number"
                     min="0"

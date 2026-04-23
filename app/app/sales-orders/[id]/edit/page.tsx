@@ -49,6 +49,10 @@ import {
 } from "@/lib/settings-service";
 import { listCustomers, type CustomerRow } from "@/lib/customers-service";
 import {
+  listProducts,
+  type ProductRow,
+} from "@/lib/products-service";
+import {
   getSalesOrder,
   updateSalesOrder,
   buildFromSnapshotForSalesOrder,
@@ -56,11 +60,20 @@ import {
   clientInfoFromBillSnapshot,
   type SalesOrderLinePayload,
   type SalesOrderStatus,
+  type SalesOrderFulfillmentStatus,
+  SALES_ORDER_FULFILLMENT_STATUSES,
+  SALES_ORDER_FULFILLMENT_LABELS,
+  type SalesOrderItemRow,
 } from "@/lib/sales-orders-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
+import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
+import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 
 type LineItem = {
   id: string;
+  /** `products.id`; required before save. */
+  productId: string | null;
   item: string;
   description: string;
   quantity: number;
@@ -91,7 +104,7 @@ type FieldErrors = Partial<
     | "phone"
     | "address_line_1"
     | "lineItems"
-    | `item_${string}`
+    | `product_${string}`
     | `qty_${string}`
     | `price_${string}`,
     string
@@ -117,6 +130,7 @@ export default function EditSalesOrderPage() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
+  const [products, setProducts] = useState<ProductRow[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(
@@ -146,11 +160,21 @@ export default function EditSalesOrderPage() {
     new Date().toISOString().split("T")[0]
   );
   const [validForDays, setValidForDays] = useState("14");
-  const [salesOrderStatus, setSalesOrderStatus] =
+  const [lifecycleStatus, setLifecycleStatus] =
     useState<SalesOrderStatus>("active");
+  const [fulfillmentStatus, setFulfillmentStatus] =
+    useState<SalesOrderFulfillmentStatus>("new");
 
   const [lineItems, setLineItems] = useState<LineItem[]>([
-    { id: "1", item: "", description: "", quantity: 1, unitPrice: 0, tax: 0 },
+    {
+      id: "1",
+      productId: null,
+      item: "",
+      description: "",
+      quantity: 1,
+      unitPrice: 0,
+      tax: 0,
+    },
   ]);
   const [discount, setDiscount] = useState({
     type: "value" as "value" | "percent",
@@ -167,10 +191,17 @@ export default function EditSalesOrderPage() {
     (async () => {
       try {
         setLoading(true);
-        const [p, prefs, q] = await Promise.all([
+        const [p, prefs, q, prodRes] = await Promise.all([
           fetchProfile(),
           fetchPreferences(),
           getSalesOrder(salesOrderId),
+          listProducts({
+            search: "",
+            includeInactive: false,
+            page: 1,
+            pageSize: 400,
+            onlyWithPositiveStock: true,
+          }),
         ]);
         if (cancelled) return;
         if (!q) {
@@ -184,13 +215,15 @@ export default function EditSalesOrderPage() {
 
         setProfile(p);
         setPreferences(prefs);
+        setProducts(prodRes.rows);
         setSalesOrderNumber(q.number);
         setIssueDate(q.issue_date);
         setValidUntil(q.valid_until);
         setValidForDays(
           String(daysBetweenIssueAndValid(q.issue_date, q.valid_until))
         );
-        setSalesOrderStatus(q.status);
+        setLifecycleStatus(q.status);
+        setFulfillmentStatus(q.fulfillment_status);
         setDiscount({
           type: q.discount_type,
           amount: q.discount_amount,
@@ -222,6 +255,7 @@ export default function EditSalesOrderPage() {
             )
             .map((it, i) => ({
               id: `ln-${i}-${it.item?.slice(0, 8) || "row"}`,
+              productId: (it as SalesOrderItemRow).product_id ?? null,
               item: it.item,
               description: it.description ?? "",
               quantity: Number(it.quantity),
@@ -311,6 +345,7 @@ export default function EditSalesOrderPage() {
       ...prev,
       {
         id: String(Date.now()),
+        productId: null,
         item: "",
         description: "",
         quantity: 1,
@@ -328,10 +363,13 @@ export default function EditSalesOrderPage() {
   const updateLineItem = (
     id: string,
     field: keyof LineItem,
-    value: string | number
+    value: string | number | null
   ) => {
     setLineItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, [field]: value } : it))
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        return { ...it, [field]: value } as LineItem;
+      })
     );
   };
 
@@ -399,7 +437,8 @@ export default function EditSalesOrderPage() {
       next.lineItems = "At least one line item is required";
     } else {
       lineItems.forEach((li) => {
-        if (!li.item.trim()) next[`item_${li.id}`] = "Item name is required";
+        if (!li.productId?.trim())
+          next[`product_${li.id}`] = "Select a product";
         if (!(li.quantity > 0))
           next[`qty_${li.id}`] = "Quantity must be greater than 0";
         if (!(li.unitPrice >= 0))
@@ -433,6 +472,7 @@ export default function EditSalesOrderPage() {
         unit_price: li.unitPrice,
         tax_percent: li.tax,
         sort_order: i,
+        product_id: li.productId,
       }));
 
       const fromSnap = buildFromSnapshotForSalesOrder(profile);
@@ -458,7 +498,8 @@ export default function EditSalesOrderPage() {
       await updateSalesOrder(salesOrderId, {
         issue_date: issueDate,
         valid_until: validUntil,
-        status: salesOrderStatus,
+        status: lifecycleStatus,
+        fulfillment_status: fulfillmentStatus,
         currency: preferences.currency,
         discount_type: discount.type,
         discount_amount: discount.amount,
@@ -592,7 +633,7 @@ export default function EditSalesOrderPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Bill To</CardTitle>
+              <CardTitle>Bill to & dates</CardTitle>
               <Button
                 variant="outline"
                 size="sm"
@@ -605,6 +646,82 @@ export default function EditSalesOrderPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex flex-nowrap items-end gap-3 md:gap-4 overflow-x-auto pb-1">
+              <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
+                <Label htmlFor="issueDate">Issue Date</Label>
+                <Input
+                  id="issueDate"
+                  type="date"
+                  className="h-9"
+                  value={issueDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setIssueDate(v);
+                    const base = new Date(v);
+                    const days = Number(validForDays) || 14;
+                    base.setDate(base.getDate() + days);
+                    setValidUntil(base.toISOString().split("T")[0]);
+                  }}
+                />
+              </div>
+              <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
+                <Label htmlFor="validUntil">Valid Until</Label>
+                <Input
+                  id="validUntil"
+                  type="date"
+                  className="h-9"
+                  value={validUntil}
+                  onChange={(e) => setValidUntil(e.target.value)}
+                />
+              </div>
+              <div className="shrink-0 space-y-2 w-[min(100%,9.5rem)]">
+                <Label htmlFor="validForDays">Valid for (days)</Label>
+                <Select
+                  value={validForDays}
+                  onValueChange={(v) => {
+                    setValidForDays(v);
+                    const days = Number(v) || 14;
+                    const base = new Date(
+                      issueDate || new Date().toISOString().split("T")[0]
+                    );
+                    base.setDate(base.getDate() + days);
+                    setValidUntil(base.toISOString().split("T")[0]);
+                  }}
+                >
+                  <SelectTrigger id="validForDays" className="h-9 w-full min-w-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="14">14 days</SelectItem>
+                    <SelectItem value="30">30 days</SelectItem>
+                    <SelectItem value="60">60 days</SelectItem>
+                    <SelectItem value="90">90 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="shrink-0 space-y-2 w-[min(100%,10.5rem)]">
+                <Label htmlFor="soFulfillment">Fulfillment status</Label>
+                <Select
+                  value={fulfillmentStatus}
+                  onValueChange={(v) =>
+                    setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
+                  }
+                >
+                  <SelectTrigger id="soFulfillment" className="h-9 w-full min-w-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {SALES_ORDER_FULFILLMENT_LABELS[v]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Separator />
             <div className="flex gap-2">
               <Button
                 variant={clientInfo.type === "company" ? "default" : "outline"}
@@ -757,81 +874,6 @@ export default function EditSalesOrderPage() {
       </div>
 
       <Card>
-        <CardContent className="pt-6">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="issueDate">Issue Date</Label>
-              <Input
-                id="issueDate"
-                type="date"
-                value={issueDate}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setIssueDate(v);
-                  const base = new Date(v);
-                  const days = Number(validForDays) || 14;
-                  base.setDate(base.getDate() + days);
-                  setValidUntil(base.toISOString().split("T")[0]);
-                }}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="validUntil">Valid Until</Label>
-              <Input
-                id="validUntil"
-                type="date"
-                value={validUntil}
-                onChange={(e) => setValidUntil(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="validForDays">Valid for (days)</Label>
-              <Select
-                value={validForDays}
-                onValueChange={(v) => {
-                  setValidForDays(v);
-                  const days = Number(v) || 14;
-                  const base = new Date(
-                    issueDate || new Date().toISOString().split("T")[0]
-                  );
-                  base.setDate(base.getDate() + days);
-                  setValidUntil(base.toISOString().split("T")[0]);
-                }}
-              >
-                <SelectTrigger id="validForDays">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="7">7 days</SelectItem>
-                  <SelectItem value="14">14 days</SelectItem>
-                  <SelectItem value="30">30 days</SelectItem>
-                  <SelectItem value="60">60 days</SelectItem>
-                  <SelectItem value="90">90 days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="soStatus">Status</Label>
-              <Select
-                value={salesOrderStatus}
-                onValueChange={(v) =>
-                  setSalesOrderStatus(v as SalesOrderStatus)
-                }
-              >
-                <SelectTrigger id="soStatus">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="expired">Expired</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader>
           <CardTitle>Line Items</CardTitle>
         </CardHeader>
@@ -843,20 +885,31 @@ export default function EditSalesOrderPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[72px] text-center">Order</TableHead>
-                  <TableHead className="w-[200px]">Item *</TableHead>
-                  <TableHead className="w-[250px]">Description</TableHead>
-                  <TableHead className="w-[100px]">Qty *</TableHead>
-                  <TableHead className="w-[120px]">Unit Price *</TableHead>
-                  <TableHead className="w-[100px]">Tax %</TableHead>
-                  <TableHead className="w-[120px] text-right">Total</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
+                  <TableHead className="w-[72px] text-center align-middle">
+                    Order
+                  </TableHead>
+                  <TableHead className="w-[min(14rem,22vw)] align-middle">
+                    Product *
+                  </TableHead>
+                  <TableHead className="w-[200px] align-middle">Item</TableHead>
+                  <TableHead className="w-[250px] align-middle">
+                    Description
+                  </TableHead>
+                  <TableHead className="w-[100px] align-middle">Qty *</TableHead>
+                  <TableHead className="w-[120px] align-middle">
+                    Unit Price *
+                  </TableHead>
+                  <TableHead className="w-[100px] align-middle">Tax %</TableHead>
+                  <TableHead className="w-[120px] text-right align-middle">
+                    Total
+                  </TableHead>
+                  <TableHead className="w-[50px] align-middle"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {lineItems.map((item, index) => {
-                  const lineErrItem =
-                    errors[`item_${item.id}` as keyof FieldErrors];
+                  const lineErrProduct =
+                    errors[`product_${item.id}` as keyof FieldErrors];
                   const lineErrQty =
                     errors[`qty_${item.id}` as keyof FieldErrors];
                   const lineErrPrice =
@@ -865,14 +918,14 @@ export default function EditSalesOrderPage() {
                     item.quantity * item.unitPrice * (1 + item.tax / 100);
 
                   return (
-                    <TableRow key={item.id}>
-                      <TableCell className="align-top">
-                        <div className="flex flex-col gap-0.5 items-center pt-1">
+                    <TableRow key={item.id} className="align-middle">
+                      <TableCell className="align-middle py-2">
+                        <div className="flex flex-row items-center justify-center gap-0.5 h-9">
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 shrink-0"
+                            className="h-8 w-8 shrink-0"
                             onClick={() => moveLineUp(index)}
                             disabled={index === 0}
                             aria-label="Move line up"
@@ -883,7 +936,7 @@ export default function EditSalesOrderPage() {
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 shrink-0"
+                            className="h-8 w-8 shrink-0"
                             onClick={() => moveLineDown(index)}
                             disabled={index === lineItems.length - 1}
                             aria-label="Move line down"
@@ -892,24 +945,50 @@ export default function EditSalesOrderPage() {
                           </Button>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Input
-                          value={item.item}
-                          onChange={(e) =>
-                            updateLineItem(item.id, "item", e.target.value)
-                          }
-                          placeholder="Service/Product"
-                          className={`h-9 ${
-                            lineErrItem ? "border-destructive" : ""
-                          }`}
-                        />
-                        {lineErrItem && (
-                          <p className="text-xs text-destructive mt-1">
-                            {String(lineErrItem)}
-                          </p>
-                        )}
+                      <TableCell className="align-middle py-2">
+                        <div className="space-y-1">
+                          <SalesOrderLineProductSelect
+                            products={products}
+                            value={item.productId}
+                            invalid={Boolean(lineErrProduct)}
+                            onValueChange={(pid) => {
+                              const p = products.find((x) => x.id === pid);
+                              if (!p) return;
+                              setLineItems((prev) =>
+                                applyProductPickToLines(prev, item.id, {
+                                  id: p.id,
+                                  name: p.name,
+                                  description: p.description || "",
+                                  salePrice: p.salePrice,
+                                })
+                              );
+                              setErrors((e) => {
+                                const next = { ...e };
+                                delete next[`product_${item.id}`];
+                                delete next[`qty_${item.id}`];
+                                delete next[`price_${item.id}`];
+                                return next;
+                              });
+                            }}
+                          />
+                          {lineErrProduct ? (
+                            <p className="text-xs text-destructive">
+                              {String(lineErrProduct)}
+                            </p>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
+                        <Input
+                          readOnly
+                          tabIndex={-1}
+                          value={item.item}
+                          placeholder="—"
+                          title={item.item || undefined}
+                          className="h-9 bg-muted/40 pointer-events-none"
+                        />
+                      </TableCell>
+                      <TableCell className="align-middle py-2">
                         <Input
                           value={item.description}
                           onChange={(e) =>
@@ -923,7 +1002,7 @@ export default function EditSalesOrderPage() {
                           className="h-9"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Input
                           type="number"
                           min="1"
@@ -945,7 +1024,7 @@ export default function EditSalesOrderPage() {
                           </p>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Input
                           type="number"
                           min="0"
@@ -968,7 +1047,7 @@ export default function EditSalesOrderPage() {
                           </p>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Select
                           value={item.tax.toString()}
                           onValueChange={(v) =>
@@ -987,10 +1066,10 @@ export default function EditSalesOrderPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="text-right font-medium align-middle py-2">
                         {preferences?.currency} {lineTotal.toFixed(2)}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1068,22 +1147,11 @@ export default function EditSalesOrderPage() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-muted-foreground">Discount</span>
                 <div className="flex items-center gap-2">
-                  <Select
+                  <DiscountTypeToggle
                     value={discount.type}
-                    onValueChange={(v: "value" | "percent") =>
-                      setDiscount({ ...discount, type: v })
-                    }
-                  >
-                    <SelectTrigger className="w-[80px] h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="value">
-                        {preferences?.currency}
-                      </SelectItem>
-                      <SelectItem value="percent">%</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onChange={(t) => setDiscount({ ...discount, type: t })}
+                    currencyLabel={preferences?.currency ?? ""}
+                  />
                   <Input
                     type="number"
                     min="0"

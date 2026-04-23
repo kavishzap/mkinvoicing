@@ -56,16 +56,97 @@ async function requireCompanyId(): Promise<string> {
   return companyId;
 }
 
+/** Product ids whose summed `product_location_stocks.quantity` is strictly &gt; 0. */
+async function productIdsWithPositiveTotalStock(
+  companyId: string
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("product_location_stocks")
+    .select("product_id, quantity")
+    .eq("company_id", companyId);
+
+  if (error) throw error;
+
+  const sums = new Map<string, number>();
+  for (const row of data ?? []) {
+    const pid = String((row as { product_id?: string }).product_id ?? "");
+    if (!pid) continue;
+    sums.set(pid, (sums.get(pid) ?? 0) + Number((row as { quantity?: number }).quantity ?? 0));
+  }
+  const out = new Set<string>();
+  for (const [pid, qty] of sums) {
+    if (qty > 0) out.add(pid);
+  }
+  return out;
+}
+
+function chunkIds<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
 export async function listProducts(opts?: {
   search?: string;
   includeInactive?: boolean;
   page?: number;
   pageSize?: number;
+  /**
+   * When true, only products with total on-hand stock &gt; 0 (sum of
+   * `product_location_stocks` for the company) are returned. Use for sales-order
+   * line pickers so zero-stock items are not offered.
+   */
+  onlyWithPositiveStock?: boolean;
 }): Promise<{ rows: ProductRow[]; total: number }> {
   const companyId = await requireCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
+
+  if (opts?.onlyWithPositiveStock) {
+    const allowed = await productIdsWithPositiveTotalStock(companyId);
+    if (allowed.size === 0) {
+      return { rows: [], total: 0 };
+    }
+    const idList = [...allowed];
+    const collected: ProductRow[] = [];
+    for (const idChunk of chunkIds(idList, 120)) {
+      let q = supabase
+        .from("products")
+        .select(LIST_COLUMNS)
+        .eq("company_id", companyId)
+        .in("id", idChunk)
+        .order("created_at", { ascending: false });
+
+      if (!opts?.includeInactive) {
+        q = q.eq("is_active", true);
+      }
+
+      const term = opts?.search?.trim();
+      if (term) {
+        const s = `%${term}%`;
+        q = q.or(
+          [`name.ilike.${s}`, `sku.ilike.${s}`, `description.ilike.${s}`].join(
+            ","
+          )
+        );
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+      collected.push(...(data ?? []).map((r) => mapRow(r as Record<string, unknown>, false)));
+    }
+
+    const dedup = [...new Map(collected.map((p) => [p.id, p])).values()].sort(
+      (a, b) => b.created_at.localeCompare(a.created_at)
+    );
+    const total = dedup.length;
+    const rows = dedup.slice(from, from + pageSize);
+    return { rows, total };
+  }
+
   const to = from + pageSize - 1;
 
   let q = supabase
@@ -178,6 +259,65 @@ export async function addProductsBulk(
   return { inserted: rows.length };
 }
 
+/** Normalize for import duplicate checks (within file vs existing DB). */
+export function normalizeProductImportDedupeValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function productImportNameDedupeKey(name: string): string | null {
+  const n = normalizeProductImportDedupeValue(name);
+  return n ? `name:${n}` : null;
+}
+
+export function productImportSkuDedupeKey(sku: string | null | undefined): string | null {
+  const s = String(sku ?? "").trim();
+  if (!s) return null;
+  const n = normalizeProductImportDedupeValue(s);
+  return n ? `sku:${n}` : null;
+}
+
+function addProductImportDedupeKeys(
+  keys: Set<string>,
+  name: string,
+  sku: string | null | undefined
+) {
+  const nk = productImportNameDedupeKey(name);
+  if (nk) keys.add(nk);
+  const sk = productImportSkuDedupeKey(sku);
+  if (sk) keys.add(sk);
+}
+
+const IMPORT_DEDUPE_PAGE = 1000;
+
+/**
+ * Dedupe keys for every product already stored for the active company (all rows),
+ * using normalized `name:` and non-empty `sku:` keys (same rules as bulk import preview).
+ */
+export async function getExistingProductImportDedupeKeys(): Promise<Set<string>> {
+  const companyId = await requireCompanyId();
+  const keys = new Set<string>();
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("name, sku")
+      .eq("company_id", companyId)
+      .range(from, from + IMPORT_DEDUPE_PAGE - 1);
+
+    if (error) throw error;
+    if (!data?.length) break;
+
+    for (const r of data as { name?: string | null; sku?: string | null }[]) {
+      addProductImportDedupeKeys(keys, String(r.name ?? ""), r.sku);
+    }
+
+    if (data.length < IMPORT_DEDUPE_PAGE) break;
+    from += IMPORT_DEDUPE_PAGE;
+  }
+
+  return keys;
+}
+
 export async function updateProduct(
   id: string,
   payload: Partial<ProductPayload>
@@ -269,7 +409,7 @@ function normalizeImageFields(
 /** Accepts raw base64 or a full data URL; returns payload-only base64. */
 export function stripDataUrlPrefix(input: string): string {
   const t = input.trim();
-  const m = t.match(/^data:([^;]+);base64,(.+)$/s);
+  const m = t.match(/^data:([^;]+);base64,([\s\S]+)$/);
   if (m) return m[2].replace(/\s/g, "");
   return t.replace(/\s/g, "");
 }

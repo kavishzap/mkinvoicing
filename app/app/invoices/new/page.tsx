@@ -50,8 +50,12 @@ import { getQuotation } from "@/lib/quotations-service";
 import {
   getSalesOrder,
   clientInfoFromBillSnapshot,
+  computeSalesOrderTotals,
+  updateSalesOrderPaymentStatus,
+  type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 
 type LineItem = {
   id: string;
@@ -106,6 +110,9 @@ function NewInvoicePageContent() {
   const [convertFromSalesOrderId] = useState(() =>
     searchParams.get("convertFromSalesOrder")
   );
+  const [markSalesOrderPaidFromSo] = useState(
+    () => searchParams.get("markSalesOrderPaid") === "1"
+  );
   const { toast } = useToast();
   const convertHandledRef = useRef(false);
 
@@ -157,6 +164,8 @@ function NewInvoicePageContent() {
     type: "value" as "value" | "percent",
     amount: 0,
   });
+  /** Carried from sales order conversion so totals match `computeSalesOrderTotals`. */
+  const [invoiceShippingAmount, setInvoiceShippingAmount] = useState(0);
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<
@@ -261,6 +270,7 @@ function NewInvoicePageContent() {
               if (match) setSelectedCustomer(match);
             }
             setConvertedFromSource({ type: "quotation", number: q.number });
+            setInvoiceShippingAmount(0);
             toast({
               title: "Convert from quotation",
               description: `Form filled from quotation ${q.number}. Save to create invoice with link.`,
@@ -321,9 +331,17 @@ function NewInvoicePageContent() {
               if (match) setSelectedCustomer(match);
             }
             setConvertedFromSource({ type: "sales_order", number: so.number });
+            setInvoiceShippingAmount(Number(so.shipping_amount ?? 0));
+            if (markSalesOrderPaidFromSo) {
+              const { total: soTotal } = computeSalesOrderTotals(so);
+              setAmountPaid(soTotal);
+              setPaymentMethod("Cash");
+            }
             toast({
               title: "Convert from sales order",
-              description: `Form filled from sales order ${so.number}. Save to create invoice with link.`,
+              description: markSalesOrderPaidFromSo
+                ? `Form filled from sales order ${so.number}. Payment is set to the full amount; save to create a paid invoice and update the order.`
+                : `Form filled from sales order ${so.number}. Save to create invoice with link.`,
             });
           } else {
             toast({
@@ -349,7 +367,13 @@ function NewInvoicePageContent() {
     return () => {
       cancelled = true;
     };
-  }, [toast, convertFromQuotationId, convertFromSalesOrderId, router]);
+  }, [
+    toast,
+    convertFromQuotationId,
+    convertFromSalesOrderId,
+    markSalesOrderPaidFromSo,
+    router,
+  ]);
 
   // React to search within dialog
   useEffect(() => {
@@ -394,8 +418,8 @@ function NewInvoicePageContent() {
     [discount, subtotal]
   );
   const total = useMemo(
-    () => subtotal + taxTotal - discountAmount,
-    [subtotal, taxTotal, discountAmount]
+    () => subtotal + taxTotal - discountAmount + invoiceShippingAmount,
+    [subtotal, taxTotal, discountAmount, invoiceShippingAmount]
   );
 
   // ===== Line handlers
@@ -490,21 +514,8 @@ function NewInvoicePageContent() {
     // Amount paid validation
     if (amountPaid < 0) {
       next.amountPaid = "Amount paid cannot be negative";
-    } else {
-      // Calculate total to validate against
-      const itemsTotal = lineItems.reduce(
-        (sum, li) => sum + li.quantity * li.unitPrice * (1 + li.tax / 100),
-        0
-      );
-      const discountAmount =
-        discount.type === "percent"
-          ? (itemsTotal * discount.amount) / 100
-          : discount.amount;
-      const calculatedTotal = itemsTotal - discountAmount;
-      
-      if (amountPaid > calculatedTotal) {
-        next.amountPaid = `Amount paid cannot exceed invoice total of ${preferences?.currency || ""} ${calculatedTotal.toFixed(2)}`;
-      }
+    } else if (amountPaid > total) {
+      next.amountPaid = `Amount paid cannot exceed invoice total of ${preferences?.currency ?? ""} ${total.toFixed(2)}`;
     }
 
     setErrors(next);
@@ -546,6 +557,7 @@ function NewInvoicePageContent() {
         currency: preferences.currency,
         discount_type: discount.type,
         discount_amount: discount.amount,
+        shipping_amount: invoiceShippingAmount,
         notes,
         terms,
         payment_method: paymentMethod,
@@ -572,6 +584,26 @@ function NewInvoicePageContent() {
         created_from_sales_order_id: convertFromSalesOrderId || undefined,
         items: itemsPayload,
       });
+
+      if (convertFromSalesOrderId && markSalesOrderPaidFromSo) {
+        let nextPay: SalesOrderPaymentStatus = "unpaid";
+        if (amountPaid >= total) nextPay = "paid";
+        else if (amountPaid > 0) nextPay = "partial";
+        try {
+          await updateSalesOrderPaymentStatus(
+            convertFromSalesOrderId,
+            nextPay
+          );
+        } catch (syncErr: unknown) {
+          const msg =
+            syncErr instanceof Error ? syncErr.message : "Unknown error";
+          toast({
+            title: "Sales order payment not updated",
+            description: `Invoice was created, but updating the linked sales order failed: ${msg}`,
+            variant: "destructive",
+          });
+        }
+      }
 
       toast({
         title: "Invoice created",
@@ -1146,22 +1178,11 @@ function NewInvoicePageContent() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-muted-foreground">Discount</span>
                 <div className="flex items-center gap-2">
-                  <Select
+                  <DiscountTypeToggle
                     value={discount.type}
-                    onValueChange={(v: "value" | "percent") =>
-                      setDiscount({ ...discount, type: v })
-                    }
-                  >
-                    <SelectTrigger className="w-[80px] h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="value">
-                        {preferences?.currency}
-                      </SelectItem>
-                      <SelectItem value="percent">%</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onChange={(t) => setDiscount({ ...discount, type: t })}
+                    currencyLabel={preferences?.currency ?? ""}
+                  />
                   <Input
                     type="number"
                     min="0"

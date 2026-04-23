@@ -1,5 +1,5 @@
 import { supabase } from "./supabaseClient";
-import { getActiveCompanyId } from "@/lib/active-company";
+import { getActiveCompanyId, requireActiveCompanyId } from "@/lib/active-company";
 
 type CompanyRow = {
   id: string;
@@ -394,11 +394,16 @@ export async function upsertProfile(profile: Profile) {
 export async function fetchPreferences(): Promise<Preferences> {
   const userId = await getCurrentUserId();
   const companyId = await getActiveCompanyId();
+
+  if (companyId) {
+    await ensureUserSettingsRow();
+  }
+
   let query = supabase.from("user_settings").select("*").eq("user_id", userId);
   if (companyId) query = query.eq("company_id", companyId);
-  const { data, error } = await query.single();
+  const { data, error } = await query.maybeSingle();
 
-  if (error && error.code !== "PGRST116") throw error;
+  if (error) throw error;
   const row = data ?? {};
 
   return {
@@ -424,9 +429,75 @@ export async function fetchPreferences(): Promise<Preferences> {
   };
 }
 
+/**
+ * Document RPCs (invoice, quotation, sales order, etc.) expect a `user_settings` row
+ * for numbering. New users may not have one until they save Preferences once — this
+ * creates the row with the same defaults as {@link fetchPreferences}.
+ */
+export async function ensureUserSettingsRow(): Promise<void> {
+  const userId = await getCurrentUserId();
+  const companyId = await requireActiveCompanyId();
+
+  const { data: row, error } = await supabase
+    .from("user_settings")
+    .select("user_id, company_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const defaults = {
+    user_id: userId,
+    company_id: companyId,
+    currency: "MUR",
+    number_prefix: "INV",
+    number_padding: 4,
+    next_number: 1,
+    payment_terms: 14,
+    default_notes: null,
+    default_terms: null,
+    quotation_prefix: "QT",
+    quotation_number_padding: 4,
+    quotation_next_number: 1,
+    sales_order_prefix: "SO",
+    sales_order_number_padding: 4,
+    sales_order_next_number: 1,
+    purchase_order_prefix: "PO",
+    purchase_order_number_padding: 4,
+    purchase_order_next_number: 1,
+    purchase_invoice_prefix: "PINV",
+    purchase_invoice_number_padding: 4,
+    purchase_invoice_next_number: 1,
+  };
+
+  if (!row) {
+    const { error: insErr } = await supabase.from("user_settings").insert(defaults);
+    if (insErr) {
+      if (insErr.code === "23505") {
+        const { error: fixCo } = await supabase
+          .from("user_settings")
+          .update({ company_id: companyId })
+          .eq("user_id", userId);
+        if (fixCo) throw fixCo;
+        return;
+      }
+      throw insErr;
+    }
+    return;
+  }
+
+  if (!row.company_id || row.company_id !== companyId) {
+    const { error: updErr } = await supabase
+      .from("user_settings")
+      .update({ company_id: companyId })
+      .eq("user_id", userId);
+    if (updErr) throw updErr;
+  }
+}
+
 export async function upsertPreferences(prefs: Preferences) {
   const userId = await getCurrentUserId();
-  const companyId = await getActiveCompanyId();
+  const companyId = await requireActiveCompanyId();
   const payload: Record<string, unknown> = {
     user_id: userId,
     company_id: companyId,

@@ -10,6 +10,10 @@ import autoTable, { RowInput } from "jspdf-autotable";
 import {
   computeSalesOrderTotals,
   getSalesOrder,
+  normalizeSalesOrderFulfillmentStatus,
+  normalizeSalesOrderPaymentStatus,
+  SALES_ORDER_FULFILLMENT_LABELS,
+  SALES_ORDER_PAYMENT_LABELS,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
@@ -128,7 +132,7 @@ export function SalesOrderViewActions({
   const handleConvertToInvoice = () => {
     if (busy) return;
     router.push(
-      `/app/invoices/new?convertFromSalesOrder=${encodeURIComponent(salesOrderId)}`
+      `/app/invoices/new?convertFromSalesOrder=${encodeURIComponent(salesOrderId)}&markSalesOrderPaid=1`
     );
   };
 
@@ -251,10 +255,15 @@ export function SalesOrderViewActions({
 
       const issue = new Date(so.issue_date).toLocaleDateString("en-GB");
       const valid = new Date(so.valid_until).toLocaleDateString("en-GB");
+      const fulfillment = normalizeSalesOrderFulfillmentStatus(
+        so.fulfillment_status
+      );
+      const payment = normalizeSalesOrderPaymentStatus(so.payment_status);
       const detailsLines = [
         `Issue Date: ${issue}`,
         `Valid Until: ${valid}`,
-        `Status: ${so.status}`,
+        `Fulfillment: ${SALES_ORDER_FULFILLMENT_LABELS[fulfillment]}`,
+        `Payment: ${SALES_ORDER_PAYMENT_LABELS[payment]}`,
       ];
       doc.setFont("helvetica", "bold").setFontSize(11).text("Details", detailsX, y);
       doc.setFont("helvetica", "normal").setFontSize(10);
@@ -458,7 +467,7 @@ export function SalesOrderViewActions({
         disabled={busy}
       >
         <FileText className="h-4 w-4" />
-        Convert to Invoice
+        Convert to invoice and mark as paid
       </Button>
       <Button type="button" variant="outline" className="gap-2" asChild>
         <Link href={`/app/sales-orders/${salesOrderId}/edit`}>

@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
-import type { Profile } from "@/lib/settings-service";
+import { ensureUserSettingsRow, type Profile } from "@/lib/settings-service";
 import type { CustomerRow } from "@/lib/customers-service";
 
 /** Only `active` (current) and `expired` (past valid_until or manual). */
@@ -238,6 +238,7 @@ export async function createQuotation(
 ): Promise<string> {
   const { items, ...inv } = params;
   const companyId = await requireActiveCompanyId();
+  await ensureUserSettingsRow();
   const { data, error } = await supabase.rpc("create_quotation", {
     p_quotation: {
       company_id: companyId,

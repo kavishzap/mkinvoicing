@@ -49,6 +49,10 @@ import {
 } from "@/lib/settings-service";
 import { listCustomers, type CustomerRow } from "@/lib/customers-service";
 import {
+  listProducts,
+  type ProductRow,
+} from "@/lib/products-service";
+import {
   createSalesOrder,
   getSalesOrder,
   buildFromSnapshotForSalesOrder,
@@ -56,12 +60,22 @@ import {
   clientInfoFromBillSnapshot,
   type SalesOrderLinePayload,
   type SalesOrderStatus,
+  type SalesOrderFulfillmentStatus,
+  type SalesOrderItemRow,
+  SALES_ORDER_FULFILLMENT_STATUSES,
+  SALES_ORDER_FULFILLMENT_LABELS,
 } from "@/lib/sales-orders-service";
 import { getQuotation } from "@/lib/quotations-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
+import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
+import { DiscountTypeToggle } from "@/components/discount-type-toggle";
+import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 
 type LineItem = {
   id: string;
+  /** `products.id`; required before save. */
+  productId: string | null;
   item: string;
   description: string;
   quantity: number;
@@ -92,12 +106,64 @@ type FieldErrors = Partial<
     | "phone"
     | "address_line_1"
     | "lineItems"
-    | `item_${string}`
+    | `product_${string}`
     | `qty_${string}`
     | `price_${string}`,
     string
   >
 >;
+
+function hasBillToDetails(ci: ClientInfo): boolean {
+  return (
+    (ci.type === "company" && ci.companyName.trim().length > 0) ||
+    (ci.type === "individual" && ci.fullName.trim().length > 0) ||
+    ci.email.trim().length > 0 ||
+    ci.phone.trim().length > 0 ||
+    ci.address_line_1.trim().length > 0
+  );
+}
+
+function CompactBillToCustomer({ c }: { c: CustomerRow }) {
+  const name =
+    c.type === "company" ? (c.companyName ?? "").trim() : (c.fullName ?? "").trim();
+  const sub =
+    c.type === "company" && c.contactName?.trim() ? c.contactName : null;
+  const contactLine = [c.email, c.phone].filter((x) => String(x ?? "").trim()).join(" · ");
+  const addr = [c.address_line_1, c.address_line_2]
+    .filter((x) => String(x ?? "").trim())
+    .join(", ");
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
+      <p className="font-medium text-foreground">{name || "—"}</p>
+      {sub ? <p className="text-muted-foreground">{sub}</p> : null}
+      {contactLine ? (
+        <p className="text-muted-foreground">{contactLine}</p>
+      ) : null}
+      {addr ? <p className="text-muted-foreground">{addr}</p> : null}
+    </div>
+  );
+}
+
+function CompactBillToClientInfo({ ci }: { ci: ClientInfo }) {
+  const name =
+    ci.type === "company"
+      ? ci.companyName.trim() || "—"
+      : ci.fullName.trim() || "—";
+  const sub =
+    ci.type === "company" && ci.contactName.trim() ? ci.contactName : null;
+  const contactLine = [ci.email, ci.phone].filter(Boolean).join(" · ");
+  const addr = [ci.address_line_1, ci.address_line_2].filter(Boolean).join(", ");
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
+      <p className="font-medium text-foreground">{name}</p>
+      {sub ? <p className="text-muted-foreground">{sub}</p> : null}
+      {contactLine ? (
+        <p className="text-muted-foreground">{contactLine}</p>
+      ) : null}
+      {addr ? <p className="text-muted-foreground">{addr}</p> : null}
+    </div>
+  );
+}
 
 function NewSalesOrderPageContent() {
   const router = useRouter();
@@ -114,8 +180,11 @@ function NewSalesOrderPageContent() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
+  const [isCreateCustomerDialogOpen, setIsCreateCustomerDialogOpen] =
+    useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [products, setProducts] = useState<ProductRow[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(
     null
   );
@@ -143,11 +212,21 @@ function NewSalesOrderPageContent() {
     new Date().toISOString().split("T")[0]
   );
   const [validForDays, setValidForDays] = useState("14");
-  const [salesOrderStatus, setSalesOrderStatus] =
+  const [lifecycleStatus, setLifecycleStatus] =
     useState<SalesOrderStatus>("active");
+  const [fulfillmentStatus, setFulfillmentStatus] =
+    useState<SalesOrderFulfillmentStatus>("new");
 
   const [lineItems, setLineItems] = useState<LineItem[]>([
-    { id: "1", item: "", description: "", quantity: 1, unitPrice: 0, tax: 0 },
+    {
+      id: "1",
+      productId: null,
+      item: "",
+      description: "",
+      quantity: 1,
+      unitPrice: 0,
+      tax: 0,
+    },
   ]);
   const [discount, setDiscount] = useState({
     type: "value" as "value" | "percent",
@@ -202,6 +281,15 @@ function NewSalesOrderPageContent() {
         if (cancelled) return;
         setCustomers(rows);
 
+        const { rows: productRows } = await listProducts({
+          search: "",
+          includeInactive: false,
+          page: 1,
+          pageSize: 400,
+          onlyWithPositiveStock: true,
+        });
+        if (!cancelled) setProducts(productRows);
+
         if (convertFromQuotationId && !convertHandledRef.current) {
           convertHandledRef.current = true;
           const q = await getQuotation(convertFromQuotationId);
@@ -228,7 +316,8 @@ function NewSalesOrderPageContent() {
             });
             setNotes(q.notes ?? "");
             setTerms(q.terms ?? "");
-            setSalesOrderStatus(q.status);
+            setLifecycleStatus("active");
+            setFulfillmentStatus("new");
             setLineItems(
               [...q.items]
                 .sort(
@@ -237,6 +326,8 @@ function NewSalesOrderPageContent() {
                 )
                 .map((it, i) => ({
                   id: `ln-${Date.now()}-${i}`,
+                  productId:
+                    (it as { product_id?: string | null }).product_id ?? null,
                   item: it.item,
                   description: it.description ?? "",
                   quantity: Number(it.quantity),
@@ -287,7 +378,8 @@ function NewSalesOrderPageContent() {
             });
             setNotes(q.notes ?? "");
             setTerms(q.terms ?? "");
-            setSalesOrderStatus(q.status);
+            setLifecycleStatus(q.status);
+            setFulfillmentStatus(q.fulfillment_status);
             setLineItems(
               [...q.items]
                 .sort(
@@ -296,6 +388,7 @@ function NewSalesOrderPageContent() {
                 )
                 .map((it, i) => ({
                   id: `ln-${Date.now()}-${i}`,
+                  productId: (it as SalesOrderItemRow).product_id ?? null,
                   item: it.item,
                   description: it.description ?? "",
                   quantity: Number(it.quantity),
@@ -389,6 +482,7 @@ function NewSalesOrderPageContent() {
       ...prev,
       {
         id: String(Date.now()),
+        productId: null,
         item: "",
         description: "",
         quantity: 1,
@@ -406,10 +500,13 @@ function NewSalesOrderPageContent() {
   const updateLineItem = (
     id: string,
     field: keyof LineItem,
-    value: string | number
+    value: string | number | null
   ) => {
     setLineItems((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, [field]: value } : it))
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        return { ...it, [field]: value } as LineItem;
+      })
     );
   };
 
@@ -448,12 +545,6 @@ function NewSalesOrderPageContent() {
       address_line_2: c.address_line_2 ?? "",
     });
     setIsCustomerDialogOpen(false);
-    toast({
-      title: "Customer selected",
-      description: `${
-        c.type === "company" ? c.companyName : c.fullName
-      } added to the sales order.`,
-    });
   };
 
   function validate(): boolean {
@@ -477,7 +568,8 @@ function NewSalesOrderPageContent() {
       next.lineItems = "At least one line item is required";
     } else {
       lineItems.forEach((li) => {
-        if (!li.item.trim()) next[`item_${li.id}`] = "Item name is required";
+        if (!li.productId?.trim())
+          next[`product_${li.id}`] = "Select a product";
         if (!(li.quantity > 0))
           next[`qty_${li.id}`] = "Quantity must be greater than 0";
         if (!(li.unitPrice >= 0))
@@ -510,6 +602,7 @@ function NewSalesOrderPageContent() {
         unit_price: li.unitPrice,
         tax_percent: li.tax,
         sort_order: i,
+        product_id: li.productId,
       }));
 
       const fromSnap = buildFromSnapshotForSalesOrder(profile);
@@ -535,7 +628,8 @@ function NewSalesOrderPageContent() {
       const id = await createSalesOrder({
         issue_date: issueDate,
         valid_until: validUntil,
-        status: salesOrderStatus,
+        status: lifecycleStatus,
+        fulfillment_status: fulfillmentStatus,
         currency: preferences.currency,
         discount_type: discount.type,
         discount_amount: discount.amount,
@@ -568,9 +662,6 @@ function NewSalesOrderPageContent() {
     }
   }
 
-  const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
-  const showLogo = (profile as { logoUrl?: string })?.logoUrl;
-
   const headerSubtitle = convertedFromQuotationNumber
     ? `Converting from quotation ${convertedFromQuotationNumber}. Draft number ${salesOrderNumber} — review lines, then save to create the order.`
     : duplicatedFromNumber
@@ -586,9 +677,8 @@ function NewSalesOrderPageContent() {
             <div className="h-9 w-28 rounded bg-muted animate-pulse" />
           </div>
         </div>
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
+        <div className="max-w-7xl">
+          <div className="h-28 rounded bg-muted animate-pulse" />
         </div>
         <div className="h-64 rounded bg-muted animate-pulse" />
       </div>
@@ -612,237 +702,65 @@ function NewSalesOrderPageContent() {
         </div>
       }
     >
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-3">From</CardTitle>
-              <Link href="/app/settings">
-                <Button variant="link" size="sm" className="h-auto p-0">
-                  Edit in Settings
-                </Button>
-              </Link>
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-2 text-sm">
-            {showLogo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={String(showLogo)}
-                alt="Logo"
-                className="h-50 w-50 rounded-md object-cover border"
-              />
-            ) : (
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary  font-bold">
-                {(profile?.companyName || profile?.fullName || "S")
-                  .slice(0, 1)
-                  .toUpperCase()}
-              </div>
-            )}
-            {profile?.accountType === "company" ? (
-              <>
-                <p className="font-semibold">{profile?.companyName}</p>
-                {profile?.registrationId && (
-                  <p className="text-muted-foreground">
-                    Reg: {profile.registrationId}
-                  </p>
-                )}
-                {profile?.vatNumber && (
-                  <p className="text-muted-foreground">
-                    VAT: {profile.vatNumber}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="font-semibold">{profile?.fullName}</p>
-            )}
-            <p className="text-muted-foreground">{profile?.email}</p>
-            <p className="text-muted-foreground">{profile?.phone}</p>
-            {profile?.address_line_1 && (
-              <p className="text-muted-foreground">{profile.address_line_1}</p>
-            )}
-            {profile?.address_line_2 && (
-              <p className="text-muted-foreground">{profile.address_line_2}</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Bill To</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsCustomerDialogOpen(true)}
-                className="gap-2"
-              >
-                <UserPlus className="h-4 w-4" />
-                Select Customer
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Button
-                variant={clientInfo.type === "company" ? "default" : "outline"}
-                size="sm"
-                onClick={() =>
-                  setClientInfo({ ...clientInfo, type: "company" })
-                }
-                className="flex-1"
-              >
-                Company
-              </Button>
-              <Button
-                variant={
-                  clientInfo.type === "individual" ? "default" : "outline"
-                }
-                size="sm"
-                onClick={() =>
-                  setClientInfo({ ...clientInfo, type: "individual" })
-                }
-                className="flex-1"
-              >
-                Individual
-              </Button>
-            </div>
-
-            {clientInfo.type === "company" ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="companyName">Company Name *</Label>
-                  <Input
-                    id="companyName"
-                    className={err("companyName")}
-                    value={clientInfo.companyName}
-                    onChange={(e) =>
-                      setClientInfo({
-                        ...clientInfo,
-                        companyName: e.target.value,
-                      })
-                    }
-                    placeholder="Acme Corp"
-                  />
-                  {errors.companyName && (
-                    <p className="text-xs text-destructive">
-                      {errors.companyName}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contactName">Contact Name (Optional)</Label>
-                  <Input
-                    id="contactName"
-                    value={clientInfo.contactName}
-                    onChange={(e) =>
-                      setClientInfo({
-                        ...clientInfo,
-                        contactName: e.target.value,
-                      })
-                    }
-                    placeholder="John Doe"
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full Name *</Label>
-                <Input
-                  id="fullName"
-                  className={err("fullName")}
-                  value={clientInfo.fullName}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, fullName: e.target.value })
-                  }
-                  placeholder="John Doe"
-                />
-                {errors.fullName && (
-                  <p className="text-xs text-destructive">{errors.fullName}</p>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="clientEmail">Email *</Label>
-                <Input
-                  id="clientEmail"
-                  className={err("email")}
-                  type="email"
-                  value={clientInfo.email}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, email: e.target.value })
-                  }
-                  placeholder="client@example.com"
-                />
-                {errors.email && (
-                  <p className="text-xs text-destructive">{errors.email}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clientPhone">Phone *</Label>
-                <Input
-                  id="clientPhone"
-                  className={err("phone")}
-                  value={clientInfo.phone}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, phone: e.target.value })
-                  }
-                  placeholder="+230 5xx xx xx"
-                />
-                {errors.phone && (
-                  <p className="text-xs text-destructive">{errors.phone}</p>
-                )}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress1">Address Line 1 *</Label>
-              <Input
-                id="clientAddress1"
-                className={err("address_line_1")}
-                value={clientInfo.address_line_1}
-                onChange={(e) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    address_line_1: e.target.value,
-                  })
-                }
-                placeholder="e.g. 123 Main St, Port Louis"
-              />
-              {errors.address_line_1 && (
-                <p className="text-xs text-destructive">
-                  {errors.address_line_1}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle>Bill to & dates</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-nowrap items-end gap-3 md:gap-4 overflow-x-auto pb-1">
+            <div className="min-w-[min(100%,12rem)] shrink-0 basis-[min(100%,20rem)] max-w-md space-y-3">
+              {selectedCustomer ? (
+                <CompactBillToCustomer c={selectedCustomer} />
+              ) : hasBillToDetails(clientInfo) ? (
+                <CompactBillToClientInfo ci={clientInfo} />
+              ) : (
+                <p className="text-sm text-muted-foreground py-0.5">
+                  Pick someone from your customer list.
                 </p>
               )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => setIsCustomerDialogOpen(true)}
+                >
+                  <UserPlus className="h-4 w-4 shrink-0" />
+                  {selectedCustomer ? "Change customer" : "Choose customer"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  aria-label="Add new customer"
+                  onClick={() => setIsCreateCustomerDialogOpen(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              {!selectedCustomer &&
+              !hasBillToDetails(clientInfo) &&
+              (errors.companyName ||
+                errors.fullName ||
+                errors.email ||
+                errors.phone ||
+                errors.address_line_1) ? (
+                <p className="text-sm text-destructive">
+                  Select a customer from the list to continue.
+                </p>
+              ) : null}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress2">Address Line 2</Label>
-              <Input
-                id="clientAddress2"
-                value={clientInfo.address_line_2}
-                onChange={(e) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    address_line_2: e.target.value,
-                  })
-                }
-                placeholder="Apartment, suite, building, etc."
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardContent className="pt-6">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="space-y-2">
+            <div
+              className="hidden sm:block w-px shrink-0 self-stretch min-h-[5.5rem] bg-border"
+              aria-hidden
+            />
+            <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
               <Label htmlFor="issueDate">Issue Date</Label>
               <Input
                 id="issueDate"
                 type="date"
+                className="w-full min-w-0 h-9"
                 value={issueDate}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -854,16 +772,17 @@ function NewSalesOrderPageContent() {
                 }}
               />
             </div>
-            <div className="space-y-2">
+            <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
               <Label htmlFor="validUntil">Valid Until</Label>
               <Input
                 id="validUntil"
                 type="date"
+                className="w-full min-w-0 h-9"
                 value={validUntil}
                 onChange={(e) => setValidUntil(e.target.value)}
               />
             </div>
-            <div className="space-y-2">
+            <div className="shrink-0 space-y-2 w-[min(100%,9.5rem)]">
               <Label htmlFor="validForDays">Valid for (days)</Label>
               <Select
                 value={validForDays}
@@ -877,7 +796,7 @@ function NewSalesOrderPageContent() {
                   setValidUntil(base.toISOString().split("T")[0]);
                 }}
               >
-                <SelectTrigger id="validForDays">
+                <SelectTrigger id="validForDays" className="w-full min-w-0 h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -889,20 +808,23 @@ function NewSalesOrderPageContent() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="soStatus">Status</Label>
+            <div className="shrink-0 space-y-2 w-[min(100%,10.5rem)]">
+              <Label htmlFor="soFulfillment">Fulfillment status</Label>
               <Select
-                value={salesOrderStatus}
+                value={fulfillmentStatus}
                 onValueChange={(v) =>
-                  setSalesOrderStatus(v as SalesOrderStatus)
+                  setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
                 }
               >
-                <SelectTrigger id="soStatus">
+                <SelectTrigger id="soFulfillment" className="w-full min-w-0 h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="expired">Expired</SelectItem>
+                  {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {SALES_ORDER_FULFILLMENT_LABELS[v]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -922,20 +844,31 @@ function NewSalesOrderPageContent() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[72px] text-center">Order</TableHead>
-                  <TableHead className="w-[200px]">Item *</TableHead>
-                  <TableHead className="w-[250px]">Description</TableHead>
-                  <TableHead className="w-[100px]">Qty *</TableHead>
-                  <TableHead className="w-[120px]">Unit Price *</TableHead>
-                  <TableHead className="w-[100px]">Tax %</TableHead>
-                  <TableHead className="w-[120px] text-right">Total</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
+                  <TableHead className="w-[72px] text-center align-middle">
+                    Order
+                  </TableHead>
+                  <TableHead className="w-[min(14rem,22vw)] align-middle">
+                    Product *
+                  </TableHead>
+                  <TableHead className="w-[200px] align-middle">Item</TableHead>
+                  <TableHead className="w-[250px] align-middle">
+                    Description
+                  </TableHead>
+                  <TableHead className="w-[100px] align-middle">Qty *</TableHead>
+                  <TableHead className="w-[120px] align-middle">
+                    Unit Price *
+                  </TableHead>
+                  <TableHead className="w-[100px] align-middle">Tax %</TableHead>
+                  <TableHead className="w-[120px] text-right align-middle">
+                    Total
+                  </TableHead>
+                  <TableHead className="w-[50px] align-middle"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {lineItems.map((item, index) => {
-                  const lineErrItem =
-                    errors[`item_${item.id}` as keyof FieldErrors];
+                  const lineErrProduct =
+                    errors[`product_${item.id}` as keyof FieldErrors];
                   const lineErrQty =
                     errors[`qty_${item.id}` as keyof FieldErrors];
                   const lineErrPrice =
@@ -944,14 +877,14 @@ function NewSalesOrderPageContent() {
                     item.quantity * item.unitPrice * (1 + item.tax / 100);
 
                   return (
-                    <TableRow key={item.id}>
-                      <TableCell className="align-top">
-                        <div className="flex flex-col gap-0.5 items-center pt-1">
+                    <TableRow key={item.id} className="align-middle">
+                      <TableCell className="align-middle py-2">
+                        <div className="flex flex-row items-center justify-center gap-0.5 h-9">
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 shrink-0"
+                            className="h-8 w-8 shrink-0"
                             onClick={() => moveLineUp(index)}
                             disabled={index === 0}
                             aria-label="Move line up"
@@ -962,7 +895,7 @@ function NewSalesOrderPageContent() {
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 shrink-0"
+                            className="h-8 w-8 shrink-0"
                             onClick={() => moveLineDown(index)}
                             disabled={index === lineItems.length - 1}
                             aria-label="Move line down"
@@ -971,24 +904,50 @@ function NewSalesOrderPageContent() {
                           </Button>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Input
-                          value={item.item}
-                          onChange={(e) =>
-                            updateLineItem(item.id, "item", e.target.value)
-                          }
-                          placeholder="Service/Product"
-                          className={`h-9 ${
-                            lineErrItem ? "border-destructive" : ""
-                          }`}
-                        />
-                        {lineErrItem && (
-                          <p className="text-xs text-destructive mt-1">
-                            {String(lineErrItem)}
-                          </p>
-                        )}
+                      <TableCell className="align-middle py-2">
+                        <div className="space-y-1">
+                          <SalesOrderLineProductSelect
+                            products={products}
+                            value={item.productId}
+                            invalid={Boolean(lineErrProduct)}
+                            onValueChange={(pid) => {
+                              const p = products.find((x) => x.id === pid);
+                              if (!p) return;
+                              setLineItems((prev) =>
+                                applyProductPickToLines(prev, item.id, {
+                                  id: p.id,
+                                  name: p.name,
+                                  description: p.description || "",
+                                  salePrice: p.salePrice,
+                                })
+                              );
+                              setErrors((e) => {
+                                const next = { ...e };
+                                delete next[`product_${item.id}`];
+                                delete next[`qty_${item.id}`];
+                                delete next[`price_${item.id}`];
+                                return next;
+                              });
+                            }}
+                          />
+                          {lineErrProduct ? (
+                            <p className="text-xs text-destructive">
+                              {String(lineErrProduct)}
+                            </p>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
+                        <Input
+                          readOnly
+                          tabIndex={-1}
+                          value={item.item}
+                          placeholder="—"
+                          title={item.item || undefined}
+                          className="h-9 bg-muted/40 pointer-events-none"
+                        />
+                      </TableCell>
+                      <TableCell className="align-middle py-2">
                         <Input
                           value={item.description}
                           onChange={(e) =>
@@ -1002,7 +961,7 @@ function NewSalesOrderPageContent() {
                           className="h-9"
                         />
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Input
                           type="number"
                           min="1"
@@ -1024,7 +983,7 @@ function NewSalesOrderPageContent() {
                           </p>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Input
                           type="number"
                           min="0"
@@ -1047,7 +1006,7 @@ function NewSalesOrderPageContent() {
                           </p>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Select
                           value={item.tax.toString()}
                           onValueChange={(v) =>
@@ -1066,10 +1025,10 @@ function NewSalesOrderPageContent() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="text-right font-medium">
+                      <TableCell className="text-right font-medium align-middle py-2">
                         {preferences?.currency} {lineTotal.toFixed(2)}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="align-middle py-2">
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1147,22 +1106,11 @@ function NewSalesOrderPageContent() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-muted-foreground">Discount</span>
                 <div className="flex items-center gap-2">
-                  <Select
+                  <DiscountTypeToggle
                     value={discount.type}
-                    onValueChange={(v: "value" | "percent") =>
-                      setDiscount({ ...discount, type: v })
-                    }
-                  >
-                    <SelectTrigger className="w-[80px] h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="value">
-                        {preferences?.currency}
-                      </SelectItem>
-                      <SelectItem value="percent">%</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onChange={(t) => setDiscount({ ...discount, type: t })}
+                    currencyLabel={preferences?.currency ?? ""}
+                  />
                   <Input
                     type="number"
                     min="0"
@@ -1213,30 +1161,28 @@ function NewSalesOrderPageContent() {
             />
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-              {customers.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => handleSelectCustomer(c)}
-                  className="w-full text-left p-4 rounded-lg border hover:bg-accent transition-colors"
-                >
-                  <div className="font-semibold">
-                    {c.type === "company" ? c.companyName : c.fullName}
-                  </div>
-                  {c.type === "company" && c.contactName && (
-                    <div className="text-sm text-muted-foreground">
-                      {c.contactName}
-                    </div>
-                  )}
-                  <div className="text-sm text-muted-foreground mt-1">
-                    {c.email}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {c.address_line_1}
-                    {c.address_line_2 ? `, ${c.address_line_2}` : ""}
-                  </div>
-                </button>
-              ))}
+              {customers.map((c) => {
+                const label =
+                  c.type === "company" ? c.companyName : c.fullName;
+                const line2 = [c.email, c.phone]
+                  .filter((x) => String(x ?? "").trim())
+                  .join(" · ");
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => handleSelectCustomer(c)}
+                    className="w-full text-left rounded-lg border px-3 py-2.5 hover:bg-accent transition-colors"
+                  >
+                    <div className="font-medium text-sm">{label || "—"}</div>
+                    {line2 ? (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {line2}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
 
               {customers.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
@@ -1252,6 +1198,27 @@ function NewSalesOrderPageContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <CustomerQuickCreateDialog
+        open={isCreateCustomerDialogOpen}
+        onOpenChange={setIsCreateCustomerDialogOpen}
+        onCreated={async (row) => {
+          handleSelectCustomer(row);
+          setErrors({});
+          setCustomerSearch("");
+          try {
+            const { rows } = await listCustomers({
+              search: "",
+              includeInactive: false,
+              page: 1,
+              pageSize: 50,
+            });
+            setCustomers(rows);
+          } catch {
+            /* ignore */
+          }
+        }}
+      />
     </AppPageShell>
   );
 }
@@ -1262,9 +1229,8 @@ export default function NewSalesOrderPage() {
       fallback={
         <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="h-56 rounded bg-muted animate-pulse" />
-            <div className="h-56 rounded bg-muted animate-pulse" />
+          <div className="max-w-7xl">
+            <div className="h-28 rounded bg-muted animate-pulse" />
           </div>
         </div>
       }

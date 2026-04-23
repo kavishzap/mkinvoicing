@@ -1,6 +1,7 @@
 // lib/invoices-service.ts
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
+import { ensureUserSettingsRow } from "@/lib/settings-service";
 
 /* -------------------- Types -------------------- */
 
@@ -73,6 +74,7 @@ export async function createInvoice(
 ): Promise<string> {
   const { items, ...inv } = params;
   const companyId = await requireActiveCompanyId();
+  await ensureUserSettingsRow();
 
   // Never send `number` from client — server generates it.
   const { data, error } = await supabase.rpc("create_invoice", {

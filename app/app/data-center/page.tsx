@@ -22,7 +22,13 @@ import {
   getExistingCustomerImportDedupeKeys,
   type CustomerPayload,
 } from "@/lib/customers-service";
-import { addProductsBulk, type ProductPayload } from "@/lib/products-service";
+import {
+  addProductsBulk,
+  getExistingProductImportDedupeKeys,
+  productImportNameDedupeKey,
+  productImportSkuDedupeKey,
+  type ProductPayload,
+} from "@/lib/products-service";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 
@@ -187,6 +193,39 @@ function buildProductImport(rows: ImportRow[]): { payloads: ProductPayload[]; sk
   return { payloads, skipped };
 }
 
+type ProductDupCell = { any: boolean; name: boolean; sku: boolean };
+
+function productImportFileDuplicateDetails(payloads: ProductPayload[]): ProductDupCell[] {
+  const nameCounts = new Map<string, number>();
+  const skuCounts = new Map<string, number>();
+  for (const p of payloads) {
+    const nk = productImportNameDedupeKey(p.name);
+    if (nk) nameCounts.set(nk, (nameCounts.get(nk) ?? 0) + 1);
+    const sk = productImportSkuDedupeKey(p.sku);
+    if (sk) skuCounts.set(sk, (skuCounts.get(sk) ?? 0) + 1);
+  }
+  return payloads.map((p) => {
+    const nk = productImportNameDedupeKey(p.name);
+    const sk = productImportSkuDedupeKey(p.sku);
+    const name = nk ? (nameCounts.get(nk) ?? 0) > 1 : false;
+    const sku = sk ? (skuCounts.get(sk) ?? 0) > 1 : false;
+    return { any: name || sku, name, sku };
+  });
+}
+
+function productImportDbDuplicateDetails(
+  payloads: ProductPayload[],
+  existing: Set<string>,
+): ProductDupCell[] {
+  return payloads.map((p) => {
+    const nk = productImportNameDedupeKey(p.name);
+    const sk = productImportSkuDedupeKey(p.sku);
+    const name = nk ? existing.has(nk) : false;
+    const sku = sk ? existing.has(sk) : false;
+    return { any: name || sku, name, sku };
+  });
+}
+
 export default function DataCenterPage() {
   const { toast } = useToast();
   const customerInputRef = useRef<HTMLInputElement>(null);
@@ -204,6 +243,7 @@ export default function DataCenterPage() {
   const [productSkipped, setProductSkipped] = useState(0);
   const [productParsing, setProductParsing] = useState(false);
   const [productImporting, setProductImporting] = useState(false);
+  const [productDbDupDetails, setProductDbDupDetails] = useState<ProductDupCell[]>([]);
 
   async function onCustomerFileSelected(file: File | null) {
     setCustomerPreview(null);
@@ -212,6 +252,7 @@ export default function DataCenterPage() {
     setCustomerDbDuplicateFlags([]);
     setProductPreview(null);
     setProductSkipped(0);
+    setProductDbDupDetails([]);
     if (!file) return;
     try {
       setCustomerParsing(true);
@@ -251,6 +292,7 @@ export default function DataCenterPage() {
   async function onProductFileSelected(file: File | null) {
     setProductPreview(null);
     setProductSkipped(0);
+    setProductDbDupDetails([]);
     setCustomerPreview(null);
     setCustomerSkipped(0);
     setCustomerTypeError(null);
@@ -260,8 +302,14 @@ export default function DataCenterPage() {
       setProductParsing(true);
       const rows = await readRowsFromFile(file);
       const { payloads, skipped } = buildProductImport(rows);
+      let dbDetails: ProductDupCell[] = [];
+      if (payloads.length > 0) {
+        const existingKeys = await getExistingProductImportDedupeKeys();
+        dbDetails = productImportDbDuplicateDetails(payloads, existingKeys);
+      }
       setProductPreview(payloads);
       setProductSkipped(skipped);
+      setProductDbDupDetails(dbDetails);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({ title: "Could not read file", description: msg, variant: "destructive" });
@@ -282,6 +330,7 @@ export default function DataCenterPage() {
   function clearProductPreview() {
     setProductPreview(null);
     setProductSkipped(0);
+    setProductDbDupDetails([]);
     if (productInputRef.current) productInputRef.current.value = "";
   }
 
@@ -333,6 +382,24 @@ export default function DataCenterPage() {
   }
 
   async function confirmProductImport() {
+    if (productPreview && productImportFileDuplicateDetails(productPreview).some((d) => d.any)) {
+      toast({
+        title: "Duplicate products in file",
+        description:
+          "Remove or fix rows that share the same name, or the same SKU when SKU is filled, then upload again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (productPreview && productDbDupDetails.some((d) => d.any)) {
+      toast({
+        title: "Products already exist",
+        description:
+          "Some rows match existing products (same normalized name or same SKU). Remove those rows or change the file.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!productPreview?.length) {
       toast({ title: "Nothing to import", variant: "destructive" });
       return;
@@ -406,6 +473,52 @@ export default function DataCenterPage() {
     productPreview && productPreview.length > PREVIEW_MAX_ROWS
       ? productPreview.length - PREVIEW_MAX_ROWS
       : 0;
+
+  const productFileDupDetails = useMemo(
+    () => (productPreview ? productImportFileDuplicateDetails(productPreview) : []),
+    [productPreview],
+  );
+  const productHasFileDuplicates = productFileDupDetails.some((d) => d.any);
+  const productHasDbDuplicates = productDbDupDetails.some((d) => d.any);
+
+  const productRowConflicts = useMemo(() => {
+    if (!productPreview?.length) return [];
+    return productPreview.map((_, i) => {
+      const f = productFileDupDetails[i];
+      const d = productDbDupDetails[i];
+      return {
+        any: Boolean(f?.any) || Boolean(d?.any),
+        name: Boolean(f?.name) || Boolean(d?.name),
+        sku: Boolean(f?.sku) || Boolean(d?.sku),
+      };
+    });
+  }, [productPreview, productFileDupDetails, productDbDupDetails]);
+
+  const productHasBlockingDuplicates = productRowConflicts.some((c) => c.any);
+
+  const productDbConflictSummary = useMemo(() => {
+    if (!productPreview?.length || !productDbDupDetails.length) return "";
+    const labels: string[] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < productPreview.length; i++) {
+      const d = productDbDupDetails[i];
+      if (!d?.any) continue;
+      const p = productPreview[i]!;
+      const key = `${productImportNameDedupeKey(p.name) ?? ""}|${productImportSkuDedupeKey(p.sku) ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const bits: string[] = [];
+      if (d.name) bits.push(`name “${p.name.trim()}”`);
+      if (d.sku && String(p.sku ?? "").trim()) bits.push(`sku “${String(p.sku).trim()}”`);
+      labels.push(bits.join(", "));
+    }
+    const max = 24;
+    const shown = labels.slice(0, max);
+    const suffix = labels.length > max ? ` …and ${labels.length - max} more` : "";
+    return shown.join("; ") + suffix;
+  }, [productPreview, productDbDupDetails]);
+
+  const productRowConflictsPreview = productRowConflicts.slice(0, PREVIEW_MAX_ROWS);
 
   return (
     <AppPageShell subtitle="Bulk import customers and products from your template files.">
@@ -606,6 +719,30 @@ export default function DataCenterPage() {
               ) : null}
             </DialogDescription>
           </DialogHeader>
+          {productHasFileDuplicates ? (
+            <Alert variant="destructive">
+              <AlertTitle>Duplicate products in this file</AlertTitle>
+              <AlertDescription>
+                Rows that share the same normalized <span className="font-medium">name</span>, or the same{" "}
+                <span className="font-medium">sku</span> when SKU is filled, are highlighted. Fix the spreadsheet
+                and upload again — import stays disabled until duplicates are gone.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {productHasDbDuplicates ? (
+            <Alert variant="destructive">
+              <AlertTitle>Already in your product list</AlertTitle>
+              <AlertDescription className="space-y-2">
+                <p>
+                  Highlighted rows match an existing product (same normalized name, or same SKU when both have a
+                  SKU). Remove those rows from the file or change name/SKU before importing.
+                </p>
+                {productDbConflictSummary ? (
+                  <p className="font-medium text-foreground">Conflicts: {productDbConflictSummary}</p>
+                ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-background text-xs">
             <table className="w-full min-w-[360px] text-left">
               <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground">
@@ -617,14 +754,22 @@ export default function DataCenterPage() {
                 </tr>
               </thead>
               <tbody>
-                {productPreviewRows.map((p, i) => (
-                  <tr key={i} className="border-t">
-                    <td className="px-2 py-1.5">{p.name}</td>
-                    <td className="px-2 py-1.5">{p.sku ?? "—"}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{p.costPrice ?? 0}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{p.salePrice ?? 0}</td>
-                  </tr>
-                ))}
+                {productPreviewRows.map((p, i) => {
+                  const c = productRowConflictsPreview[i] ?? { any: false, name: false, sku: false };
+                  return (
+                    <tr
+                      key={i}
+                      className={cn("border-t", c.any && "bg-destructive/10 text-destructive")}
+                    >
+                      <td className={cn("px-2 py-1.5", c.name && "font-semibold text-destructive")}>{p.name}</td>
+                      <td className={cn("px-2 py-1.5", c.sku && "font-semibold text-destructive")}>
+                        {p.sku ?? "—"}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{p.costPrice ?? 0}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{p.salePrice ?? 0}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -640,7 +785,7 @@ export default function DataCenterPage() {
             <Button
               type="button"
               onClick={() => void confirmProductImport()}
-              disabled={productImporting || !productPreview?.length}
+              disabled={productImporting || !productPreview?.length || productHasBlockingDuplicates}
             >
               {productImporting ? "Importing…" : "Confirm import"}
             </Button>
@@ -759,6 +904,11 @@ export default function DataCenterPage() {
         </div>
         <p className="mt-2 text-muted-foreground">
           Mandatory: <span className="text-foreground">name</span>.
+        </p>
+        <p className="mt-1 text-muted-foreground">
+          Preview blocks import if the file repeats the same normalized <span className="text-foreground">name</span>{" "}
+          or <span className="text-foreground">sku</span> (when filled), or if a row matches a product already saved
+          for your company.
         </p>
       </div>
     </AppPageShell>

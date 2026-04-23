@@ -1910,6 +1910,7 @@ export type Database = {
           line_subtotal: number
           line_tax: number
           line_total: number
+          product_id: string | null
           quantity: number
           sales_order_id: string
           sort_order: number
@@ -1924,6 +1925,7 @@ export type Database = {
           line_subtotal?: number
           line_tax?: number
           line_total?: number
+          product_id?: string | null
           quantity: number
           sales_order_id: string
           sort_order?: number
@@ -1938,6 +1940,7 @@ export type Database = {
           line_subtotal?: number
           line_tax?: number
           line_total?: number
+          product_id?: string | null
           quantity?: number
           sales_order_id?: string
           sort_order?: number
@@ -1945,6 +1948,13 @@ export type Database = {
           unit_price?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "sales_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "sales_order_items_sales_order_id_fkey"
             columns: ["sales_order_id"]
@@ -1958,18 +1968,20 @@ export type Database = {
         Row: {
           bill_to_snapshot: Json
           client_snapshot: Json | null
-          company_id: string | null
+          company_id: string
           created_at: string
           created_from_quotation_id: string | null
           currency: string
           customer_id: string | null
           discount_amount: number
           discount_type: string | null
+          fulfillment_status: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           from_snapshot: Json
           id: string
           issue_date: string
           notes: string | null
           number: string
+          payment_status: string
           shipping_amount: number
           status: Database["public"]["Enums"]["sales_order_status"]
           subtotal: number
@@ -1983,13 +1995,14 @@ export type Database = {
         Insert: {
           bill_to_snapshot: Json
           client_snapshot?: Json | null
-          company_id?: string | null
+          company_id: string
           created_at?: string
           created_from_quotation_id?: string | null
           currency?: string
           customer_id?: string | null
           discount_amount?: number
           discount_type?: string | null
+          fulfillment_status?: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           from_snapshot: Json
           id?: string
           issue_date?: string
@@ -2020,6 +2033,7 @@ export type Database = {
           issue_date?: string
           notes?: string | null
           number?: string
+          payment_status?: string
           shipping_amount?: number
           status?: Database["public"]["Enums"]["sales_order_status"]
           subtotal?: number
@@ -2666,6 +2680,12 @@ export type Database = {
         | "expired"
         | "cancelled"
         | "active"
+      sales_order_fulfillment_status:
+        | "new"
+        | "delivered to driver"
+        | "delivered to customer"
+        | "cancelled"
+        | "Rescheduled"
       sales_order_status: "active" | "expired"
       subscription_plan: "monthly_100" | "yearly_1000"
       system_role: "admin" | "owner" | "member"
@@ -2829,6 +2849,13 @@ export const Constants = {
         "expired",
         "cancelled",
         "active",
+      ],
+      sales_order_fulfillment_status: [
+        "new",
+        "delivered to driver",
+        "delivered to customer",
+        "cancelled",
+        "Rescheduled",
       ],
       sales_order_status: ["active", "expired"],
       subscription_plan: ["monthly_100", "yearly_1000"],

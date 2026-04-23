@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   MessageCircle,
   Package2,
+  PackageOpen,
   Receipt,
   ScrollText,
   Settings,
@@ -38,6 +39,7 @@ export const FEATURE_CODES = {
   companyTeam: "company_team",
   companySettings: "company_settings",
   dataCenter: "data_center",
+  deliveryNote: "delivery_note",
 } as const;
 
 export type FeatureCode = (typeof FEATURE_CODES)[keyof typeof FEATURE_CODES];
@@ -82,6 +84,11 @@ export type AppNavItem = {
   icon: LucideIcon;
   /** Sidebar group heading for this item. */
   section: NavSectionId;
+  /**
+   * Optional sub-heading inside the section (e.g. "Delivery" under Operations).
+   * Shown before this item when it differs from the previous item's subsection.
+   */
+  subsection?: string;
 };
 
 /**
@@ -107,6 +114,7 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/company-team": "Company Team",
   "/app/settings": "Company Settings",
   "/app/data-center": "Data Center",
+  "/app/delivery-notes": "Delivery Notes",
 };
 
 /**
@@ -171,12 +179,20 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     href: "/app/inventory",
     icon: Package2,
     section: "operations",
+    subsection: "Inventory",
   },
   {
     requires: FEATURE_CODES.expenses,
     href: "/app/expenses",
     icon: Receipt,
     section: "operations",
+  },
+  {
+    requires: FEATURE_CODES.deliveryNote,
+    href: "/app/delivery-notes",
+    icon: PackageOpen,
+    section: "operations",
+    subsection: "Delivery",
   },
   {
     requires: FEATURE_CODES.whatsappCatalog,
@@ -247,6 +263,7 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   { prefix: "/app/settings", requires: FEATURE_CODES.companySettings },
   { prefix: "/app/company-team", requires: FEATURE_CODES.companyTeam },
   { prefix: "/app/data-center", requires: FEATURE_CODES.dataCenter },
+  { prefix: "/app/delivery-notes", requires: FEATURE_CODES.deliveryNote },
   { prefix: "/app", requires: FEATURE_CODES.dashboard },
 ];
 

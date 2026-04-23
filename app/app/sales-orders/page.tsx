@@ -40,7 +40,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
-import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
+import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
+import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   listSalesOrders,
@@ -183,9 +184,14 @@ export default function SalesOrdersPage() {
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Status" />
         ),
-        meta: { searchValue: (row: SalesOrderListRow) => row.status },
+        meta: {
+          searchValue: (row: SalesOrderListRow) =>
+            `${row.status} ${row.fulfillmentStatus}`,
+        },
         cell: ({ row }) => (
-          <SalesOrderStatusBadge status={row.original.status} />
+          <SalesOrderFulfillmentStatusBadge
+            status={row.original.fulfillmentStatus}
+          />
         ),
       },
       {
@@ -248,12 +254,12 @@ export default function SalesOrdersPage() {
                 <DropdownMenuItem
                   onClick={() =>
                     router.push(
-                      `/app/invoices/new?convertFromSalesOrder=${encodeURIComponent(so.id)}`,
+                      `/app/invoices/new?convertFromSalesOrder=${encodeURIComponent(so.id)}&markSalesOrderPaid=1`,
                     )
                   }
                 >
                   <FileText className="mr-2 h-4 w-4" />
-                  Convert to Invoice
+                  Convert to invoice and mark as paid
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -373,10 +379,10 @@ export default function SalesOrdersPage() {
               }
             >
               <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="Status" />
+                <SelectValue placeholder="Validity" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="all">All</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="expired">Expired</SelectItem>
               </SelectContent>

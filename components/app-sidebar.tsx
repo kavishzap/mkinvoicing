@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -162,7 +162,13 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                     {group.label}
                   </h2>
                 )}
-                {group.items.map((item) => {
+                {group.items.map((item, itemIndex) => {
+                  const prev = itemIndex > 0 ? group.items[itemIndex - 1] : null;
+                  const showSubsectionHeading =
+                    !narrow &&
+                    Boolean(item.subsection?.trim()) &&
+                    item.subsection !== prev?.subsection;
+
                   const isActive =
                     item.href === "/app"
                       ? pathname === "/app"
@@ -179,7 +185,6 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
 
                   const link = (
                     <Link
-                      key={item.href}
                       href={item.href}
                       data-tour-id={item.displayLabel
                         .replace(/\s+/g, "-")
@@ -206,6 +211,11 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                             <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
                               {group.label}
                             </span>
+                            {item.subsection ? (
+                              <span className="text-[9px] font-medium text-muted-foreground/90">
+                                {item.subsection}
+                              </span>
+                            ) : null}
                             <span className="text-[13px]">{item.displayLabel}</span>
                           </div>
                         </TooltipContent>
@@ -213,7 +223,16 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                     );
                   }
 
-                  return link;
+                  return (
+                    <Fragment key={item.href}>
+                      {showSubsectionHeading ? (
+                        <h3 className="px-3 pt-2 first:pt-0 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {item.subsection}
+                        </h3>
+                      ) : null}
+                      {link}
+                    </Fragment>
+                  );
                 })}
               </section>
             ))

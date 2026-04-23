@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
-import type { Profile } from "@/lib/settings-service";
+import { ensureUserSettingsRow, type Profile } from "@/lib/settings-service";
 import type { SupplierRow } from "@/lib/suppliers-service";
 import type { SalesOrderClientInfo } from "@/lib/sales-orders-service";
 
@@ -145,6 +145,7 @@ export async function createPurchaseOrder(
 ): Promise<string> {
   const { items, ...inv } = params;
   const companyId = await requireActiveCompanyId();
+  await ensureUserSettingsRow();
   const { data, error } = await supabase.rpc("create_purchase_order", {
     p_purchase_order: {
       company_id: companyId,

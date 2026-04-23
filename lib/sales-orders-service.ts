@@ -1,10 +1,86 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
+import {
+  ensureUserSettingsRow,
+  fetchPreferences,
+  getCurrentUserId,
+} from "@/lib/settings-service";
 import type { Profile } from "@/lib/settings-service";
 import type { CustomerRow } from "@/lib/customers-service";
+import type { Database } from "@/types/supabase";
 
 /** Only `active` (current) and `expired` (past valid_until or manual). */
 export type SalesOrderStatus = "active" | "expired";
+
+/** Fulfillment pipeline; stored as `sales_orders.fulfillment_status`. */
+export type SalesOrderFulfillmentStatus =
+  Database["public"]["Enums"]["sales_order_fulfillment_status"];
+
+export const SALES_ORDER_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] = [
+  "new",
+  "delivered to driver",
+  "delivered to customer",
+  "cancelled",
+  "Rescheduled",
+];
+
+/** Older app / DB values → current enum (best-effort). */
+const FULFILLMENT_LEGACY: Record<string, SalesOrderFulfillmentStatus> = {
+  pending: "new",
+  confirmed: "new",
+  processing: "new",
+  shipped: "new",
+  delivered: "delivered to customer",
+  delivered_to_driver: "delivered to driver",
+  delivered_to_customer: "delivered to customer",
+};
+
+export function normalizeSalesOrderFulfillmentStatus(
+  raw: string | null | undefined
+): SalesOrderFulfillmentStatus {
+  const v = String(raw ?? "").trim();
+  const fromLegacy = FULFILLMENT_LEGACY[v];
+  if (fromLegacy) return fromLegacy;
+  if (v.toLowerCase() === "rescheduled") return "Rescheduled";
+  if (
+    SALES_ORDER_FULFILLMENT_STATUSES.includes(v as SalesOrderFulfillmentStatus)
+  ) {
+    return v as SalesOrderFulfillmentStatus;
+  }
+  return "new";
+}
+
+export const SALES_ORDER_FULFILLMENT_LABELS: Record<
+  SalesOrderFulfillmentStatus,
+  string
+> = {
+  new: "New",
+  "delivered to driver": "Delivered to driver",
+  "delivered to customer": "Delivered to customer",
+  cancelled: "Cancelled",
+  Rescheduled: "Rescheduled",
+};
+
+/** Stored as `sales_orders.payment_status`. */
+export type SalesOrderPaymentStatus = "unpaid" | "paid" | "partial";
+
+export function normalizeSalesOrderPaymentStatus(
+  raw: string | null | undefined
+): SalesOrderPaymentStatus {
+  const v = String(raw ?? "unpaid").trim().toLowerCase();
+  if (v === "paid") return "paid";
+  if (v === "partial" || v === "partially_paid") return "partial";
+  return "unpaid";
+}
+
+export const SALES_ORDER_PAYMENT_LABELS: Record<
+  SalesOrderPaymentStatus,
+  string
+> = {
+  unpaid: "Unpaid",
+  paid: "Paid",
+  partial: "Partial",
+};
 
 /** Map DB / legacy values to the two-status model. */
 export function normalizeSalesOrderStatus(raw: string): SalesOrderStatus {
@@ -18,12 +94,15 @@ export type SalesOrderLinePayload = {
   unit_price: number;
   tax_percent: number;
   sort_order?: number;
+  /** Links the line to `public.products` when chosen from inventory. */
+  product_id?: string | null;
 };
 
 export type CreateSalesOrderPayload = {
   issue_date: string;
   valid_until: string;
   status: SalesOrderStatus;
+  fulfillment_status: SalesOrderFulfillmentStatus;
   currency: string;
   discount_type: "value" | "percent";
   discount_amount: number;
@@ -46,6 +125,7 @@ export type SalesOrderItemRow = {
   unit_price: number;
   tax_percent: number;
   sort_order?: number;
+  product_id?: string | null;
 };
 
 export type SalesOrderDetail = {
@@ -54,6 +134,8 @@ export type SalesOrderDetail = {
   issue_date: string;
   valid_until: string;
   status: SalesOrderStatus;
+  fulfillment_status: SalesOrderFulfillmentStatus;
+  payment_status: SalesOrderPaymentStatus;
   currency: string;
   customer_id: string | null;
   created_from_quotation_id: string | null;
@@ -74,6 +156,8 @@ export type SalesOrderListRow = {
   issueDate: string;
   validUntil: string;
   status: SalesOrderStatus;
+  fulfillmentStatus: SalesOrderFulfillmentStatus;
+  paymentStatus: SalesOrderPaymentStatus;
   currency: string;
   clientName: string;
   total: number;
@@ -237,16 +321,48 @@ export async function createSalesOrder(
 ): Promise<string> {
   const { items, created_from_quotation_id, ...inv } = params;
   const companyId = await requireActiveCompanyId();
-  const { data, error } = await supabase.rpc("create_sales_order", {
-    p_sales_order: {
+  const userId = await getCurrentUserId();
+  await ensureUserSettingsRow();
+
+  const subtotal = items.reduce(
+    (s, it) => s + Number(it.quantity) * Number(it.unit_price),
+    0
+  );
+  const taxTotal = items.reduce((s, it) => {
+    const line = Number(it.quantity) * Number(it.unit_price);
+    return s + line * (Number(it.tax_percent) / 100);
+  }, 0);
+  const discount =
+    inv.discount_type === "percent"
+      ? (subtotal * Number(inv.discount_amount || 0)) / 100
+      : Number(inv.discount_amount || 0);
+  const ship = inv.shipping_amount ?? 0;
+  const total = subtotal + taxTotal - discount + ship;
+
+  const lastError: { message?: string; code?: string }[] = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const prefs = await fetchPreferences();
+    const prefix = prefs.salesOrderPrefix ?? "SO";
+    const pad = prefs.salesOrderNumberPadding ?? 4;
+    const nextNum = prefs.salesOrderNextNumber ?? 1;
+    const number = `${prefix}-${String(nextNum).padStart(pad, "0")}`;
+
+    const orderRow = {
       company_id: companyId,
+      user_id: userId,
+      number,
       issue_date: inv.issue_date,
       valid_until: inv.valid_until,
       status: inv.status,
+      fulfillment_status: inv.fulfillment_status,
+      payment_status: "unpaid" as const,
       currency: inv.currency,
       discount_type: inv.discount_type,
       discount_amount: inv.discount_amount,
-      shipping_amount: inv.shipping_amount ?? 0,
+      shipping_amount: ship,
+      subtotal,
+      tax_total: taxTotal,
+      total,
       notes: inv.notes ?? null,
       terms: inv.terms ?? null,
       customer_id: inv.customer_id,
@@ -254,28 +370,67 @@ export async function createSalesOrder(
       from_snapshot: inv.from_snapshot,
       bill_to_snapshot: inv.bill_to_snapshot,
       created_from_quotation_id: created_from_quotation_id || null,
-    } as Record<string, unknown>,
-    p_items: items.map((li, i) => ({
-      item: li.item,
-      description: li.description ?? null,
-      quantity: li.quantity,
-      unit_price: li.unit_price,
-      tax_percent: li.tax_percent,
-      sort_order: li.sort_order ?? i,
-    })),
-  });
+    };
 
-  if (error) throw error;
+    const { data: inserted, error: insSo } = await supabase
+      .from("sales_orders")
+      .insert(orderRow)
+      .select("id")
+      .single();
 
-  let salesOrderId: string;
-  if (typeof data === "string") {
-    salesOrderId = data;
-  } else if (data && typeof data === "object" && "sales_order_id" in (data as object)) {
-    salesOrderId = (data as { sales_order_id: string }).sales_order_id;
-  } else {
-    salesOrderId = String(data);
+    if (insSo) {
+      lastError[0] = { message: insSo.message, code: insSo.code };
+      if (insSo.code === "23505") continue;
+      throw insSo;
+    }
+
+    const salesOrderId = inserted.id as string;
+
+    const itemRows = items.map((it, idx) => {
+      const line = Number(it.quantity) * Number(it.unit_price);
+      const lineTax = line * (Number(it.tax_percent) / 100);
+      const sortOrder = it.sort_order ?? idx;
+      return {
+        sales_order_id: salesOrderId,
+        company_id: companyId,
+        item: it.item,
+        description: it.description ?? null,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        tax_percent: it.tax_percent,
+        line_subtotal: line,
+        line_tax: lineTax,
+        line_total: line + lineTax,
+        sort_order: sortOrder,
+        product_id: it.product_id ?? null,
+      };
+    });
+
+    const { error: insItems } = await supabase
+      .from("sales_order_items")
+      .insert(itemRows);
+    if (insItems) {
+      await supabase.from("sales_orders").delete().eq("id", salesOrderId);
+      throw insItems;
+    }
+
+    const { error: bumpErr } = await supabase
+      .from("user_settings")
+      .update({ sales_order_next_number: nextNum + 1 })
+      .eq("user_id", userId)
+      .eq("company_id", companyId);
+    if (bumpErr) {
+      // eslint-disable-next-line no-console
+      console.warn("createSalesOrder: could not bump sales_order_next_number:", bumpErr.message);
+    }
+
+    return salesOrderId;
   }
-  return salesOrderId;
+
+  throw new Error(
+    lastError[0]?.message ??
+      "Could not allocate a unique sales order number. Try again."
+  );
 }
 
 export async function listSalesOrders(opts?: {
@@ -295,7 +450,7 @@ export async function listSalesOrders(opts?: {
   let q = supabase
     .from("sales_orders")
     .select(
-      "id, number, issue_date, valid_until, status, currency, bill_to_snapshot, total",
+      "id, number, issue_date, valid_until, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total",
       { count: "exact" }
     )
     .eq("company_id", companyId)
@@ -324,6 +479,10 @@ export async function listSalesOrders(opts?: {
     issueDate: r.issue_date,
     validUntil: r.valid_until,
     status: normalizeSalesOrderStatus(String(r.status)),
+    fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
+      r.fulfillment_status
+    ),
+    paymentStatus: normalizeSalesOrderPaymentStatus(r.payment_status),
     currency: r.currency,
     clientName: nameFromBillTo(r.bill_to_snapshot),
     total: Number(r.total ?? 0),
@@ -340,10 +499,10 @@ export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null
     .from("sales_orders")
     .select(
       `
-      id, number, issue_date, valid_until, status, currency, customer_id, created_from_quotation_id,
+      id, number, issue_date, valid_until, status, fulfillment_status, payment_status, currency, customer_id, created_from_quotation_id,
       from_snapshot, bill_to_snapshot, client_snapshot,
       discount_type, discount_amount, shipping_amount, notes, terms,
-      sales_order_items ( item, description, quantity, unit_price, tax_percent, sort_order )
+      sales_order_items ( item, description, quantity, unit_price, tax_percent, sort_order, product_id )
     `
     )
     .eq("id", id)
@@ -363,6 +522,12 @@ export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null
     issue_date: data.issue_date,
     valid_until: data.valid_until,
     status: normalizeSalesOrderStatus(String(data.status)),
+    fulfillment_status: normalizeSalesOrderFulfillmentStatus(
+      (data as { fulfillment_status?: string | null }).fulfillment_status
+    ),
+    payment_status: normalizeSalesOrderPaymentStatus(
+      (data as { payment_status?: string | null }).payment_status
+    ),
     currency: data.currency,
     customer_id: (data.customer_id as string) ?? null,
     created_from_quotation_id: (data.created_from_quotation_id as string) ?? null,
@@ -379,6 +544,22 @@ export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null
     terms: data.terms,
     items,
   };
+}
+
+export async function updateSalesOrderPaymentStatus(
+  id: string,
+  payment_status: SalesOrderPaymentStatus
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("sales_orders")
+    .update({
+      payment_status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("company_id", companyId);
+  if (error) throw error;
 }
 
 export async function deleteSalesOrder(id: string): Promise<void> {
@@ -439,6 +620,7 @@ export async function updateSalesOrder(
       issue_date: inv.issue_date,
       valid_until: inv.valid_until,
       status: inv.status,
+      fulfillment_status: inv.fulfillment_status,
       currency: inv.currency,
       from_snapshot: inv.from_snapshot,
       bill_to_snapshot: inv.bill_to_snapshot,
@@ -481,6 +663,7 @@ export async function updateSalesOrder(
       line_tax: lineTax,
       line_total: line + lineTax,
       sort_order: sortOrder,
+      product_id: it.product_id ?? null,
     };
   });
 
