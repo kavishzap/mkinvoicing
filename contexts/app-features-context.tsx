@@ -85,9 +85,13 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
         setFeatures([]);
         setIsOwner(false);
         setStatus("unauthenticated");
-      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+      } else if (event === "SIGNED_IN") {
         void load();
       }
+      // Intentionally ignore TOKEN_REFRESHED (tab focus / idle return). Re-loading
+      // features would re-render the whole app tree and can wipe in-progress client
+      // forms. Session stays valid via Supabase auto-refresh; call `reload()` after
+      // role changes if needed.
     });
 
     return () => {
@@ -95,18 +99,33 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
     };
   }, [load]);
 
-  const value = useMemo<AppFeaturesContextValue>(() => {
-    const byCode = new Map(features.map((f) => [f.code, f] as const));
-    return {
+  const featureByCode = useMemo(
+    () => new Map(features.map((f) => [f.code, f] as const)),
+    [features]
+  );
+
+  const featureName = useCallback(
+    (code: string) => featureByCode.get(code)?.name ?? null,
+    [featureByCode]
+  );
+
+  const has = useCallback(
+    (code: string) => isOwner || featureByCode.has(code),
+    [isOwner, featureByCode]
+  );
+
+  const value = useMemo<AppFeaturesContextValue>(
+    () => ({
       status,
       isOwner,
       features,
       error,
       reload: load,
-      featureName: (code: string) => byCode.get(code)?.name ?? null,
-      has: (code: string) => isOwner || byCode.has(code),
-    };
-  }, [status, isOwner, features, error, load]);
+      featureName,
+      has,
+    }),
+    [status, isOwner, features, error, load, featureName, has]
+  );
 
   return (
     <AppFeaturesContext.Provider value={value}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useAppFeatures } from "@/contexts/app-features-context";
@@ -28,6 +28,8 @@ export function AppFeatureRouteGuard({
   const router = useRouter();
   const pathname = usePathname() ?? "/app";
   const { status, isOwner, has, error } = useAppFeatures();
+  /** After first `ready`, never swap `<main>` for the full-page loader again (avoids losing client form state). */
+  const hasEverBeenReady = useRef(false);
 
   const allowed = useMemo(
     () => APP_NAV_ITEMS.filter((item) => isOwner || has(item.requires)),
@@ -45,6 +47,15 @@ export function AppFeatureRouteGuard({
   }, [isOwner, has, requiredCode]);
 
   useEffect(() => {
+    if (status === "ready") {
+      hasEverBeenReady.current = true;
+    }
+    if (status === "unauthenticated") {
+      hasEverBeenReady.current = false;
+    }
+  }, [status]);
+
+  useEffect(() => {
     if (status !== "ready") return;
     if (hasAccess) return;
     const fallback = pickFallbackHref(allowed);
@@ -53,7 +64,7 @@ export function AppFeatureRouteGuard({
     }
   }, [status, hasAccess, allowed, pathname, router]);
 
-  if (status === "loading") {
+  if (status === "loading" && !hasEverBeenReady.current) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
         <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
