@@ -5,6 +5,7 @@ DO $migration$
 BEGIN
   CREATE TYPE public.sales_order_fulfillment_status AS ENUM (
     'new',
+    'delivery note created',
     'delivered to driver',
     'delivered to customer',
     'cancelled',

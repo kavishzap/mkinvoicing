@@ -1,6 +1,13 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Trash2, UserPlus } from "lucide-react";
@@ -42,8 +49,12 @@ import {
 } from "@/lib/settings-service";
 import { listCustomers, type CustomerRow } from "@/lib/customers-service";
 import {
+  listProducts,
+  type ProductRow,
+} from "@/lib/products-service";
+import {
   createInvoice,
-  type InvoicePaymentMethod,
+  getInvoice,
   type LineItemPayload,
 } from "@/lib/invoices-service";
 import { getQuotation } from "@/lib/quotations-service";
@@ -52,13 +63,19 @@ import {
   clientInfoFromBillSnapshot,
   computeSalesOrderTotals,
   updateSalesOrderPaymentStatus,
+  type SalesOrderDetail,
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
+import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
+import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 
 type LineItem = {
   id: string;
+  /** `products.id`; required before save (same pattern as sales orders). */
+  productId: string | null;
   item: string;
   description: string;
   quantity: number;
@@ -95,6 +112,7 @@ type FieldErrors = Partial<
     | "lineItems"
     | "amountPaid"
     | `item_${string}`
+    | `product_${string}`
     | `qty_${string}`
     | `price_${string}`,
     string
@@ -107,11 +125,14 @@ function NewInvoicePageContent() {
   const [convertFromQuotationId] = useState(() =>
     searchParams.get("convertFromQuotation")
   );
-  const [convertFromSalesOrderId] = useState(() =>
-    searchParams.get("convertFromSalesOrder")
-  );
+  const [createdFromSalesOrderId, setCreatedFromSalesOrderId] = useState<
+    string | null
+  >(() => searchParams.get("convertFromSalesOrder"));
   const [markSalesOrderPaidFromSo] = useState(
     () => searchParams.get("markSalesOrderPaid") === "1"
+  );
+  const [duplicateFromInvoiceId] = useState(() =>
+    searchParams.get("duplicateFrom")
   );
   const { toast } = useToast();
   const convertHandledRef = useRef(false);
@@ -124,8 +145,11 @@ function NewInvoicePageContent() {
 
   // ===== Customers from Supabase
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
+  const [isCreateCustomerDialogOpen, setIsCreateCustomerDialogOpen] =
+    useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [products, setProducts] = useState<ProductRow[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(
     null
   );
@@ -158,7 +182,15 @@ function NewInvoicePageContent() {
 
   // ===== Lines
   const [lineItems, setLineItems] = useState<LineItem[]>([
-    { id: "1", item: "", description: "", quantity: 1, unitPrice: 0, tax: 0 },
+    {
+      id: "1",
+      productId: null,
+      item: "",
+      description: "",
+      quantity: 1,
+      unitPrice: 0,
+      tax: 0,
+    },
   ]);
   const [discount, setDiscount] = useState({
     type: "value" as "value" | "percent",
@@ -168,17 +200,75 @@ function NewInvoicePageContent() {
   const [invoiceShippingAmount, setInvoiceShippingAmount] = useState(0);
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<
-    InvoicePaymentMethod | null
-  >(null);
   const [amountPaid, setAmountPaid] = useState(0);
 
   // Errors
   const [errors, setErrors] = useState<FieldErrors>({});
   const [convertedFromSource, setConvertedFromSource] = useState<{
-    type: "quotation" | "sales_order";
+    type: "quotation" | "sales_order" | "invoice";
     number: string;
   } | null>(null);
+
+  const applySalesOrderToForm = useCallback(
+    (
+      so: SalesOrderDetail,
+      customerRows: CustomerRow[],
+      opts?: { markPaid?: boolean }
+    ) => {
+      const ci = clientInfoFromBillSnapshot(so.bill_to_snapshot);
+      setClientInfo({
+        type: ci.type,
+        companyName: ci.companyName,
+        contactName: ci.contactName,
+        fullName: ci.fullName,
+        email: ci.email,
+        phone: ci.phone,
+        street: ci.street,
+        city: ci.city,
+        postal: ci.postal,
+        country: ci.country,
+        address_line_1: ci.address_line_1,
+        address_line_2: ci.address_line_2,
+      });
+      setDiscount({
+        type: so.discount_type,
+        amount: so.discount_amount,
+      });
+      setNotes(so.notes ?? "");
+      setTerms(so.terms ?? "");
+      setIssueDate(so.issue_date);
+      setDueDate(so.valid_until);
+      setLineItems(
+        [...(so.items ?? [])]
+          .sort(
+            (a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+          )
+          .map((it, i) => ({
+            id: `ln-${Date.now()}-${i}`,
+            productId: (it as { product_id?: string | null }).product_id ?? null,
+            item: it.item,
+            description: it.description ?? "",
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unit_price),
+            tax: Number(it.tax_percent),
+          }))
+      );
+      if (so.customer_id) {
+        const match = customerRows.find((c) => c.id === so.customer_id);
+        setSelectedCustomer(match ?? null);
+      } else {
+        setSelectedCustomer(null);
+      }
+      setConvertedFromSource({ type: "sales_order", number: so.number });
+      setInvoiceShippingAmount(Number(so.shipping_amount ?? 0));
+      setCreatedFromSalesOrderId(so.id);
+      if (opts?.markPaid) {
+        const { total: soTotal } = computeSalesOrderTotals(so);
+        setAmountPaid(soTotal);
+      }
+    },
+    []
+  );
 
   // ========= INITIAL LOAD
   useEffect(() => {
@@ -221,6 +311,15 @@ function NewInvoicePageContent() {
         if (cancelled) return;
         setCustomers(rows);
 
+        const { rows: productRows } = await listProducts({
+          search: "",
+          includeInactive: false,
+          page: 1,
+          pageSize: 400,
+          onlyWithPositiveStock: true,
+        });
+        if (!cancelled) setProducts(productRows);
+
         // Convert from quotation
         if (convertFromQuotationId && !convertHandledRef.current) {
           convertHandledRef.current = true;
@@ -258,6 +357,7 @@ function NewInvoicePageContent() {
                 )
                 .map((it, i) => ({
                   id: `ln-${Date.now()}-${i}`,
+                  productId: null,
                   item: it.item,
                   description: it.description ?? "",
                   quantity: Number(it.quantity),
@@ -283,12 +383,36 @@ function NewInvoicePageContent() {
             });
           }
           router.replace("/app/invoices/new", { scroll: false });
-        } else if (convertFromSalesOrderId && !convertHandledRef.current) {
+        } else if (createdFromSalesOrderId && !convertHandledRef.current) {
           convertHandledRef.current = true;
-          const so = await getSalesOrder(convertFromSalesOrderId);
+          const so = await getSalesOrder(createdFromSalesOrderId);
           if (cancelled) return;
           if (so) {
-            const ci = clientInfoFromBillSnapshot(so.bill_to_snapshot);
+            applySalesOrderToForm(so, rows, {
+              markPaid: markSalesOrderPaidFromSo,
+            });
+            toast({
+              title: "Convert from sales order",
+              description: markSalesOrderPaidFromSo
+                ? `Form filled from sales order ${so.number}. Payment is set to the full amount; save to create a paid invoice and update the order.`
+                : `Form filled from sales order ${so.number}. Save to create invoice with link.`,
+            });
+          } else {
+            toast({
+              title: "Could not load sales order",
+              description: "Starting with a blank form.",
+              variant: "destructive",
+            });
+          }
+          router.replace("/app/invoices/new", { scroll: false });
+        } else if (duplicateFromInvoiceId && !convertHandledRef.current) {
+          convertHandledRef.current = true;
+          const inv = await getInvoice(duplicateFromInvoiceId);
+          if (cancelled) return;
+          if (inv) {
+            const ci = clientInfoFromBillSnapshot(
+              (inv.bill_to_snapshot || {}) as Record<string, unknown>
+            );
             setClientInfo({
               type: ci.type,
               companyName: ci.companyName,
@@ -304,48 +428,44 @@ function NewInvoicePageContent() {
               address_line_2: ci.address_line_2,
             });
             setDiscount({
-              type: so.discount_type,
-              amount: so.discount_amount,
+              type: inv.discount_type,
+              amount: inv.discount_amount,
             });
-            setNotes(so.notes ?? "");
-            setTerms(so.terms ?? "");
-            setIssueDate(so.issue_date);
-            setDueDate(so.valid_until);
+            setNotes(inv.notes ?? "");
+            setTerms(inv.terms ?? "");
+            setIssueDate(inv.issue_date);
+            setDueDate(inv.due_date);
             setLineItems(
-              [...so.items]
-                .sort(
-                  (a, b) =>
-                    Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-                )
-                .map((it, i) => ({
-                  id: `ln-${Date.now()}-${i}`,
-                  item: it.item,
-                  description: it.description ?? "",
-                  quantity: Number(it.quantity),
-                  unitPrice: Number(it.unit_price),
-                  tax: Number(it.tax_percent),
-                }))
+              (inv.items ?? []).map((it, i) => ({
+                id: `ln-${Date.now()}-${i}`,
+                productId: it.product_id ?? null,
+                item: it.item,
+                description: it.description ?? "",
+                quantity: Number(it.quantity),
+                unitPrice: Number(it.unit_price),
+                tax: Number(it.tax_percent),
+              }))
             );
-            if (so.customer_id) {
-              const match = rows.find((c) => c.id === so.customer_id);
-              if (match) setSelectedCustomer(match);
+            if (inv.customer_id) {
+              const match = rows.find((c) => c.id === inv.customer_id);
+              setSelectedCustomer(match ?? null);
+            } else {
+              setSelectedCustomer(null);
             }
-            setConvertedFromSource({ type: "sales_order", number: so.number });
-            setInvoiceShippingAmount(Number(so.shipping_amount ?? 0));
-            if (markSalesOrderPaidFromSo) {
-              const { total: soTotal } = computeSalesOrderTotals(so);
-              setAmountPaid(soTotal);
-              setPaymentMethod("Cash");
-            }
+            setConvertedFromSource({
+              type: "invoice",
+              number: inv.number,
+            });
+            setInvoiceShippingAmount(Number(inv.shipping_amount ?? 0));
+            setCreatedFromSalesOrderId(null);
+            setAmountPaid(0);
             toast({
-              title: "Convert from sales order",
-              description: markSalesOrderPaidFromSo
-                ? `Form filled from sales order ${so.number}. Payment is set to the full amount; save to create a paid invoice and update the order.`
-                : `Form filled from sales order ${so.number}. Save to create invoice with link.`,
+              title: "Duplicate invoice",
+              description: `Prefilled from ${inv.number}. Save to create a new invoice.`,
             });
           } else {
             toast({
-              title: "Could not load sales order",
+              title: "Could not load invoice",
               description: "Starting with a blank form.",
               variant: "destructive",
             });
@@ -370,9 +490,11 @@ function NewInvoicePageContent() {
   }, [
     toast,
     convertFromQuotationId,
-    convertFromSalesOrderId,
+    createdFromSalesOrderId,
     markSalesOrderPaidFromSo,
+    duplicateFromInvoiceId,
     router,
+    applySalesOrderToForm,
   ]);
 
   // React to search within dialog
@@ -428,6 +550,7 @@ function NewInvoicePageContent() {
       ...prev,
       {
         id: String(Date.now()),
+        productId: null,
         item: "",
         description: "",
         quantity: 1,
@@ -470,12 +593,7 @@ function NewInvoicePageContent() {
       address_line_2: c.address_line_2 ?? "",
     });
     setIsCustomerDialogOpen(false);
-    toast({
-      title: "Customer selected",
-      description: `${
-        c.type === "company" ? c.companyName : c.fullName
-      } added to the invoice.`,
-    });
+    setErrors({});
   };
 
   // ===== Validation
@@ -495,15 +613,14 @@ function NewInvoicePageContent() {
 
     if (!clientInfo.phone.trim()) next.phone = "Phone is required";
     if (!clientInfo.address_line_1.trim())
-      next.companyName ? null : (next.companyName = next.companyName); // no-op line to keep type happy in diff viewers
-    if (!clientInfo.address_line_1.trim())
-      (next as any).address_line_1 = "Address line 1 is required";
+      next.address_line_1 = "Address line 1 is required";
     // Line items validation
     if (lineItems.length === 0) {
       next.lineItems = "At least one line item is required";
     } else {
       lineItems.forEach((li) => {
-        if (!li.item.trim()) next[`item_${li.id}`] = "Item name is required";
+        if (!li.productId?.trim())
+          next[`product_${li.id}`] = "Select a product";
         if (!(li.quantity > 0))
           next[`qty_${li.id}`] = "Quantity must be greater than 0";
         if (!(li.unitPrice >= 0))
@@ -542,6 +659,7 @@ function NewInvoicePageContent() {
         quantity: li.quantity,
         unit_price: li.unitPrice,
         tax_percent: li.tax,
+        product_id: li.productId,
       }));
 
       // IMPORTANT:
@@ -560,7 +678,7 @@ function NewInvoicePageContent() {
         shipping_amount: invoiceShippingAmount,
         notes,
         terms,
-        payment_method: paymentMethod,
+        payment_method: null,
         amount_paid: amountPaid,
         amount_due: calculatedAmountDue,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
@@ -581,17 +699,17 @@ function NewInvoicePageContent() {
               address_line_2: clientInfo.address_line_2 || null,
             },
         created_from_quotation_id: convertFromQuotationId || undefined,
-        created_from_sales_order_id: convertFromSalesOrderId || undefined,
+        created_from_sales_order_id: createdFromSalesOrderId || undefined,
         items: itemsPayload,
       });
 
-      if (convertFromSalesOrderId && markSalesOrderPaidFromSo) {
+      if (createdFromSalesOrderId && markSalesOrderPaidFromSo) {
         let nextPay: SalesOrderPaymentStatus = "unpaid";
         if (amountPaid >= total) nextPay = "paid";
         else if (amountPaid > 0) nextPay = "partial";
         try {
           await updateSalesOrderPaymentStatus(
-            convertFromSalesOrderId,
+            createdFromSalesOrderId,
             nextPay
           );
         } catch (syncErr: unknown) {
@@ -621,38 +739,24 @@ function NewInvoicePageContent() {
     }
   }
 
-  const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
-  const showLogo = (profile as any)?.logoUrl || (profile as any)?.logo_url;
-
   if (loading) {
     return (
       <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="flex gap-2">
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
-          </div>
-        </div>
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
-        </div>
-        <div className="h-64 rounded bg-muted animate-pulse" />
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
-        </div>
+        <div className="h-8 w-56 rounded bg-muted animate-pulse" />
+        <div className="mt-4 h-24 rounded bg-muted animate-pulse" />
+        <div className="mt-4 h-64 rounded bg-muted animate-pulse" />
       </div>
     );
   }
 
   const headerSubtitle =
     convertedFromSource != null
-      ? `Converting from ${
-          convertedFromSource.type === "quotation" ? "quotation" : "sales order"
-        } ${convertedFromSource.number} — review lines below, then save to create the invoice.`
-      : "Choose the customer, add lines, then save or send—totals and tax calculate for you.";
+      ? convertedFromSource.type === "invoice"
+        ? `Duplicating from invoice ${convertedFromSource.number} — review and save to create a new invoice.`
+        : `Converting from ${
+            convertedFromSource.type === "quotation" ? "quotation" : "sales order"
+          } ${convertedFromSource.number} — review lines below, then save to create the invoice.`
+      : "Select a customer, then add lines and save.";
 
   return (
     <AppPageShell
@@ -671,243 +775,87 @@ function NewInvoicePageContent() {
         </div>
       }
     >
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* From (your profile) */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-3">
-                {/* Logo / Initials */}
-                From
-              </CardTitle>
-              <Link href="/app/settings">
-                <Button variant="link" size="sm" className="h-auto p-0">
-                  Edit in Settings
-                </Button>
-              </Link>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <CardTitle>Customer</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Your business details on the invoice come from{" "}
+                <Link href="/app/settings" className="text-primary underline">
+                  Settings
+                </Link>
+                .
+              </p>
             </div>
-          </CardHeader>
-
-          <CardContent className="space-y-2 text-sm">
-            {showLogo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={String(showLogo)}
-                alt="Logo"
-                className="h-50 w-50 rounded-md object-cover border"
-              />
-            ) : (
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary  font-bold">
-                {(profile?.companyName || profile?.fullName || "I")
-                  .slice(0, 1)
-                  .toUpperCase()}
-              </div>
-            )}
-            {profile?.accountType === "company" ? (
-              <>
-                <p className="font-semibold">{profile?.companyName}</p>
-                {profile?.registrationId && (
-                  <p className="text-muted-foreground">
-                    Reg: {profile.registrationId}
-                  </p>
-                )}
-                {profile?.vatNumber && (
-                  <p className="text-muted-foreground">
-                    VAT: {profile.vatNumber}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="font-semibold">{profile?.fullName}</p>
-            )}
-            <p className="text-muted-foreground">{profile?.email}</p>
-            <p className="text-muted-foreground">{profile?.phone}</p>
-            {profile?.address_line_1 && (
-              <p className="text-muted-foreground">{profile.address_line_1}</p>
-            )}
-            {profile?.address_line_2 && (
-              <p className="text-muted-foreground">{profile.address_line_2}</p>
-            )}
-            {(profile as any)?.bank_name && (
-              <p className="text-muted-foreground">
-                Bank: {(profile as any).bank_name}
-              </p>
-            )}
-            {(profile as any)?.bank_acc_num && (
-              <p className="text-muted-foreground">
-                Account: {(profile as any).bank_acc_num}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Bill To */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Bill To</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                variant="outline"
+                type="button"
                 size="sm"
-                onClick={() => setIsCustomerDialogOpen(true)}
                 className="gap-2"
+                onClick={() => setIsCustomerDialogOpen(true)}
               >
-                <UserPlus className="h-4 w-4" />
-                Select Customer
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Button
-                variant={clientInfo.type === "company" ? "default" : "outline"}
-                size="sm"
-                onClick={() =>
-                  setClientInfo({ ...clientInfo, type: "company" })
-                }
-                className="flex-1"
-              >
-                Company
+                <UserPlus className="h-4 w-4 shrink-0" />
+                {selectedCustomer ? "Change customer" : "Choose customer"}
               </Button>
               <Button
-                variant={
-                  clientInfo.type === "individual" ? "default" : "outline"
-                }
-                size="sm"
-                onClick={() =>
-                  setClientInfo({ ...clientInfo, type: "individual" })
-                }
-                className="flex-1"
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                aria-label="Add new customer"
+                onClick={() => setIsCreateCustomerDialogOpen(true)}
               >
-                Individual
+                <Plus className="h-4 w-4" />
               </Button>
             </div>
-
-            {clientInfo.type === "company" ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="companyName">Company Name *</Label>
-                  <Input
-                    id="companyName"
-                    className={err("companyName")}
-                    value={clientInfo.companyName}
-                    onChange={(e) =>
-                      setClientInfo({
-                        ...clientInfo,
-                        companyName: e.target.value,
-                      })
-                    }
-                    placeholder="Acme Corp"
-                  />
-                  {errors.companyName && (
-                    <p className="text-xs text-destructive">
-                      {errors.companyName}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contactName">Contact Name (Optional)</Label>
-                  <Input
-                    id="contactName"
-                    value={clientInfo.contactName}
-                    onChange={(e) =>
-                      setClientInfo({
-                        ...clientInfo,
-                        contactName: e.target.value,
-                      })
-                    }
-                    placeholder="John Doe"
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full Name *</Label>
-                <Input
-                  id="fullName"
-                  className={err("fullName")}
-                  value={clientInfo.fullName}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, fullName: e.target.value })
-                  }
-                  placeholder="John Doe"
-                />
-                {errors.fullName && (
-                  <p className="text-xs text-destructive">{errors.fullName}</p>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {selectedCustomer ? (
+            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-semibold">
+                {selectedCustomer.type === "company"
+                  ? selectedCustomer.companyName
+                  : selectedCustomer.fullName}
+              </p>
+              {selectedCustomer.type === "company" &&
+                selectedCustomer.contactName && (
+                  <p className="text-muted-foreground">
+                    {selectedCustomer.contactName}
+                  </p>
                 )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="clientEmail">Email *</Label>
-                <Input
-                  id="clientEmail"
-                  className={err("email")}
-                  type="email"
-                  value={clientInfo.email}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, email: e.target.value })
-                  }
-                  placeholder="client@example.com"
-                />
-                {errors.email && (
-                  <p className="text-xs text-destructive">{errors.email}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clientPhone">Phone *</Label>
-                <Input
-                  id="clientPhone"
-                  className={err("phone")}
-                  value={clientInfo.phone}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, phone: e.target.value })
-                  }
-                  placeholder="+230 5xx xx xx"
-                />
-                {errors.phone && (
-                  <p className="text-xs text-destructive">{errors.phone}</p>
-                )}
-              </div>
+              <p className="text-muted-foreground">{selectedCustomer.email}</p>
+              <p className="text-muted-foreground">{selectedCustomer.phone}</p>
+              <p className="text-muted-foreground">
+                {selectedCustomer.address_line_1}
+              </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress1">Address Line 1 *</Label>
-              <Input
-                id="clientAddress1"
-                className={err("address_line_1")}
-                value={clientInfo.address_line_1}
-                onChange={(e) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    address_line_1: e.target.value,
-                  })
-                }
-                placeholder="e.g. 123 Main St, Port Louis"
-              />
-              {errors.address_line_1 && (
-                <p className="text-xs text-destructive">
-                  {errors.address_line_1}
-                </p>
-              )}
+          ) : clientInfo.email ||
+            clientInfo.companyName ||
+            clientInfo.fullName ? (
+            <div className="rounded-lg border border-dashed border-border p-3 text-sm">
+              <p className="font-medium text-foreground">
+                Billing preview (from import)
+              </p>
+              <p className="text-muted-foreground">
+                {clientInfo.type === "company"
+                  ? clientInfo.companyName
+                  : clientInfo.fullName}
+              </p>
+              <p className="text-muted-foreground">{clientInfo.email}</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Link a customer above if this order matches someone in your
+                directory.
+              </p>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress2">Address Line 2</Label>
-              <Input
-                id="clientAddress2"
-                value={clientInfo.address_line_2}
-                onChange={(e) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    address_line_2: e.target.value,
-                  })
-                }
-                placeholder="Apartment, suite, building, etc."
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Pick someone from your customer list.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Invoice Meta */}
       <Card>
@@ -973,7 +921,8 @@ function NewInvoicePageContent() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[200px]">Item *</TableHead>
+                  <TableHead className="w-[min(14rem,22vw)]">Product *</TableHead>
+                  <TableHead className="w-[200px]">Item</TableHead>
                   <TableHead className="w-[250px]">Description</TableHead>
                   <TableHead className="w-[100px]">Qty *</TableHead>
                   <TableHead className="w-[120px]">Unit Price *</TableHead>
@@ -984,8 +933,8 @@ function NewInvoicePageContent() {
               </TableHeader>
               <TableBody>
                 {lineItems.map((item) => {
-                  const lineErrItem =
-                    errors[`item_${item.id}` as keyof FieldErrors];
+                  const lineErrProduct =
+                    errors[`product_${item.id}` as keyof FieldErrors];
                   const lineErrQty =
                     errors[`qty_${item.id}` as keyof FieldErrors];
                   const lineErrPrice =
@@ -996,21 +945,46 @@ function NewInvoicePageContent() {
                   return (
                     <TableRow key={item.id}>
                       <TableCell>
+                        <div className="space-y-1">
+                          <SalesOrderLineProductSelect
+                            products={products}
+                            value={item.productId}
+                            invalid={Boolean(lineErrProduct)}
+                            onValueChange={(pid) => {
+                              const p = products.find((x) => x.id === pid);
+                              if (!p) return;
+                              setLineItems((prev) =>
+                                applyProductPickToLines(prev, item.id, {
+                                  id: p.id,
+                                  name: p.name,
+                                  description: p.description || "",
+                                  salePrice: p.salePrice,
+                                })
+                              );
+                              setErrors((e) => {
+                                const next = { ...e };
+                                delete next[`product_${item.id}`];
+                                delete next[`item_${item.id}`];
+                                return next;
+                              });
+                            }}
+                          />
+                          {lineErrProduct ? (
+                            <p className="text-xs text-destructive">
+                              {String(lineErrProduct)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <Input
+                          readOnly
+                          tabIndex={-1}
                           value={item.item}
-                          onChange={(e) =>
-                            updateLineItem(item.id, "item", e.target.value)
-                          }
-                          placeholder="Service/Product"
-                          className={`h-9 ${
-                            lineErrItem ? "border-destructive" : ""
-                          }`}
+                          placeholder="—"
+                          title={item.item || undefined}
+                          className="h-9 bg-muted/40 pointer-events-none"
                         />
-                        {lineErrItem && (
-                          <p className="text-xs text-destructive mt-1">
-                            {String(lineErrItem)}
-                          </p>
-                        )}
                       </TableCell>
                       <TableCell>
                         <Input
@@ -1211,27 +1185,6 @@ function NewInvoicePageContent() {
               <Separator />
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="paymentMethod">Payment Method</Label>
-                  <Select
-                    value={paymentMethod || ""}
-                    onValueChange={(v) =>
-                      setPaymentMethod(
-                        v === "" ? null : (v as InvoicePaymentMethod)
-                      )
-                    }
-                  >
-                    <SelectTrigger id="paymentMethod">
-                      <SelectValue placeholder="Select payment method" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Cash">Cash</SelectItem>
-                      <SelectItem value="Card Payment">Card Payment</SelectItem>
-                      <SelectItem value="Credit Facilities">Credit Facilities</SelectItem>
-                      <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="amountPaid">Amount Paid</Label>
                   <Input
                     id="amountPaid"
@@ -1327,6 +1280,26 @@ function NewInvoicePageContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <CustomerQuickCreateDialog
+        open={isCreateCustomerDialogOpen}
+        onOpenChange={setIsCreateCustomerDialogOpen}
+        onCreated={async (row) => {
+          handleSelectCustomer(row);
+          setCustomerSearch("");
+          try {
+            const { rows } = await listCustomers({
+              search: "",
+              includeInactive: false,
+              page: 1,
+              pageSize: 50,
+            });
+            setCustomers(rows);
+          } catch {
+            /* ignore */
+          }
+        }}
+      />
     </AppPageShell>
   );
 }
@@ -1337,10 +1310,7 @@ export default function NewInvoicePage() {
       fallback={
         <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
           <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="h-56 rounded bg-muted animate-pulse" />
-            <div className="h-56 rounded bg-muted animate-pulse" />
-          </div>
+          <div className="mt-4 h-24 rounded bg-muted animate-pulse" />
         </div>
       }
     >

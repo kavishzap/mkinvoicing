@@ -95,11 +95,8 @@ export default function SalesOrderViewPage() {
   if (loading || !salesOrder) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
-        </div>
-        <div className="h-96 animate-pulse rounded bg-muted" />
+        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+        <div className="mt-4 h-96 animate-pulse rounded bg-muted" />
       </AppPageShell>
     );
   }
@@ -161,16 +158,14 @@ export default function SalesOrderViewPage() {
           </Button>
         </Link>
       }
-      subtitle={`${salesOrder.number}${billName ? ` · ${billName}` : ""} — Review lines and totals, export a PDF, or convert to an invoice when ready.`}
-      actions={
-        <div className="print:hidden">
-          <SalesOrderViewActions
-            salesOrderId={salesOrder.id}
-            salesOrder={salesOrder}
-            profile={profile}
-            logoSrc={logoSrc}
-          />
-        </div>
+      subtitle={`${salesOrder.number}${billName ? ` · ${billName}` : ""} — Review lines and totals below.`}
+      belowSubtitle={
+        <SalesOrderViewActions
+          salesOrderId={salesOrder.id}
+          salesOrder={salesOrder}
+          profile={profile}
+          logoSrc={logoSrc}
+        />
       }
     >
       <div className="lg:col-span-2 space-y-6">

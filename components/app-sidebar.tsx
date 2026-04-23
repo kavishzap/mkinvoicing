@@ -81,7 +81,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "hidden md:flex flex-col border-r border-border bg-card min-h-0 overflow-hidden transition-[width] duration-200 ease-out",
+        "print:hidden hidden md:flex flex-col border-r border-border bg-card min-h-0 overflow-hidden transition-[width] duration-200 ease-out",
         narrow ? "w-16" : "w-64",
         className
       )}

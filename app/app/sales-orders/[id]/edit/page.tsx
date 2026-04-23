@@ -58,6 +58,7 @@ import {
   buildFromSnapshotForSalesOrder,
   buildBillToSnapshot,
   clientInfoFromBillSnapshot,
+  normalizeSalesOrderFulfillmentStatus,
   type SalesOrderLinePayload,
   type SalesOrderStatus,
   type SalesOrderFulfillmentStatus,
@@ -210,6 +211,17 @@ export default function EditSalesOrderPage() {
             variant: "destructive",
           });
           router.replace("/app/sales-orders");
+          return;
+        }
+
+        if (normalizeSalesOrderFulfillmentStatus(q.fulfillment_status) !== "new") {
+          toast({
+            title: "Editing not available",
+            description:
+              "Sales orders can only be edited when fulfillment status is New.",
+            variant: "destructive",
+          });
+          router.replace(`/app/sales-orders/${salesOrderId}`);
           return;
         }
 

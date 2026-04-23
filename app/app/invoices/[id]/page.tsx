@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
 import { InvoiceViewActions } from "@/components/invoice-view-actions";
+import { CompactBillToSummary } from "@/components/compact-bill-to-summary";
 import { useToast } from "@/hooks/use-toast";
 
 import {
@@ -108,20 +109,14 @@ export default function InvoiceViewPage() {
   if (loading || !invoice) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
-          <div className="h-9 w-40 bg-muted rounded animate-pulse" />
-        </div>
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 h-96 bg-muted rounded animate-pulse" />
-          <div className="h-60 bg-muted rounded animate-pulse" />
-        </div>
+        <div className="h-8 w-64 rounded bg-muted animate-pulse" />
+        <div className="mt-4 h-96 rounded bg-muted animate-pulse" />
       </AppPageShell>
     );
   }
 
   const { subtotal, taxTotal, discount, total } = computeTotals(invoice);
-  const bill = invoice.bill_to_snapshot || {};
+  const bill = (invoice.bill_to_snapshot || {}) as Record<string, unknown>;
   const from = invoice.from_snapshot || {};
   
   // Calculate amount due: always calculate from total - amount_paid to ensure accuracy
@@ -129,7 +124,9 @@ export default function InvoiceViewPage() {
   const amountDue = Math.max(0, total - amountPaid);
 
   const billName =
-    bill?.type === "company" ? bill?.company_name : bill?.full_name;
+    bill.type === "company"
+      ? String(bill.company_name ?? "")
+      : String(bill.full_name ?? "");
 
   const safeProfile = {
     accountType: profile?.accountType ?? "individual",
@@ -162,22 +159,23 @@ export default function InvoiceViewPage() {
           </Button>
         </Link>
       }
-      subtitle={`${invoice.number}${billName ? ` · ${billName}` : ""} — Review amounts, record payments, print or share PDF.`}
-      actions={
+      subtitle={`${invoice.number}${billName ? ` · ${billName}` : ""} — Review lines and totals below.`}
+      belowSubtitle={
         <InvoiceViewActions
           invoiceId={invoice.id}
           invoice={invoice}
           profile={profile}
           logoSrc={logoSrc}
           onPaid={() => {
-            // flip local state so badge updates right away
             setInvoice((prev) =>
               prev ? ({ ...prev, status: "paid" } as InvoiceDetail) : prev
             );
           }}
           onCancelled={() => {
             setInvoice((prev) =>
-              prev ? ({ ...prev, status: "cancelled" } as InvoiceDetail) : prev
+              prev
+                ? ({ ...prev, status: "cancelled" } as InvoiceDetail)
+                : prev
             );
           }}
           onRefresh={() => {
@@ -190,7 +188,7 @@ export default function InvoiceViewPage() {
         {/* Invoice Content */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-lg">
-            <CardContent className="p-8 space-y-8">
+            <CardContent className="space-y-6 p-6 sm:p-7 sm:space-y-8">
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div>
@@ -241,42 +239,10 @@ export default function InvoiceViewPage() {
 
               <Separator />
 
-              {/* Details */}
-              <div className="grid sm:grid-cols-2 gap-8">
-                <div>
-                  <h4 className="text-sm font-semibold text-muted-foreground mb-2">
-                    BILL TO
-                  </h4>
-                  <p className="font-semibold">{billName}</p>
-                  {bill?.email && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {bill.email}
-                    </p>
-                  )}
-                  {bill?.phone && (
-                    <p className="text-sm text-muted-foreground">
-                      {bill.phone}
-                    </p>
-                  )}
-                  {(bill?.street || bill?.city || bill?.postal) && (
-                    <>
-                      {bill?.street && (
-                        <p className="text-sm text-muted-foreground mt-2">
-                          {bill.street}
-                        </p>
-                      )}
-                      <p className="text-sm text-muted-foreground">
-                        {[bill?.city, bill?.postal].filter(Boolean).join(", ")}
-                      </p>
-                      {bill?.country && (
-                        <p className="text-sm text-muted-foreground">
-                          {bill.country}
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-                <div className="space-y-3">
+              <div className="space-y-4">
+                <CompactBillToSummary billName={billName} bill={bill} />
+
+                <div className="grid gap-4 sm:grid-cols-3">
                   <div>
                     <p className="text-sm font-semibold text-muted-foreground">
                       Issue Date
@@ -294,59 +260,60 @@ export default function InvoiceViewPage() {
                       Status
                     </p>
                     <div className="mt-1">
-                      <InvoiceStatusBadge status={invoice.status} />
+                      <InvoiceStatusBadge
+                        status={invoice.status}
+                        dueDate={invoice.due_date}
+                        amountDue={amountDue}
+                      />
                     </div>
                   </div>
-                  {(invoice.created_from_quotation_id ||
-                    invoice.created_from_sales_order_id) && (
-                    <div>
-                      <p className="text-sm font-semibold text-muted-foreground">
-                        Created from
-                      </p>
-                      <div className="mt-1 space-y-1">
-                        {invoice.created_from_quotation_id && (
-                          <Link
-                            href={`/app/quotations/${invoice.created_from_quotation_id}`}
-                            className="block text-sm text-primary underline font-medium"
-                          >
-                            Open quotation
-                          </Link>
-                        )}
-                        {invoice.created_from_sales_order_id && (
-                          <Link
-                            href={`/app/sales-orders/${invoice.created_from_sales_order_id}`}
-                            className="block text-sm text-primary underline font-medium"
-                          >
-                            Open sales order
-                          </Link>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  <Separator />
+                </div>
+
+                {(invoice.created_from_quotation_id ||
+                  invoice.created_from_sales_order_id) && (
                   <div>
-                    <p className="text-sm font-semibold text-muted-foreground mb-2">
-                      Payment Information
+                    <p className="text-sm font-semibold text-muted-foreground">
+                      Created from
                     </p>
-                    <div className="space-y-2">
-                      {invoice.payment_method && (
-                        <div>
-                          <p className="text-xs text-muted-foreground">Payment Method</p>
-                          <p className="font-medium text-sm">{invoice.payment_method}</p>
-                        </div>
+                    <div className="mt-1 space-y-1">
+                      {invoice.created_from_quotation_id && (
+                        <Link
+                          href={`/app/quotations/${invoice.created_from_quotation_id}`}
+                          className="block text-sm font-medium text-primary underline"
+                        >
+                          Open quotation
+                        </Link>
                       )}
-                      <div>
-                        <p className="text-xs text-muted-foreground">Amount Paid</p>
-                        <p className="font-medium text-sm">
-                          {invoice.currency} {amountPaid.toFixed(2)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Amount Due</p>
-                        <p className={`font-semibold text-sm ${amountDue > 0 ? "text-destructive" : "text-green-600"}`}>
-                          {invoice.currency} {amountDue.toFixed(2)}
-                        </p>
-                      </div>
+                      {invoice.created_from_sales_order_id && (
+                        <Link
+                          href={`/app/sales-orders/${invoice.created_from_sales_order_id}`}
+                          className="block text-sm font-medium text-primary underline"
+                        >
+                          Open sales order
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-border bg-muted/35 px-3 py-3 sm:px-4">
+                  <p className="mb-2 text-sm font-semibold text-muted-foreground">
+                    Payment Information
+                  </p>
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Amount Paid</p>
+                      <p className="text-sm font-medium">
+                        {invoice.currency} {amountPaid.toFixed(2)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Amount Due</p>
+                      <p
+                        className={`text-sm font-semibold ${amountDue > 0 ? "text-destructive" : "text-green-600"}`}
+                      >
+                        {invoice.currency} {amountDue.toFixed(2)}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -480,12 +447,6 @@ export default function InvoiceViewPage() {
                           }).format(amountDue)}
                         </span>
                       </div>
-                      {invoice.payment_method && (
-                        <div className="flex justify-between text-sm pt-2 border-t">
-                          <span className="text-muted-foreground">Payment Method:</span>
-                          <span className="font-medium">{invoice.payment_method}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>

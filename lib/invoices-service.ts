@@ -5,11 +5,10 @@ import { ensureUserSettingsRow } from "@/lib/settings-service";
 
 /* -------------------- Types -------------------- */
 
-/** Allowed values for `invoices.payment_method` (matches UI selects). */
+/** Allowed values for `invoices.payment_method` in the UI (create / update). */
 export type InvoicePaymentMethod =
   | "Cash"
   | "Card Payment"
-  | "Credit Facilities"
   | "Bank Transfer";
 
 export type LineItemPayload = {
@@ -18,6 +17,8 @@ export type LineItemPayload = {
   quantity: number;
   unit_price: number;
   tax_percent: number;
+  /** Optional link to `public.products`; persisted after create if RPC omits it. */
+  product_id?: string | null;
 };
 
 export type CreateInvoicePayload = {
@@ -59,6 +60,76 @@ export type CreateInvoicePayload = {
   items: LineItemPayload[];
 };
 
+/** Set `company_id` on all lines for this invoice (same pattern as `sales_order_items`). */
+async function ensureInvoiceItemsCompanyId(
+  invoiceId: string,
+  companyId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("invoice_items")
+    .update({ company_id: companyId })
+    .eq("invoice_id", invoiceId);
+
+  if (error) {
+    console.warn("ensureInvoiceItemsCompanyId: update failed", error);
+  }
+}
+
+/** Match inserted `invoice_items` rows to payload lines and set `product_id`. */
+async function patchInvoiceItemsProductIds(
+  invoiceId: string,
+  companyId: string,
+  items: LineItemPayload[]
+): Promise<void> {
+  if (!items.some((li) => li.product_id?.trim())) return;
+
+  const { data: rows, error } = await supabase
+    .from("invoice_items")
+    .select("id, item, description, quantity, unit_price, tax_percent")
+    .eq("invoice_id", invoiceId);
+
+  if (error || !rows?.length) {
+    console.warn("patchInvoiceItemsProductIds: could not load invoice_items", error);
+    return;
+  }
+
+  const used = new Set<string>();
+  const normDesc = (d: string | null | undefined) => (d ?? "").trim();
+  const close = (a: number, b: number) =>
+    Math.abs(Number(a) - Number(b)) < 0.01;
+
+  for (const li of items) {
+    const pid = li.product_id?.trim();
+    if (!pid) continue;
+
+    const match = rows.find(
+      (r) =>
+        !used.has(r.id) &&
+        r.item === li.item &&
+        normDesc(r.description) === normDesc(li.description) &&
+        close(Number(r.quantity), Number(li.quantity)) &&
+        close(Number(r.unit_price), Number(li.unit_price)) &&
+        close(Number(r.tax_percent), Number(li.tax_percent))
+    );
+
+    if (!match) {
+      console.warn("patchInvoiceItemsProductIds: no matching row for line", li.item);
+      continue;
+    }
+
+    const { error: upErr } = await supabase
+      .from("invoice_items")
+      .update({ product_id: pid, company_id: companyId })
+      .eq("id", match.id);
+
+    if (upErr) {
+      console.warn("patchInvoiceItemsProductIds: update failed", upErr);
+    } else {
+      used.add(match.id);
+    }
+  }
+}
+
 /* -------------------- Create -------------------- */
 
 /**
@@ -96,11 +167,13 @@ export async function createInvoice(
       client_snapshot: inv.client_snapshot, // or null if using customer_id
     },
     p_items: items.map((li) => ({
+      company_id: companyId,
       item: li.item,
       description: li.description ?? null,
       quantity: li.quantity,
       unit_price: li.unit_price,
       tax_percent: li.tax_percent,
+      product_id: li.product_id ?? null,
     })),
   });
 
@@ -117,16 +190,17 @@ export async function createInvoice(
     throw new Error("Unexpected response from create_invoice RPC");
   }
 
-  // Update created_from and payment fields (RPC may not handle them)
-  // Always update payment fields to ensure they are saved correctly
+  // Stamp invoices.company_id and fields the RPC may omit. Match by id only: new rows
+  // often have company_id NULL until this update, so .eq("company_id", …) would match 0 rows.
   try {
     const updatePayload: {
+      company_id: string;
       created_from_quotation_id?: string | null;
       created_from_sales_order_id?: string | null;
       payment_method?: InvoicePaymentMethod | null;
       amount_paid?: number;
       amount_due?: number | null;
-    } = {};
+    } = { company_id: companyId };
 
     if (inv.created_from_quotation_id !== undefined && inv.created_from_quotation_id !== null) {
       updatePayload.created_from_quotation_id = inv.created_from_quotation_id;
@@ -143,22 +217,24 @@ export async function createInvoice(
     if (inv.amount_due !== undefined) {
       updatePayload.amount_due = inv.amount_due !== null ? inv.amount_due : null;
     }
-    
-    if (Object.keys(updatePayload).length > 0) {
-      const { error: updateError } = await supabase
-        .from("invoices")
-        .update(updatePayload)
-        .eq("id", invoiceId)
-        .eq("company_id", companyId);
-      
-      if (updateError) {
-        // Log but don't fail - invoice was created successfully
-        console.warn("Failed to update payment fields after invoice creation:", updateError);
-      }
+
+    const { error: updateError } = await supabase
+      .from("invoices")
+      .update(updatePayload)
+      .eq("id", invoiceId);
+
+    if (updateError) {
+      console.warn("Failed to update invoice after creation:", updateError);
     }
   } catch (updateError) {
-    // Log but don't fail - invoice was created successfully
-    console.warn("Failed to update payment fields after invoice creation:", updateError);
+    console.warn("Failed to update invoice after creation:", updateError);
+  }
+
+  try {
+    await ensureInvoiceItemsCompanyId(invoiceId, companyId);
+    await patchInvoiceItemsProductIds(invoiceId, companyId, items);
+  } catch (e) {
+    console.warn("patchInvoiceItemsAfterCreate:", e);
   }
 
   return invoiceId;
@@ -236,7 +312,7 @@ export async function listInvoices(opts?: {
     `,
       { count: "exact" }
     )
-    .eq("company_id", companyId);
+    .or(`company_id.eq.${companyId},company_id.is.null`);
 
   // Filters
   if (opts?.status && opts.status !== "all") {
@@ -298,11 +374,13 @@ export async function listInvoices(opts?: {
 /* -------------------- Detail -------------------- */
 
 export type InvoiceItemRow = {
+  company_id?: string | null;
   item: string;
   description: string | null;
   quantity: number;
   unit_price: number;
   tax_percent: number;
+  product_id?: string | null;
 };
 
 export type InvoiceDetail = {
@@ -317,11 +395,13 @@ export type InvoiceDetail = {
   created_from_sales_order_id: string | null;
   from_snapshot: any;
   bill_to_snapshot: any;
+  shipping_amount: number;
   discount_type: "value" | "percent";
   discount_amount: number;
   notes: string | null;
   terms: string | null;
-  payment_method: InvoicePaymentMethod | null;
+  /** DB value; may include legacy strings not shown in payment dropdowns. */
+  payment_method: string | null;
   amount_paid: number;
   amount_due: number;
   items: InvoiceItemRow[];
@@ -350,28 +430,48 @@ export function computeTotals(inv: InvoiceDetail) {
   return { subtotal, taxTotal, discount, total };
 }
 
-export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
-  const companyId = await requireActiveCompanyId();
-  const { data, error } = await supabase
-    .from("invoices")
-    .select(
-      `
+const INVOICE_DETAIL_SELECT = `
       id, number, issue_date, due_date, status, currency, customer_id,
       created_from_quotation_id, created_from_sales_order_id,
       from_snapshot, bill_to_snapshot,
+      shipping_amount,
       discount_type, discount_amount,
       notes, terms,
       payment_method, amount_paid, amount_due,
-      invoice_items ( item, description, quantity, unit_price, tax_percent )
-    `
-    )
-    .eq("id", id)
-    .eq("company_id", companyId)
-    .single();
+      invoice_items ( company_id, item, description, quantity, unit_price, tax_percent, product_id )
+    `;
 
-  if (error) {
+export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
+  const companyId = await requireActiveCompanyId();
+
+  // Load by id only so RLS can return the row even when invoices.company_id is NULL
+  // or out of sync; then enforce workspace and stamp NULL → active company.
+  const { data: row, error: loadErr } = await supabase
+    .from("invoices")
+    .select(INVOICE_DETAIL_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (loadErr || !row) {
     return null;
   }
+
+  if (row.company_id && row.company_id !== companyId) {
+    return null;
+  }
+
+  if (!row.company_id) {
+    const { error: stampErr } = await supabase
+      .from("invoices")
+      .update({ company_id: companyId })
+      .eq("id", id)
+      .is("company_id", null);
+    if (!stampErr) {
+      (row as { company_id: string }).company_id = companyId;
+    }
+  }
+
+  const data = row;
 
   // Calculate totals to determine correct amount_due
   const items = (data.invoice_items ?? []) as InvoiceItemRow[];
@@ -390,15 +490,12 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
   const total = subtotal + taxTotal - discount;
   
   const amountPaid = Number(data.amount_paid || 0);
-  // Calculate amount_due: use stored value if valid, otherwise calculate from total - amount_paid
-  const storedAmountDue = data.amount_due !== null && data.amount_due !== undefined 
-    ? Number(data.amount_due) 
-    : null;
-  const calculatedAmountDue = Math.max(0, total - amountPaid);
-  // Use stored value if it's reasonable (>= 0 and <= total), otherwise use calculated
-  const amountDue = storedAmountDue !== null && storedAmountDue >= 0 && storedAmountDue <= total
-    ? storedAmountDue
-    : calculatedAmountDue;
+  // Match invoice UI: derive balance from line totals minus paid. Stored amount_due can be 0/null
+  // for new unpaid rows, which must not hide the real balance on screen or in exports.
+  const amountDue =
+    data.status === "paid" || data.status === "cancelled"
+      ? 0
+      : Math.max(0, total - amountPaid);
 
   return {
     id: data.id,
@@ -412,11 +509,12 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     created_from_sales_order_id: (data.created_from_sales_order_id as string) ?? null,
     from_snapshot: data.from_snapshot,
     bill_to_snapshot: data.bill_to_snapshot,
+    shipping_amount: Number(data.shipping_amount ?? 0),
     discount_type: data.discount_type,
     discount_amount: Number(data.discount_amount || 0),
     notes: data.notes,
     terms: data.terms,
-    payment_method: data.payment_method as InvoicePaymentMethod | null,
+    payment_method: (data.payment_method as string | null) ?? null,
     amount_paid: amountPaid,
     amount_due: amountDue,
     items: items,

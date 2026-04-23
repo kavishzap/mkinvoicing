@@ -18,11 +18,11 @@ export default function AppLayout({
       <AppAccountProvider>
         <SidebarCollapseProvider>
         <AppPageActionsProvider>
-        <div className="flex h-screen overflow-hidden text-sm">
+        <div className="flex h-screen overflow-hidden text-sm print:h-auto print:min-h-0 print:overflow-visible">
           <AppSidebar />
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden print:overflow-visible">
             <AppTopbar />
-            <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-background">
+            <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-background print:overflow-visible">
               <AppFeatureRouteGuard>{children}</AppFeatureRouteGuard>
             </main>
             <AppShellFooter />

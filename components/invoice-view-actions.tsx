@@ -2,17 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Download, CheckCircle2, Edit, Printer, XCircle } from "lucide-react";
+import {
+  Copy,
+  Download,
+  CheckCircle2,
+  Edit,
+  Printer,
+  XCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -171,11 +171,6 @@ export function InvoiceViewActions({
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<
-    "Cash" | "Card Payment" | "Credit Facilities" | "Bank Transfer" | null
-  >(
-    invoice?.payment_method || null
-  );
   const [amountPaid, setAmountPaid] = useState(invoice?.amount_paid || 0);
   const [amountPaidError, setAmountPaidError] = useState<string | null>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
@@ -192,14 +187,6 @@ export function InvoiceViewActions({
   // Update local state when invoice changes
   useEffect(() => {
     if (invoice) {
-      setPaymentMethod(
-        (invoice.payment_method as
-          | "Cash"
-          | "Card Payment"
-          | "Credit Facilities"
-          | "Bank Transfer"
-          | null) || null
-      );
       setAmountPaid(invoice.amount_paid || 0);
       setCreditToApply(0);
     }
@@ -238,6 +225,13 @@ export function InvoiceViewActions({
       const inv = invoice ?? (await getInvoice(invoiceId));
       const prof = profile ?? (await fetchProfile());
       if (!inv) throw new Error("Invoice not found.");
+
+      const totals = computeTotals(inv);
+      const pdfPaid = Number(inv.amount_paid) || 0;
+      const pdfAmountDue =
+        inv.status === "paid" || inv.status === "cancelled"
+          ? 0
+          : Math.max(0, totals.total - pdfPaid);
 
       const branding = (await fetchBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A"; // slate-900
@@ -346,14 +340,11 @@ export function InvoiceViewActions({
       const issue = new Date(inv.issue_date).toLocaleDateString("en-GB");
       const due = new Date(inv.due_date).toLocaleDateString("en-GB");
       const detailsLines = [`Issue Date: ${issue}`, `Due Date: ${due}`, `Status: ${inv.status}`];
-      if (inv.payment_method) {
-        detailsLines.push(`Payment: ${inv.payment_method}`);
+      if (pdfPaid > 0) {
+        detailsLines.push(`Paid: ${money(pdfPaid, inv.currency)}`);
       }
-      if (inv.amount_paid > 0) {
-        detailsLines.push(`Paid: ${money(inv.amount_paid, inv.currency)}`);
-      }
-      if (inv.amount_due > 0) {
-        detailsLines.push(`Due: ${money(inv.amount_due, inv.currency)}`);
+      if (pdfAmountDue > 0) {
+        detailsLines.push(`Due: ${money(pdfAmountDue, inv.currency)}`);
       }
       doc.setFont("helvetica", "bold").setFontSize(11).text("Invoice Details", detailsX, y);
       doc.setFont("helvetica", "normal").setFontSize(10);
@@ -421,13 +412,12 @@ export function InvoiceViewActions({
       const afterTableY = (doc as any).lastAutoTable?.finalY ?? y;
 
       // Totals card
-      const totals = computeTotals(inv);
-      const hasPayment = inv.amount_paid > 0 || inv.amount_due > 0;
+      const hasPayment = pdfPaid > 0 || pdfAmountDue > 0;
       const cardW = 260;
       let cardH = 110 + (totals.discount > 0 ? 14 : 0);
       if (hasPayment) {
-        cardH += inv.amount_paid > 0 ? 14 : 0;
-        cardH += inv.amount_due > 0 ? 14 : 0;
+        cardH += pdfPaid > 0 ? 14 : 0;
+        cardH += pdfAmountDue > 0 ? 14 : 0;
         cardH += 4; // extra spacing
       }
       const cardX = pageW - M - cardW;
@@ -467,27 +457,20 @@ export function InvoiceViewActions({
       ty += 20;
 
       // Payment information
-      if (inv.amount_paid > 0) {
+      if (pdfPaid > 0) {
         doc.setFont("helvetica", "normal").setFontSize(10);
         doc.text("Amount Paid", labelX, ty);
-        doc.text(money(inv.amount_paid, inv.currency), valueX, ty, { align: "right" });
+        doc.text(money(pdfPaid, inv.currency), valueX, ty, { align: "right" });
         ty += 16;
       }
 
-      if (inv.amount_due > 0) {
+      if (pdfAmountDue > 0) {
         doc.setFont("helvetica", "bold").setFontSize(10);
         doc.setTextColor(220, 38, 38); // red color for amount due
         doc.text("Amount Due", labelX, ty);
-        doc.text(money(inv.amount_due, inv.currency), valueX, ty, { align: "right" });
+        doc.text(money(pdfAmountDue, inv.currency), valueX, ty, { align: "right" });
         doc.setTextColor(0, 0, 0); // reset to black
         ty += 16;
-      }
-
-      if (inv.payment_method) {
-        doc.setFont("helvetica", "normal").setFontSize(9);
-        doc.setTextColor(100, 100, 100); // gray color
-        doc.text(`Payment Method: ${inv.payment_method}`, labelX, ty);
-        doc.setTextColor(0, 0, 0); // reset to black
       }
 
       // Notes / Terms
@@ -534,6 +517,13 @@ export function InvoiceViewActions({
       const inv = invoice ?? (await getInvoice(invoiceId));
       const prof = profile ?? (await fetchProfile());
       if (!inv) throw new Error("Invoice not found.");
+
+      const totals = computeTotals(inv);
+      const pdfPaid = Number(inv.amount_paid) || 0;
+      const pdfAmountDue =
+        inv.status === "paid" || inv.status === "cancelled"
+          ? 0
+          : Math.max(0, totals.total - pdfPaid);
 
       const branding = (await fetchBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A"; // slate-900
@@ -642,14 +632,11 @@ export function InvoiceViewActions({
       const issue = new Date(inv.issue_date).toLocaleDateString("en-GB");
       const due = new Date(inv.due_date).toLocaleDateString("en-GB");
       const detailsLines = [`Issue Date: ${issue}`, `Due Date: ${due}`, `Status: ${inv.status}`];
-      if (inv.payment_method) {
-        detailsLines.push(`Payment: ${inv.payment_method}`);
+      if (pdfPaid > 0) {
+        detailsLines.push(`Paid: ${money(pdfPaid, inv.currency)}`);
       }
-      if (inv.amount_paid > 0) {
-        detailsLines.push(`Paid: ${money(inv.amount_paid, inv.currency)}`);
-      }
-      if (inv.amount_due > 0) {
-        detailsLines.push(`Due: ${money(inv.amount_due, inv.currency)}`);
+      if (pdfAmountDue > 0) {
+        detailsLines.push(`Due: ${money(pdfAmountDue, inv.currency)}`);
       }
       doc.setFont("helvetica", "bold").setFontSize(11).text("Invoice Details", detailsX, y);
       doc.setFont("helvetica", "normal").setFontSize(10);
@@ -721,13 +708,12 @@ export function InvoiceViewActions({
       const afterTableY = (doc as any).lastAutoTable?.finalY ?? y;
 
       // Totals card
-      const totals = computeTotals(inv);
-      const hasPayment = inv.amount_paid > 0 || inv.amount_due > 0;
+      const hasPayment = pdfPaid > 0 || pdfAmountDue > 0;
       const cardW = 260;
       let cardH = 110 + (totals.discount > 0 ? 14 : 0);
       if (hasPayment) {
-        cardH += inv.amount_paid > 0 ? 14 : 0;
-        cardH += inv.amount_due > 0 ? 14 : 0;
+        cardH += pdfPaid > 0 ? 14 : 0;
+        cardH += pdfAmountDue > 0 ? 14 : 0;
         cardH += 4; // extra spacing
       }
       const cardX = pageW - M - cardW;
@@ -767,27 +753,20 @@ export function InvoiceViewActions({
       ty += 20;
 
       // Payment information
-      if (inv.amount_paid > 0) {
+      if (pdfPaid > 0) {
         doc.setFont("helvetica", "normal").setFontSize(10);
         doc.text("Amount Paid", labelX, ty);
-        doc.text(money(inv.amount_paid, inv.currency), valueX, ty, { align: "right" });
+        doc.text(money(pdfPaid, inv.currency), valueX, ty, { align: "right" });
         ty += 16;
       }
 
-      if (inv.amount_due > 0) {
+      if (pdfAmountDue > 0) {
         doc.setFont("helvetica", "bold").setFontSize(10);
         doc.setTextColor(220, 38, 38); // red color for amount due
         doc.text("Amount Due", labelX, ty);
-        doc.text(money(inv.amount_due, inv.currency), valueX, ty, { align: "right" });
+        doc.text(money(pdfAmountDue, inv.currency), valueX, ty, { align: "right" });
         doc.setTextColor(0, 0, 0); // reset to black
         ty += 16;
-      }
-
-      if (inv.payment_method) {
-        doc.setFont("helvetica", "normal").setFontSize(9);
-        doc.setTextColor(100, 100, 100); // gray color
-        doc.text(`Payment Method: ${inv.payment_method}`, labelX, ty);
-        doc.setTextColor(0, 0, 0); // reset to black
       }
 
       // Notes / Terms
@@ -863,7 +842,6 @@ export function InvoiceViewActions({
       const overpaid = Math.max(0, effectivePaid - totals.total);
 
       await updateInvoicePayment(invoiceId, {
-        payment_method: paymentMethod,
         // Store the full amount that went towards this invoice:
         // cash (amountPaid) + credit applied.
         amount_paid: effectivePaid,
@@ -965,7 +943,7 @@ export function InvoiceViewActions({
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-nowrap">
+      <div className="flex w-full max-w-full flex-wrap items-center justify-start gap-1.5 sm:gap-2">
         <Button variant="outline" onClick={handleDownloadPDF} className="gap-2" disabled={busy}>
           <Download className="h-4 w-4" />
           {busy ? "Generating…" : "Download PDF"}
@@ -981,13 +959,24 @@ export function InvoiceViewActions({
           Print
         </Button>
 
+        <Button
+          variant="outline"
+          className="gap-2"
+          disabled={busy}
+          onClick={() =>
+            router.push(`/app/invoices/new?duplicateFrom=${encodeURIComponent(invoiceId)}`)
+          }
+        >
+          <Copy className="h-4 w-4" />
+          Duplicate
+        </Button>
+
         {invoice?.status !== "paid" && invoice?.status !== "cancelled" && (
           <Button 
             variant="outline" 
             onClick={() => {
               // Sync state with current invoice when opening dialog
               if (invoice) {
-                setPaymentMethod(invoice.payment_method || null);
                 setAmountPaid(invoice.amount_paid || 0);
                 setAmountPaidError(null);
                 setCreditToApply(0);
@@ -1008,7 +997,6 @@ export function InvoiceViewActions({
             onClick={() => {
               // Open update payment modal pre-filled to mark as paid
               if (invoice) {
-                setPaymentMethod(invoice.payment_method || "Cash");
                 setAmountPaid(totals.total);
                 setAmountPaidError(null);
                 setCreditToApply(0);
@@ -1044,37 +1032,11 @@ export function InvoiceViewActions({
           <DialogHeader>
             <DialogTitle>Update Payment Information</DialogTitle>
             <DialogDescription>
-              Update the payment method and amount paid for this invoice. Invoice will be marked as paid only when the full amount is received.
+              Update the amount paid for this invoice. It will be marked as paid
+              only when the full amount is received.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-payment-method">Payment Method</Label>
-              <Select
-                value={paymentMethod || ""}
-                onValueChange={(v) =>
-                  setPaymentMethod(
-                    v === ""
-                      ? null
-                      : (v as
-                          | "Cash"
-                          | "Card Payment"
-                          | "Credit Facilities"
-                          | "Bank Transfer")
-                  )
-                }
-              >
-                <SelectTrigger id="edit-payment-method">
-                  <SelectValue placeholder="Select payment method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Cash">Cash</SelectItem>
-                  <SelectItem value="Card Payment">Card Payment</SelectItem>
-                  <SelectItem value="Credit Facilities">Credit Facilities</SelectItem>
-                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label htmlFor="edit-amount-paid">Amount Paid</Label>
               <Input

@@ -690,6 +690,7 @@ export type Database = {
           line_subtotal: number
           line_tax: number
           line_total: number
+          product_id: string | null
           quantity: number
           tax_percent: number
           unit_price: number
@@ -703,6 +704,7 @@ export type Database = {
           line_subtotal?: number
           line_tax?: number
           line_total?: number
+          product_id?: string | null
           quantity: number
           tax_percent?: number
           unit_price: number
@@ -716,6 +718,7 @@ export type Database = {
           line_subtotal?: number
           line_tax?: number
           line_total?: number
+          product_id?: string | null
           quantity?: number
           tax_percent?: number
           unit_price?: number
@@ -733,6 +736,13 @@ export type Database = {
             columns: ["invoice_id"]
             isOneToOne: false
             referencedRelation: "invoices_list"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoice_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
         ]
@@ -2028,6 +2038,7 @@ export type Database = {
           customer_id?: string | null
           discount_amount?: number
           discount_type?: string | null
+          fulfillment_status?: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           from_snapshot?: Json
           id?: string
           issue_date?: string
@@ -2064,6 +2075,83 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deliveries: {
+        Row: {
+          id: string
+          company_id: string
+          driver_user_id: string
+          created_by: string
+          notes: string | null
+          status: "new" | "delivered_to_driver" | "completed"
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          driver_user_id: string
+          created_by: string
+          notes?: string | null
+          status?: "new" | "delivered_to_driver" | "completed"
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          driver_user_id?: string
+          created_by?: string
+          notes?: string | null
+          status?: "new" | "delivered_to_driver" | "completed"
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_sales_orders: {
+        Row: {
+          id: string
+          delivery_id: string
+          sales_order_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          delivery_id: string
+          sales_order_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          delivery_id?: string
+          sales_order_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_sales_orders_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_sales_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -2657,6 +2745,7 @@ export type Database = {
       }
     }
     Enums: {
+      delivery_note_status: "new" | "delivered_to_driver" | "completed"
       invoice_status:
         | "draft"
         | "sent"
@@ -2682,6 +2771,7 @@ export type Database = {
         | "active"
       sales_order_fulfillment_status:
         | "new"
+        | "delivery note created"
         | "delivered to driver"
         | "delivered to customer"
         | "cancelled"
@@ -2824,6 +2914,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      delivery_note_status: ["new", "delivered_to_driver", "completed"],
       invoice_status: [
         "draft",
         "sent",
@@ -2852,6 +2943,7 @@ export const Constants = {
       ],
       sales_order_fulfillment_status: [
         "new",
+        "delivery note created",
         "delivered to driver",
         "delivered to customer",
         "cancelled",

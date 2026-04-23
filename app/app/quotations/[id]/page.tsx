@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { QuotationStatusBadge } from "@/components/quotation-status-badge";
 import { QuotationViewActions } from "@/components/quotation-view-actions";
+import { CompactBillToSummary } from "@/components/compact-bill-to-summary";
 import {
   getQuotation,
   computeQuotationTotals,
@@ -94,11 +95,8 @@ export default function QuotationViewPage() {
   if (loading || !quotation) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
-        </div>
-        <div className="h-96 animate-pulse rounded bg-muted" />
+        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+        <div className="mt-4 h-96 animate-pulse rounded bg-muted" />
       </AppPageShell>
     );
   }
@@ -115,20 +113,12 @@ export default function QuotationViewPage() {
     vat_number?: string;
     logoUrl?: string;
   };
-  const bill = quotation.bill_to_snapshot as {
-    type?: string;
-    company_name?: string;
-    full_name?: string;
-    email?: string;
-    phone?: string;
-    street?: string;
-    city?: string;
-    postal?: string;
-    country?: string;
-  };
+  const bill = quotation.bill_to_snapshot as Record<string, unknown>;
 
   const billName =
-    bill.type === "company" ? bill.company_name : bill.full_name;
+    bill.type === "company"
+      ? String(bill.company_name ?? "")
+      : String(bill.full_name ?? "");
 
   const safeProfile = {
     accountType: profile?.accountType ?? "individual",
@@ -160,21 +150,19 @@ export default function QuotationViewPage() {
           </Button>
         </Link>
       }
-      subtitle={`${quotation.number}${billName ? ` · ${billName}` : ""} — Review pricing and terms, send a PDF, or convert to a sales order or invoice.`}
-      actions={
-        <div className="print:hidden">
-          <QuotationViewActions
-            quotationId={quotation.id}
-            quotation={quotation}
-            profile={profile}
-            logoSrc={logoSrc}
-          />
-        </div>
+      subtitle={`${quotation.number}${billName ? ` · ${billName}` : ""} — Review lines and totals below.`}
+      belowSubtitle={
+        <QuotationViewActions
+          quotationId={quotation.id}
+          quotation={quotation}
+          profile={profile}
+          logoSrc={logoSrc}
+        />
       }
     >
       <div className="lg:col-span-2 space-y-6">
         <Card className="shadow-lg">
-          <CardContent className="p-8 space-y-8">
+          <CardContent className="space-y-6 p-6 sm:p-7 sm:space-y-8">
             <div className="flex items-start justify-between">
               <div>
                 {logoSrc ? (
@@ -221,35 +209,10 @@ export default function QuotationViewPage() {
 
             <Separator />
 
-            <div className="grid sm:grid-cols-2 gap-8">
-              <div>
-                <h4 className="text-sm font-semibold text-muted-foreground mb-2">
-                  BILL TO
-                </h4>
-                <p className="font-semibold">{billName}</p>
-                {bill?.email && (
-                  <p className="text-sm text-muted-foreground mt-1">{bill.email}</p>
-                )}
-                {bill?.phone && (
-                  <p className="text-sm text-muted-foreground">{bill.phone}</p>
-                )}
-                {(bill?.street || bill?.city || bill?.postal) && (
-                  <>
-                    {bill?.street && (
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {bill.street}
-                      </p>
-                    )}
-                    <p className="text-sm text-muted-foreground">
-                      {[bill?.city, bill?.postal].filter(Boolean).join(", ")}
-                    </p>
-                    {bill?.country && (
-                      <p className="text-sm text-muted-foreground">{bill.country}</p>
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="space-y-3">
+            <div className="space-y-4">
+              <CompactBillToSummary billName={billName} bill={bill} />
+
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div>
                   <p className="text-sm font-semibold text-muted-foreground">
                     Issue Date

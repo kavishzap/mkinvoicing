@@ -125,6 +125,8 @@ export function getNavDisplayLabel(
   item: AppNavItem,
   featureNameFn: (code: string) => string | null,
 ): string {
+  /** Sidebar / shell: inventory module uses this path; DB feature may still be named "Locations". */
+  if (item.href === "/app/inventory") return "Inventory";
   const fromDb = featureNameFn(item.requires)?.trim();
   if (fromDb) return fromDb;
   return NAV_LABEL_FALLBACK_BY_HREF[item.href] ?? item.requires;
@@ -179,7 +181,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     href: "/app/inventory",
     icon: Package2,
     section: "operations",
-    subsection: "Inventory",
   },
   {
     requires: FEATURE_CODES.expenses,

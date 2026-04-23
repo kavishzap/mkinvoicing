@@ -16,6 +16,8 @@ type AppPageShellProps = {
   leading?: React.ReactNode;
   /** Primary actions — shown in the app top bar next to the page title. */
   actions?: React.ReactNode;
+  /** Renders directly under the subtitle row (e.g. document view toolbars). */
+  belowSubtitle?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   /** Tighter padding and vertical rhythm (settings, long forms). */
@@ -26,11 +28,12 @@ export function AppPageShell({
   subtitle,
   leading,
   actions,
+  belowSubtitle,
   children,
   className,
   compact = false,
 }: AppPageShellProps) {
-  const showHeader = Boolean(leading || subtitle);
+  const showHeader = Boolean(leading || subtitle || belowSubtitle);
 
   return (
     <div
@@ -57,6 +60,11 @@ export function AppPageShell({
               ) : null}
             </div>
           </div>
+          {belowSubtitle ? (
+            <div className="print:hidden w-full min-w-0 rounded-lg border border-border bg-muted/40 p-3 sm:p-4">
+              {belowSubtitle}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <div className={compact ? "space-y-4" : "space-y-6"}>{children}</div>

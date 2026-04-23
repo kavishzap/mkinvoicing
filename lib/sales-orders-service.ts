@@ -18,6 +18,7 @@ export type SalesOrderFulfillmentStatus =
 
 export const SALES_ORDER_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] = [
   "new",
+  "delivery note created",
   "delivered to driver",
   "delivered to customer",
   "cancelled",
@@ -55,6 +56,7 @@ export const SALES_ORDER_FULFILLMENT_LABELS: Record<
   string
 > = {
   new: "New",
+  "delivery note created": "Delivery note created",
   "delivered to driver": "Delivered to driver",
   "delivered to customer": "Delivered to customer",
   cancelled: "Cancelled",
@@ -436,6 +438,8 @@ export async function createSalesOrder(
 export async function listSalesOrders(opts?: {
   search?: string;
   status?: SalesOrderStatus | "all";
+  /** When set (not `"all"`), filter by `sales_orders.fulfillment_status`. */
+  fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: SalesOrderListRow[]; total: number }> {
@@ -459,6 +463,10 @@ export async function listSalesOrders(opts?: {
 
   if (opts?.status && opts.status !== "all") {
     q = q.eq("status", opts.status);
+  }
+
+  if (opts?.fulfillmentStatus && opts.fulfillmentStatus !== "all") {
+    q = q.eq("fulfillment_status", opts.fulfillmentStatus);
   }
 
   if (opts?.search?.trim()) {
@@ -599,6 +607,27 @@ export async function updateSalesOrder(
 ): Promise<void> {
   const { items, ...inv } = params;
   const companyId = await requireActiveCompanyId();
+
+  const { data: existingRow, error: existingErr } = await supabase
+    .from("sales_orders")
+    .select("fulfillment_status")
+    .eq("id", id)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (!existingRow) {
+    throw new Error("Sales order not found.");
+  }
+  if (
+    normalizeSalesOrderFulfillmentStatus(
+      (existingRow as { fulfillment_status?: string | null }).fulfillment_status
+    ) !== "new"
+  ) {
+    throw new Error(
+      "This sales order can only be edited while fulfillment status is New."
+    );
+  }
+
   const subtotal = items.reduce(
     (s, it) => s + Number(it.quantity) * Number(it.unit_price),
     0

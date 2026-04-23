@@ -191,9 +191,9 @@ export async function fetchProfile(): Promise<Profile> {
     .from("profiles")
     .select("*")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
-  if (error && error.code !== "PGRST116") throw error; // not found
+  if (error) throw error;
   const row = data ?? {};
   let profile = profileFromDbRow(row as Record<string, unknown>);
 
@@ -236,9 +236,12 @@ export async function fetchActiveCompanySettings(): Promise<ActiveCompanySetting
       "id, name, company_logo_url, brn, vat_number, email, phone, address_line_1, address_line_2, city, country, billing_contact_name, billing_contact_email, billing_contact_phone",
     )
     .eq("id", companyId)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) {
+    throw new Error("Company not found for this workspace.");
+  }
   return companyRowToSettings(data as CompanySettingsRow);
 }
 
@@ -291,9 +294,12 @@ export async function fetchCompanySubscriptionDetails(): Promise<CompanySubscrip
     `,
     )
     .eq("id", companyId)
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) {
+    throw new Error("Company not found for subscription details.");
+  }
 
   const rawPlans = (data as { plans?: PlanEmbed | PlanEmbed[] | null }).plans;
   const planRow: PlanEmbed | null = Array.isArray(rawPlans)

@@ -426,7 +426,7 @@ export function QuotationViewActions({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex w-full max-w-full flex-wrap items-center justify-start gap-1.5 sm:gap-2">
       <Button
         type="button"
         variant="outline"

@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus, Eye, MoreHorizontal } from "lucide-react";
+import { Plus, Eye, MoreHorizontal, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -214,7 +214,10 @@ export default function InvoicesPage() {
           searchValue: (row: InvoiceListRow) => row.status,
         },
         cell: ({ row }) => (
-          <InvoiceStatusBadge status={row.original.status} />
+          <InvoiceStatusBadge
+            status={row.original.status}
+            dueDate={row.original.dueDate}
+          />
         ),
       },
       {
@@ -261,6 +264,16 @@ export default function InvoicesPage() {
               >
                 <Eye className="mr-2 h-4 w-4" />
                 View
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  router.push(
+                    `/app/invoices/new?duplicateFrom=${encodeURIComponent(row.original.id)}`
+                  )
+                }
+              >
+                <Copy className="mr-2 h-4 w-4" />
+                Duplicate
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -365,7 +378,7 @@ export default function InvoicesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="unpaid">Overdue</SelectItem>
+                <SelectItem value="unpaid">Unpaid</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>

@@ -41,7 +41,7 @@ export function AppTopbar() {
   );
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 w-full shrink-0 items-center gap-2 border-b border-border bg-card/95 text-sm backdrop-blur supports-[backdrop-filter]:bg-card/60">
+    <header className="print:hidden sticky top-0 z-40 flex h-14 w-full shrink-0 items-center gap-2 border-b border-border bg-card/95 text-sm backdrop-blur supports-[backdrop-filter]:bg-card/60">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 sm:gap-2 sm:px-3">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -80,12 +80,12 @@ export function AppTopbar() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-          <h1 className="min-w-0 flex-1 truncate text-base font-semibold leading-none tracking-tight text-foreground">
+        <div className="flex min-w-0 flex-1 items-start gap-2 sm:gap-3">
+          <h1 className="min-w-0 flex-1 truncate pt-0.5 text-base font-semibold leading-none tracking-tight text-foreground">
             {pageTitle}
           </h1>
           {pageActions ? (
-            <div className="flex max-w-[min(100%,52vw)] shrink-0 flex-wrap items-center justify-end gap-2 sm:max-w-[min(100%,40rem)] md:flex-nowrap [&_button]:whitespace-nowrap [&_button]:!rounded-sm [&_a]:!rounded-sm">
+            <div className="flex min-w-0 max-w-full flex-[1.25] basis-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2 sm:flex-none sm:max-w-[min(100%,42rem)] [&_button]:!rounded-sm [&_a]:!rounded-sm">
               {pageActions}
             </div>
           ) : null}

@@ -179,19 +179,35 @@ export default function SalesOrdersPage() {
         cell: ({ row }) => formatDate(row.original.validUntil),
       },
       {
-        id: "status",
-        accessorFn: (r) => r.status,
+        id: "fulfillmentStatus",
+        accessorFn: (r) => r.fulfillmentStatus,
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Status" />
+          <DataTableColumnHeader
+            column={column}
+            title="Fulfillment status"
+          />
         ),
         meta: {
           searchValue: (row: SalesOrderListRow) =>
-            `${row.status} ${row.fulfillmentStatus}`,
+            `${row.status} ${row.fulfillmentStatus} ${row.paymentStatus}`,
         },
         cell: ({ row }) => (
           <SalesOrderFulfillmentStatusBadge
             status={row.original.fulfillmentStatus}
           />
+        ),
+      },
+      {
+        id: "paymentStatus",
+        accessorFn: (r) => r.paymentStatus,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Payment status" />
+        ),
+        meta: {
+          searchValue: (row: SalesOrderListRow) => row.paymentStatus,
+        },
+        cell: ({ row }) => (
+          <SalesOrderPaymentStatusBadge status={row.original.paymentStatus} />
         ),
       },
       {
@@ -239,14 +255,16 @@ export default function SalesOrdersPage() {
                   <Eye className="mr-2 h-4 w-4" />
                   View
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() =>
-                    router.push(`/app/sales-orders/${so.id}/edit`)
-                  }
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit
-                </DropdownMenuItem>
+                {so.fulfillmentStatus === "new" ? (
+                  <DropdownMenuItem
+                    onClick={() =>
+                      router.push(`/app/sales-orders/${so.id}/edit`)
+                    }
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem onClick={() => handleDuplicate(so.id)}>
                   <Copy className="mr-2 h-4 w-4" />
                   Duplicate (prefill new)

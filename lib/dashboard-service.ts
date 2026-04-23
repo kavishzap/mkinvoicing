@@ -2,14 +2,16 @@ import { listInvoices } from "@/lib/invoices-service";
 import { listExpenses } from "@/lib/expenses-service";
 import { listCustomers } from "@/lib/customers-service";
 import { listSuppliers } from "@/lib/suppliers-service";
-import { listCustomerCredits } from "@/lib/customer-credits-service";
+import { listPurchaseInvoices } from "@/lib/purchase-invoices-service";
 
 export type DashboardStats = {
   netSales: number;
   totalPaid: number; // Money In (Paid)
   totalOverdue: number; // Money Pending
   totalExpense: number;
-  totalCustomerCredit: number;
+  /** Sum of purchase invoice totals (non-cancelled), same basis as reports */
+  totalPurchases: number;
+  /** Gross profit (paid sales − purchases) minus operating expenses */
   profitableIncome: number;
   customerCount: number;
   supplierCount: number;
@@ -29,13 +31,13 @@ export type ExpenseByMonth = {
 };
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const [invResult, expResult, custResult, suppResult, creditRows] =
+  const [invResult, expResult, custResult, suppResult, piResult] =
     await Promise.all([
       listInvoices({ status: "all", pageSize: 5000 }),
       listExpenses({ pageSize: 5000 }),
       listCustomers({ pageSize: 1, includeInactive: true }),
       listSuppliers({ pageSize: 1, includeInactive: true }),
-      listCustomerCredits(),
+      listPurchaseInvoices({ status: "all", pageSize: 5000 }),
     ]);
 
   const totalPaid = invResult.rows
@@ -53,16 +55,26 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     0
   );
 
-  const currency = invResult.rows[0]?.currency || expResult.rows[0]?.currency || "MUR";
-  const totalCustomerCredit = creditRows.reduce((acc, c) => acc + Number(c.balance || 0), 0);
+  const currency =
+    invResult.rows[0]?.currency ||
+    expResult.rows[0]?.currency ||
+    piResult.rows[0]?.currency ||
+    "MUR";
+
+  const totalPurchases = piResult.rows
+    .filter((r) => r.status !== "cancelled")
+    .reduce((acc, r) => acc + Number(r.total || 0), 0);
+
+  const grossProfit = totalPaid - totalPurchases;
+  const profitableIncome = grossProfit - totalExpense;
 
   return {
     netSales,
     totalPaid,
     totalOverdue,
     totalExpense,
-    totalCustomerCredit,
-    profitableIncome: totalPaid - totalExpense,
+    totalPurchases,
+    profitableIncome,
     customerCount: custResult.total,
     supplierCount: suppResult.total,
     currency,

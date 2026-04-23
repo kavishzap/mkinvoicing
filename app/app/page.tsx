@@ -17,7 +17,6 @@ import {
   TrendingUp,
   Users,
   Truck,
-  Coins,
 } from "lucide-react";
 import {
   Bar,
@@ -56,7 +55,7 @@ export default function DashboardPage() {
     totalPaid: number;
     totalOverdue: number;
     totalExpense: number;
-    totalCustomerCredit: number;
+    totalPurchases: number;
     profitableIncome: number;
     customerCount: number;
     supplierCount: number;
@@ -94,7 +93,7 @@ export default function DashboardPage() {
     return (
       <AppPageShell subtitle="See how sales, cash in, and costs look at a glance—then open any module from the sidebar.">
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
             <Card key={i}>
               <CardHeader className="pb-2">
                 <div className="h-5 w-24 bg-muted rounded animate-pulse" />
@@ -191,23 +190,6 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Customer Credit
-            </CardTitle>
-            <Coins className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {formatCurrency(stats.totalCustomerCredit, stats.currency)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Credit owed to customers
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
               Customers
             </CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
@@ -257,7 +239,7 @@ export default function DashboardPage() {
               {formatCurrency(stats.profitableIncome, stats.currency)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Paid − expenses
+              Paid sales − purchases − expenses
             </p>
           </CardContent>
         </Card>

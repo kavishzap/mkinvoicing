@@ -5,7 +5,7 @@ export function AppShellFooter() {
 
   return (
     <footer
-      className="shrink-0 border-t border-border bg-background/95 px-4 py-3 text-center backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      className="print:hidden shrink-0 border-t border-border bg-background/95 px-4 py-3 text-center backdrop-blur supports-[backdrop-filter]:bg-background/80"
       role="contentinfo"
     >
       <p className="text-xs text-muted-foreground">

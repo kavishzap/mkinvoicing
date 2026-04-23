@@ -136,6 +136,11 @@ export function SalesOrderViewActions({
     );
   };
 
+  const canEditSalesOrder =
+    salesOrder != null &&
+    normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status) ===
+      "new";
+
   const renderPdf = async (mode: "download" | "print") => {
     if (busy) return;
     setBusy(true);
@@ -428,53 +433,73 @@ export function SalesOrderViewActions({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex w-full max-w-full flex-wrap items-center justify-start gap-1.5 sm:gap-2">
       <Button
         type="button"
         variant="outline"
-        className="gap-2"
+        size="sm"
+        className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
         disabled={busy}
         onClick={() => renderPdf("download")}
       >
-        <Download className="h-4 w-4" />
-        {busy ? "Generating…" : "Download PDF"}
+        <Download className="h-4 w-4 shrink-0" />
+        <span className="whitespace-nowrap">
+          {busy ? "Generating…" : "Download PDF"}
+        </span>
       </Button>
       <Button
         type="button"
         variant="outline"
-        className="gap-2"
+        size="sm"
+        className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
         disabled={busy}
         onClick={() => renderPdf("print")}
       >
-        <Printer className="h-4 w-4" />
-        Print
+        <Printer className="h-4 w-4 shrink-0" />
+        <span className="whitespace-nowrap">Print</span>
       </Button>
       <Button
         type="button"
         variant="outline"
-        className="gap-2"
+        size="sm"
+        className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
         disabled={busy}
         onClick={handleDuplicate}
       >
-        <Copy className="h-4 w-4" />
-        Duplicate (prefill)
+        <Copy className="h-4 w-4 shrink-0" />
+        <span className="whitespace-nowrap">Duplicate</span>
       </Button>
       <Button
         type="button"
         variant="outline"
-        className="gap-2"
+        size="sm"
+        className="h-auto min-h-8 max-w-full shrink-0 gap-1.5 px-2.5 py-1.5 text-left leading-snug sm:h-9 sm:max-w-[min(100%,20rem)] sm:py-0"
         onClick={handleConvertToInvoice}
         disabled={busy}
+        title="Convert to invoice and mark as paid"
       >
-        <FileText className="h-4 w-4" />
-        Convert to invoice and mark as paid
+        <FileText className="h-4 w-4 shrink-0 sm:mt-0.5" />
+        <span className="min-w-0 sm:whitespace-nowrap">
+          <span className="sm:hidden">Invoice + mark paid</span>
+          <span className="hidden sm:inline">
+            Convert to invoice and mark as paid
+          </span>
+        </span>
       </Button>
-      <Button type="button" variant="outline" className="gap-2" asChild>
-        <Link href={`/app/sales-orders/${salesOrderId}/edit`}>
-          <Edit className="h-4 w-4" />
-          Edit
-        </Link>
-      </Button>
+      {canEditSalesOrder ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
+          asChild
+        >
+          <Link href={`/app/sales-orders/${salesOrderId}/edit`}>
+            <Edit className="h-4 w-4 shrink-0" />
+            <span className="whitespace-nowrap">Edit</span>
+          </Link>
+        </Button>
+      ) : null}
     </div>
   );
 }
