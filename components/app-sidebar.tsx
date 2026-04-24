@@ -4,7 +4,7 @@ import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { initialsFromDisplayName } from "@/lib/user-display";
 import {
@@ -17,6 +17,7 @@ import {
 import { useAppFeatures } from "@/contexts/app-features-context";
 import { useAppAccount } from "@/contexts/app-account-context";
 import { useSidebarCollapse } from "@/contexts/sidebar-collapse-context";
+import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Popover,
@@ -40,7 +41,7 @@ type SidebarProps = {
 
 export function AppSidebar({ className, onNavigate }: SidebarProps) {
   const pathname = usePathname();
-  const { collapsed } = useSidebarCollapse();
+  const { collapsed, toggleCollapsed } = useSidebarCollapse();
   const {
     userChip,
     systemRoleLabel,
@@ -91,14 +92,14 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
           "flex h-14 shrink-0 items-center border-b border-border bg-card",
           narrow && "justify-center px-2",
           onNavigate && "justify-center px-4",
-          !narrow && !onNavigate && "justify-center px-3"
+          !narrow && !onNavigate && "justify-between px-3"
         )}
       >
         <Link
           href="/app"
           className={cn(
             "flex min-w-0 items-center justify-center",
-            !narrow && !onNavigate && "w-full"
+            !narrow && !onNavigate && "flex-1 justify-start"
           )}
           onClick={onNavigate}
         >
@@ -117,6 +118,30 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
             sizes={narrow ? "32px" : "(max-width: 768px) 128px, 136px"}
           />
         </Link>
+        {!onNavigate ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-muted-foreground"
+                onClick={toggleCollapsed}
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-pressed={!collapsed}
+              >
+                {collapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={6}>
+              {collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
       </div>
 
       <nav className="flex flex-1 flex-col min-h-0 px-2 py-2">
@@ -172,8 +197,12 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                   const isActive =
                     item.href === "/app"
                       ? pathname === "/app"
-                      : pathname === item.href ||
-                        pathname?.startsWith(item.href + "/");
+                      : item.href === "/app/inventory"
+                        ? pathname === "/app/inventory" ||
+                          (pathname?.startsWith("/app/inventory/") &&
+                            !pathname?.startsWith("/app/inventory/products"))
+                        : pathname === item.href ||
+                          pathname?.startsWith(item.href + "/");
 
                   const linkClass = cn(
                     "flex items-center rounded-lg py-2 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-accent hover:text-accent-foreground",

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -11,11 +11,6 @@ import {
 } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { AccountPopoverPanel } from "@/components/account-popover-panel";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -24,7 +19,6 @@ import { initialsFromDisplayName } from "@/lib/user-display";
 import { useAppFeatures } from "@/contexts/app-features-context";
 import { useAppAccount } from "@/contexts/app-account-context";
 import { useAppPageActions } from "@/contexts/app-page-actions-context";
-import { useSidebarCollapse } from "@/contexts/sidebar-collapse-context";
 
 export function AppTopbar() {
   const pathname = usePathname() ?? "/app";
@@ -32,7 +26,6 @@ export function AppTopbar() {
   const { actions: pageActions } = useAppPageActions();
   const { userChip, companyName, accountAnchor, setAccountAnchor } =
     useAppAccount();
-  const { collapsed, toggleCollapsed } = useSidebarCollapse();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const pageTitle = useMemo(
@@ -43,29 +36,6 @@ export function AppTopbar() {
   return (
     <header className="print:hidden sticky top-0 z-40 flex h-14 w-full shrink-0 items-center gap-2 border-b border-border bg-card/95 text-sm backdrop-blur supports-[backdrop-filter]:bg-card/60">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 sm:gap-2 sm:px-3">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="hidden h-9 w-9 shrink-0 text-muted-foreground md:inline-flex"
-              onClick={toggleCollapsed}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              aria-pressed={!collapsed}
-            >
-              {collapsed ? (
-                <ChevronRight className="h-4 w-4" />
-              ) : (
-                <ChevronLeft className="h-4 w-4" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" sideOffset={6}>
-            {collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          </TooltipContent>
-        </Tooltip>
-
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <SheetTrigger asChild className="md:hidden shrink-0">
             <Button variant="ghost" size="icon" aria-label="Open navigation menu">

@@ -7,6 +7,7 @@ import {
   FileText,
   LayoutDashboard,
   MessageCircle,
+  Package,
   Package2,
   PackageOpen,
   Receipt,
@@ -24,6 +25,7 @@ export const FEATURE_CODES = {
   dashboard: "dashboard",
   invoices: "invoices",
   quotations: "quotations",
+  products: "products",
   salesOrders: "sales_orders",
   purchaseOrders: "purchase_orders",
   purchaseInvoices: "purchase_invoices",
@@ -105,6 +107,7 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/customers": "Customers",
   "/app/suppliers": "Suppliers",
   "/app/inventory": "Inventory",
+  "/app/inventory/products": "Products",
   "/app/expenses": "Expenses",
   "/app/payroll": "Payroll",
   "/app/customer-credit": "Customer Credit",
@@ -127,6 +130,7 @@ export function getNavDisplayLabel(
 ): string {
   /** Sidebar / shell: inventory module uses this path; DB feature may still be named "Locations". */
   if (item.href === "/app/inventory") return "Inventory";
+  if (item.href === "/app/inventory/products") return "Products";
   const fromDb = featureNameFn(item.requires)?.trim();
   if (fromDb) return fromDb;
   return NAV_LABEL_FALLBACK_BY_HREF[item.href] ?? item.requires;
@@ -143,12 +147,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.invoices,
     href: "/app/invoices",
     icon: FileText,
-    section: "sales",
-  },
-  {
-    requires: FEATURE_CODES.quotations,
-    href: "/app/quotations",
-    icon: ScrollText,
     section: "sales",
   },
   {
@@ -176,6 +174,12 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     section: "purchasing",
   },
   { requires: FEATURE_CODES.suppliers, href: "/app/suppliers", icon: Truck, section: "purchasing" },
+  {
+    requires: FEATURE_CODES.products,
+    href: "/app/inventory/products",
+    icon: Package,
+    section: "operations",
+  },
   {
     requires: FEATURE_CODES.locations,
     href: "/app/inventory",
@@ -251,6 +255,7 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   },
   { prefix: "/app/customers", requires: FEATURE_CODES.customers },
   { prefix: "/app/suppliers", requires: FEATURE_CODES.suppliers },
+  { prefix: "/app/inventory/products", requires: FEATURE_CODES.products },
   { prefix: "/app/inventory", requires: FEATURE_CODES.locations },
   { prefix: "/app/expenses", requires: FEATURE_CODES.expenses },
   { prefix: "/app/payroll", requires: FEATURE_CODES.payroll },
