@@ -515,21 +515,21 @@ export default function EditQuotationPage() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={`${quotationNumber} — Update customer, lines, or pricing, then save.`}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={
-              quotationId ? `/app/quotations/${quotationId}` : "/app/quotations"
-            }
-          >
-            <Button variant="ghost" size="icon" aria-label="Back to quotation">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={saveQuotation} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save changes"}
+      leading={
+        <Link
+          href={
+            quotationId ? `/app/quotations/${quotationId}` : "/app/quotations"
+          }
+        >
+          <Button variant="ghost" size="icon" aria-label="Back to quotation">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={saveQuotation} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save changes"}
+        </Button>
       }
     >
       <div className="grid lg:grid-cols-2 gap-6">

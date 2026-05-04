@@ -1,18 +1,35 @@
 import { supabase } from "@/lib/supabaseClient";
 import { isUserSystemAdmin } from "@/lib/user-system-role";
 
-const SESSION_KEY = "mkinv:active_company_id";
+/** `sessionStorage` key for the tenant id chosen at login (company code). */
+export const ACTIVE_COMPANY_ID_STORAGE_KEY = "mkinv:active_company_id";
 const SESSION_USER_KEY = "mkinv:active_company_user_id";
+
+/** Fired on the active window when `setActiveCompanyCache` / `clearActiveCompanyCache` runs. */
+export const ACTIVE_COMPANY_CHANGED_EVENT = "mkinv:active-company-changed";
 
 let cachedCompanyId: string | null = null;
 let cachedUserId: string | null = null;
 let inFlight: Promise<string | null> | null = null;
 
+function dispatchActiveCompanyChanged(companyId: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent(ACTIVE_COMPANY_CHANGED_EVENT, {
+        detail: { companyId },
+      })
+    );
+  } catch {
+    // ignore
+  }
+}
+
 function readSessionCache(): { companyId: string | null; userId: string | null } {
   if (typeof window === "undefined") return { companyId: null, userId: null };
   try {
     return {
-      companyId: window.sessionStorage.getItem(SESSION_KEY),
+      companyId: window.sessionStorage.getItem(ACTIVE_COMPANY_ID_STORAGE_KEY),
       userId: window.sessionStorage.getItem(SESSION_USER_KEY),
     };
   } catch {
@@ -24,15 +41,20 @@ function writeSessionCache(userId: string, companyId: string | null) {
   if (typeof window === "undefined") return;
   try {
     if (companyId) {
-      window.sessionStorage.setItem(SESSION_KEY, companyId);
+      window.sessionStorage.setItem(ACTIVE_COMPANY_ID_STORAGE_KEY, companyId);
       window.sessionStorage.setItem(SESSION_USER_KEY, userId);
     } else {
-      window.sessionStorage.removeItem(SESSION_KEY);
+      window.sessionStorage.removeItem(ACTIVE_COMPANY_ID_STORAGE_KEY);
       window.sessionStorage.removeItem(SESSION_USER_KEY);
     }
   } catch {
     // ignore storage errors
   }
+}
+
+function clearSessionTenant(userId: string) {
+  writeSessionCache(userId, null);
+  dispatchActiveCompanyChanged(null);
 }
 
 function normalizeCompanyCode(code: string): string {
@@ -42,6 +64,44 @@ function normalizeCompanyCode(code: string): string {
 /** Escape `%` / `_` / `\` so `ilike` is treated as exact match, not a pattern. */
 function escapeIlikeExact(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/** True when this user may use `companyId` as the active tenant (members, owners, admins). */
+async function userCanAccessCompany(
+  userId: string,
+  companyId: string
+): Promise<boolean> {
+  if (!companyId) return false;
+
+  if (await isUserSystemAdmin(userId)) {
+    const { data, error } = await supabase
+      .from("companies")
+      .select("id")
+      .eq("id", companyId)
+      .eq("is_active", true)
+      .maybeSingle();
+    return !error && !!data;
+  }
+
+  const { data: mem } = await supabase
+    .from("company_users")
+    .select("company_id")
+    .eq("user_id", userId)
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (mem) return true;
+
+  const { data: owned } = await supabase
+    .from("companies")
+    .select("id")
+    .eq("id", companyId)
+    .eq("owner_user_id", userId)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  return !!owned;
 }
 
 /**
@@ -144,6 +204,7 @@ export function setActiveCompanyCache(userId: string, companyId: string): void {
   cachedUserId = userId;
   cachedCompanyId = companyId;
   writeSessionCache(userId, companyId);
+  dispatchActiveCompanyChanged(companyId);
 }
 
 /** Clears the cached active company (call on login/logout/switch). */
@@ -153,12 +214,13 @@ export function clearActiveCompanyCache(): void {
   inFlight = null;
   if (typeof window !== "undefined") {
     try {
-      window.sessionStorage.removeItem(SESSION_KEY);
+      window.sessionStorage.removeItem(ACTIVE_COMPANY_ID_STORAGE_KEY);
       window.sessionStorage.removeItem(SESSION_USER_KEY);
     } catch {
       // ignore storage errors
     }
   }
+  dispatchActiveCompanyChanged(null);
 }
 
 async function resolveActiveCompanyId(): Promise<string | null> {
@@ -166,52 +228,109 @@ async function resolveActiveCompanyId(): Promise<string | null> {
   if (authErr || !auth?.user?.id) return null;
   const userId = auth.user.id;
 
-  // Cache invalidates if the logged-in user changed
   if (cachedUserId && cachedUserId !== userId) {
     cachedCompanyId = null;
-  }
-  const session = readSessionCache();
-  if (session.userId === userId && session.companyId) {
-    cachedCompanyId = session.companyId;
-    cachedUserId = userId;
-    return session.companyId;
+    cachedUserId = null;
   }
 
-  const { data: membership } = await supabase
+  const session = readSessionCache();
+  if (session.userId === userId && session.companyId) {
+    if (await userCanAccessCompany(userId, session.companyId)) {
+      cachedCompanyId = session.companyId;
+      cachedUserId = userId;
+      writeSessionCache(userId, session.companyId);
+      return session.companyId;
+    }
+    clearSessionTenant(userId);
+    cachedCompanyId = null;
+  }
+
+  if (cachedUserId === userId && cachedCompanyId) {
+    if (await userCanAccessCompany(userId, cachedCompanyId)) {
+      cachedUserId = userId;
+      writeSessionCache(userId, cachedCompanyId);
+      return cachedCompanyId;
+    }
+    cachedCompanyId = null;
+  }
+
+  const { data: memberships, error: memErr } = await supabase
     .from("company_users")
     .select("company_id")
     .eq("user_id", userId)
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
+    .eq("is_active", true);
 
-  let companyId: string | null = (membership?.company_id as string | undefined) ?? null;
-
-  if (!companyId) {
-    const { data: owned } = await supabase
-      .from("companies")
-      .select("id")
-      .eq("owner_user_id", userId)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    companyId = (owned?.id as string | undefined) ?? null;
+  if (memErr) {
+    cachedUserId = userId;
+    cachedCompanyId = null;
+    clearSessionTenant(userId);
+    return null;
   }
 
+  const ids = new Set<string>();
+  for (const m of memberships ?? []) {
+    if (m.company_id) ids.add(m.company_id as string);
+  }
+
+  const { data: ownedRows, error: ownErr } = await supabase
+    .from("companies")
+    .select("id")
+    .eq("owner_user_id", userId)
+    .eq("is_active", true);
+
+  if (ownErr) {
+    cachedUserId = userId;
+    cachedCompanyId = null;
+    clearSessionTenant(userId);
+    return null;
+  }
+
+  for (const o of ownedRows ?? []) {
+    if (o.id) ids.add(o.id as string);
+  }
+
+  const list = [...ids];
   cachedUserId = userId;
-  cachedCompanyId = companyId;
-  writeSessionCache(userId, companyId);
-  return companyId;
+
+  if (list.length === 0) {
+    cachedCompanyId = null;
+    clearSessionTenant(userId);
+    return null;
+  }
+
+  if (list.length === 1) {
+    const only = list[0];
+    cachedCompanyId = only;
+    writeSessionCache(userId, only);
+    dispatchActiveCompanyChanged(only);
+    return only;
+  }
+
+  // Several tenants and no valid session: do not guess (avoids wrong `company_id` on fetches).
+  cachedCompanyId = null;
+  clearSessionTenant(userId);
+  return null;
 }
 
 /**
- * Resolves the current user's primary company for multi-tenant tables.
- * Uses session cache from login (`setActiveCompanyCache`), else first active
- * `company_users` row, else first owned `companies` row. System admins rely on
- * login with a company code so the session cache is set.
+ * Resolves the current user's active company for multi-tenant tables (`sales_orders`, etc.).
+ * Prefers the session from login (`setActiveCompanyCache`), validates it against membership,
+ * then falls back to the sole accessible company when the user has exactly one tenant.
  */
 export async function getActiveCompanyId(): Promise<string | null> {
-  if (cachedCompanyId) return cachedCompanyId;
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !auth?.user?.id) return null;
+  const userId = auth.user.id;
+
+  if (cachedUserId && cachedUserId !== userId) {
+    cachedCompanyId = null;
+    cachedUserId = null;
+  }
+
+  if (cachedUserId === userId && cachedCompanyId) {
+    return cachedCompanyId;
+  }
+
   if (inFlight) return inFlight;
   inFlight = resolveActiveCompanyId().finally(() => {
     inFlight = null;
@@ -227,7 +346,7 @@ export async function requireActiveCompanyId(): Promise<string> {
   const companyId = await getActiveCompanyId();
   if (!companyId) {
     throw new Error(
-      "No company found for this account. Please contact your administrator to be assigned to a company."
+      "No active company for this session. Sign in again with your company code, or ask your administrator to assign you to a single company."
     );
   }
   return companyId;

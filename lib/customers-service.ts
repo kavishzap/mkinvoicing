@@ -40,6 +40,8 @@ const COLUMNS =
 export async function listCustomers(opts?: {
   search?: string;
   includeInactive?: boolean;
+  /** When set, only rows of this customer type. */
+  type?: "company" | "individual";
   page?: number; // 1-based
   pageSize?: number; // default 10
 }): Promise<{ rows: CustomerRow[]; total: number }> {
@@ -58,6 +60,10 @@ export async function listCustomers(opts?: {
 
   if (!opts?.includeInactive) {
     q = q.eq("is_active", true);
+  }
+
+  if (opts?.type) {
+    q = q.eq("type", opts.type);
   }
 
   const term = opts?.search?.trim();
@@ -79,6 +85,20 @@ export async function listCustomers(opts?: {
     rows: (data ?? []).map(mapRow),
     total: count ?? 0,
   };
+}
+
+/** One customer for the active company, or null if not found / wrong tenant. */
+export async function getCustomer(id: string): Promise<CustomerRow | null> {
+  const companyId = await requireActiveCompanyId();
+  const { data, error } = await supabase
+    .from("customers")
+    .select(COLUMNS)
+    .eq("id", id)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return mapRow(data);
 }
 
 /**

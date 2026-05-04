@@ -350,6 +350,83 @@ export type Database = {
           },
         ]
       }
+      deliveries: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string
+          driver_user_id: string
+          id: string
+          notes: string | null
+          status: Database["public"]["Enums"]["delivery_note_status"]
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by: string
+          driver_user_id: string
+          id?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["delivery_note_status"]
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          driver_user_id?: string
+          id?: string
+          notes?: string | null
+          status?: Database["public"]["Enums"]["delivery_note_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deliveries_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      delivery_sales_orders: {
+        Row: {
+          created_at: string
+          delivery_id: string
+          id: string
+          sales_order_id: string
+        }
+        Insert: {
+          created_at?: string
+          delivery_id: string
+          id?: string
+          sales_order_id: string
+        }
+        Update: {
+          created_at?: string
+          delivery_id?: string
+          id?: string
+          sales_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_sales_orders_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "deliveries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_sales_orders_sales_order_id_fkey"
+            columns: ["sales_order_id"]
+            isOneToOne: false
+            referencedRelation: "sales_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_advances: {
         Row: {
           amount: number
@@ -1985,13 +2062,13 @@ export type Database = {
           customer_id: string | null
           discount_amount: number
           discount_type: string | null
-          fulfillment_status: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           from_snapshot: Json
+          fulfillment_status: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           id: string
           issue_date: string
           notes: string | null
           number: string
-          payment_status: string
+          payment_status: Database["public"]["Enums"]["sales_order_payment_status"]
           shipping_amount: number
           status: Database["public"]["Enums"]["sales_order_status"]
           subtotal: number
@@ -2012,12 +2089,13 @@ export type Database = {
           customer_id?: string | null
           discount_amount?: number
           discount_type?: string | null
-          fulfillment_status?: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           from_snapshot: Json
+          fulfillment_status?: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           id?: string
           issue_date?: string
           notes?: string | null
           number: string
+          payment_status?: Database["public"]["Enums"]["sales_order_payment_status"]
           shipping_amount?: number
           status?: Database["public"]["Enums"]["sales_order_status"]
           subtotal?: number
@@ -2031,20 +2109,20 @@ export type Database = {
         Update: {
           bill_to_snapshot?: Json
           client_snapshot?: Json | null
-          company_id?: string | null
+          company_id?: string
           created_at?: string
           created_from_quotation_id?: string | null
           currency?: string
           customer_id?: string | null
           discount_amount?: number
           discount_type?: string | null
-          fulfillment_status?: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           from_snapshot?: Json
+          fulfillment_status?: Database["public"]["Enums"]["sales_order_fulfillment_status"]
           id?: string
           issue_date?: string
           notes?: string | null
           number?: string
-          payment_status?: string
+          payment_status?: Database["public"]["Enums"]["sales_order_payment_status"]
           shipping_amount?: number
           status?: Database["public"]["Enums"]["sales_order_status"]
           subtotal?: number
@@ -2075,83 +2153,6 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      deliveries: {
-        Row: {
-          id: string
-          company_id: string
-          driver_user_id: string
-          created_by: string
-          notes: string | null
-          status: "new" | "delivered_to_driver" | "completed"
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          company_id: string
-          driver_user_id: string
-          created_by: string
-          notes?: string | null
-          status?: "new" | "delivered_to_driver" | "completed"
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          company_id?: string
-          driver_user_id?: string
-          created_by?: string
-          notes?: string | null
-          status?: "new" | "delivered_to_driver" | "completed"
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "deliveries_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      delivery_sales_orders: {
-        Row: {
-          id: string
-          delivery_id: string
-          sales_order_id: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          delivery_id: string
-          sales_order_id: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          delivery_id?: string
-          sales_order_id?: string
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "delivery_sales_orders_delivery_id_fkey"
-            columns: ["delivery_id"]
-            isOneToOne: false
-            referencedRelation: "deliveries"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "delivery_sales_orders_sales_order_id_fkey"
-            columns: ["sales_order_id"]
-            isOneToOne: false
-            referencedRelation: "sales_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -2694,6 +2695,14 @@ export type Database = {
       }
     }
     Functions: {
+      _update_sales_order_fulfillment_for_company_internal: {
+        Args: {
+          p_company_id: string
+          p_fulfillment_status: string
+          p_sales_order_id: string
+        }
+        Returns: undefined
+      }
       create_company: {
         Args: {
           p_billing_contact_email?: string
@@ -2738,10 +2747,211 @@ export type Database = {
         Args: { p_items: Json; p_sales_order: Json }
         Returns: string
       }
+      get_customer_for_company: {
+        Args: { p_company_id: string; p_customer_id: string }
+        Returns: {
+          address_line_1: string | null
+          address_line_2: string | null
+          city: string | null
+          company_id: string | null
+          company_name: string | null
+          contact_name: string | null
+          country: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          is_active: boolean
+          phone: string | null
+          postal: string | null
+          street: string | null
+          type: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "customers"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       get_plans: { Args: never; Returns: Json }
+      get_product_for_company: {
+        Args: { p_company_id: string; p_product_id: string }
+        Returns: {
+          company_id: string
+          cost_price: number
+          created_at: string
+          currency: string
+          description: string | null
+          id: string
+          image_base64: string | null
+          image_mime_type: string | null
+          is_active: boolean
+          name: string
+          sale_price: number
+          sku: string | null
+          unit: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "products"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_customers_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          address_line_1: string | null
+          address_line_2: string | null
+          city: string | null
+          company_id: string | null
+          company_name: string | null
+          contact_name: string | null
+          country: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          is_active: boolean
+          phone: string | null
+          postal: string | null
+          street: string | null
+          type: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "customers"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_products_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          company_id: string
+          cost_price: number
+          created_at: string
+          currency: string
+          description: string | null
+          id: string
+          image_base64: string | null
+          image_mime_type: string | null
+          is_active: boolean
+          name: string
+          sale_price: number
+          sku: string | null
+          unit: string
+          updated_at: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "products"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_sales_orders_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          bill_to_snapshot: Json
+          client_snapshot: Json | null
+          company_id: string
+          created_at: string
+          created_from_quotation_id: string | null
+          currency: string
+          customer_id: string | null
+          discount_amount: number
+          discount_type: string | null
+          from_snapshot: Json
+          fulfillment_status: Database["public"]["Enums"]["sales_order_fulfillment_status"]
+          id: string
+          issue_date: string
+          notes: string | null
+          number: string
+          payment_status: Database["public"]["Enums"]["sales_order_payment_status"]
+          shipping_amount: number
+          status: Database["public"]["Enums"]["sales_order_status"]
+          subtotal: number
+          tax_total: number
+          terms: string | null
+          total: number
+          updated_at: string
+          user_id: string
+          valid_until: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "sales_orders"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_sales_orders_for_company_view: {
+        Args: {
+          p_company_id: string
+          p_fulfillment_status?: string
+          p_status?: string
+        }
+        Returns: {
+          bill_to_snapshot: Json
+          currency: string
+          customer_address: string
+          customer_city: string
+          customer_id: string
+          customer_name: string
+          customer_phone: string
+          fulfillment_status: string
+          id: string
+          issue_date: string
+          item_summary: string
+          line_items: Json
+          notes: string
+          number: string
+          payment_status: string
+          status: string
+          subtotal: number
+          total: number
+        }[]
+      }
       refresh_purchase_invoice_overdue_statuses: {
         Args: never
         Returns: number
+      }
+      update_sales_order_for_company: {
+        Args: {
+          p_address: string
+          p_company_id: string
+          p_currency: string
+          p_customer_id: string
+          p_items: Json
+          p_phone: string
+          p_sales_order_id: string
+        }
+        Returns: undefined
+      }
+      update_sales_order_fulfillment_for_company: {
+        Args: {
+          p_company_id: string
+          p_fulfillment_status: string
+          p_sales_order_id: string
+        }
+        Returns: undefined
+      }
+      update_sales_order_notes_for_company: {
+        Args: {
+          p_company_id: string
+          p_notes: string
+          p_sales_order_id: string
+        }
+        Returns: undefined
       }
     }
     Enums: {
@@ -2771,11 +2981,12 @@ export type Database = {
         | "active"
       sales_order_fulfillment_status:
         | "new"
-        | "delivery note created"
         | "delivered to driver"
         | "delivered to customer"
         | "cancelled"
         | "Rescheduled"
+        | "delivery note created"
+      sales_order_payment_status: "unpaid" | "partial paid" | "paid"
       sales_order_status: "active" | "expired"
       subscription_plan: "monthly_100" | "yearly_1000"
       system_role: "admin" | "owner" | "member"
@@ -2943,12 +3154,13 @@ export const Constants = {
       ],
       sales_order_fulfillment_status: [
         "new",
-        "delivery note created",
         "delivered to driver",
         "delivered to customer",
         "cancelled",
         "Rescheduled",
+        "delivery note created",
       ],
+      sales_order_payment_status: ["unpaid", "partial paid", "paid"],
       sales_order_status: ["active", "expired"],
       subscription_plan: ["monthly_100", "yearly_1000"],
       system_role: ["admin", "owner", "member"],

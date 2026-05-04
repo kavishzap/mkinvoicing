@@ -140,15 +140,17 @@ export default function DeliveryDetailPage() {
   return (
     <AppPageShell
       className="max-w-[1800px]"
+      leading={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to delivery notes">
+          <Link href="/app/delivery-notes">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+      }
       subtitle={`Created ${fmtWhen(delivery.createdAt)} · Driver ${delivery.driverDisplay}`}
-      actions={
-        <div className="flex items-center gap-2">
+      belowSubtitle={
+        <div className="print:hidden">
           <DeliveryNoteViewActions deliveryId={id} delivery={delivery} />
-          <Button variant="ghost" size="icon" asChild aria-label="Back">
-            <Link href="/app/delivery-notes">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
         </div>
       }
     >

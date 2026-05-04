@@ -361,6 +361,7 @@ export default function PurchaseInvoicesPage() {
           columns={columns}
           data={rows}
           manualFiltering
+          onRowClick={(r) => router.push(`/app/purchase-invoices/${r.id}`)}
           searchPlaceholder="Search by PINV # or supplier…"
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}

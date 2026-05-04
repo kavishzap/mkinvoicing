@@ -339,13 +339,15 @@ export default function NewInventoryProductPage() {
   return (
     <AppPageShell
       subtitle="Create a catalogue item and optional per-location stock."
+      leading={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to products">
+          <Link href="/app/inventory/products">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" asChild aria-label="Back to products">
-            <Link href="/app/inventory/products">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
           <Button variant="outline" onClick={() => router.push("/app/inventory/products")}>
             Cancel
           </Button>

@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Plus, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,6 @@ import {
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
-import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
@@ -121,6 +120,7 @@ type FieldErrors = Partial<
 
 function NewInvoicePageContent() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [convertFromQuotationId] = useState(() =>
     searchParams.get("convertFromQuotation")
@@ -137,6 +137,12 @@ function NewInvoicePageContent() {
   const { toast } = useToast();
   const convertHandledRef = useRef(false);
 
+  const returnToNewCustomer = useMemo(() => {
+    const qs = searchParams.toString();
+    const p = pathname ?? "/app/invoices/new";
+    return encodeURIComponent(qs ? `${p}?${qs}` : p);
+  }, [pathname, searchParams]);
+
   // ===== Load profile & preferences from Supabase
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -145,8 +151,6 @@ function NewInvoicePageContent() {
 
   // ===== Customers from Supabase
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
-  const [isCreateCustomerDialogOpen, setIsCreateCustomerDialogOpen] =
-    useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -762,17 +766,17 @@ function NewInvoicePageContent() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={headerSubtitle}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link href="/app/invoices">
-            <Button variant="ghost" size="icon" aria-label="Back to invoices">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={doCreateUnpaid} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save & View"}
+      leading={
+        <Link href="/app/invoices">
+          <Button variant="ghost" size="icon" aria-label="Back to invoices">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={doCreateUnpaid} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save & View"}
+        </Button>
       }
     >
       <Card>
@@ -803,10 +807,14 @@ function NewInvoicePageContent() {
                 variant="outline"
                 size="icon"
                 className="h-9 w-9 shrink-0"
-                aria-label="Add new customer"
-                onClick={() => setIsCreateCustomerDialogOpen(true)}
+                asChild
+                aria-label="Add new customer (full page)"
               >
-                <Plus className="h-4 w-4" />
+                <Link
+                  href={`/app/customers/new?returnTo=${returnToNewCustomer}`}
+                >
+                  <Plus className="h-4 w-4" />
+                </Link>
               </Button>
             </div>
           </div>
@@ -1224,7 +1232,24 @@ function NewInvoicePageContent() {
       {/* Customer Selection Dialog (Supabase-powered) */}
       <Dialog
         open={isCustomerDialogOpen}
-        onOpenChange={setIsCustomerDialogOpen}
+        onOpenChange={(open) => {
+          setIsCustomerDialogOpen(open);
+          if (open) {
+            void (async () => {
+              try {
+                const { rows } = await listCustomers({
+                  search: "",
+                  includeInactive: false,
+                  page: 1,
+                  pageSize: 100,
+                });
+                setCustomers(rows);
+              } catch {
+                /* ignore */
+              }
+            })();
+          }
+        }}
       >
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
@@ -1269,7 +1294,9 @@ function NewInvoicePageContent() {
               {customers.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
                   <p>No customers found</p>
-                  <Link href="/app/customers">
+                  <Link
+                    href={`/app/customers/new?returnTo=${returnToNewCustomer}`}
+                  >
                     <Button variant="link" className="mt-2">
                       Add a new customer
                     </Button>
@@ -1280,26 +1307,6 @@ function NewInvoicePageContent() {
           </div>
         </DialogContent>
       </Dialog>
-
-      <CustomerQuickCreateDialog
-        open={isCreateCustomerDialogOpen}
-        onOpenChange={setIsCreateCustomerDialogOpen}
-        onCreated={async (row) => {
-          handleSelectCustomer(row);
-          setCustomerSearch("");
-          try {
-            const { rows } = await listCustomers({
-              search: "",
-              includeInactive: false,
-              page: 1,
-              pageSize: 50,
-            });
-            setCustomers(rows);
-          } catch {
-            /* ignore */
-          }
-        }}
-      />
     </AppPageShell>
   );
 }

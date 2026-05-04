@@ -11,9 +11,11 @@ import {
   MoreHorizontal,
   Copy,
   FileText,
+  ClipboardList,
+  BadgeCheck,
+  TimerOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -40,15 +42,25 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
+import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
+import { FeatureEmptyState } from "@/components/feature-empty-state";
+import type { FeatureKpiItem } from "@/components/feature-kpi-strip";
+import { FeatureListSection } from "@/components/feature-list-section";
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   listSalesOrders,
   deleteSalesOrder,
+  expireStaleSalesOrders,
+  getSalesOrderKpiCounts,
   type SalesOrderListRow,
   type SalesOrderStatus,
 } from "@/lib/sales-orders-service";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+} from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
 
 export default function SalesOrdersPage() {
@@ -59,35 +71,70 @@ export default function SalesOrdersPage() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<SalesOrderStatus | "all">(
-    "all"
+    "all",
   );
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** Bumped when the active tenant changes so `listSalesOrders` re-runs for the right `company_id`. */
+  const [activeCompanyScope, setActiveCompanyScope] = useState(0);
+  /** Bumped after mutations so KPI counts stay in sync. */
+  const [kpiRev, setKpiRev] = useState(0);
+  const [kpiLoading, setKpiLoading] = useState(true);
+  const [kpiTotal, setKpiTotal] = useState(0);
+  const [kpiActive, setKpiActive] = useState(0);
+  const [kpiExpired, setKpiExpired] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setActiveCompanyScope((n) => n + 1);
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
 
   const hasActiveFilters = useMemo(
     () => searchQuery.trim() !== "" || statusFilter !== "all",
-    [searchQuery, statusFilter]
+    [searchQuery, statusFilter],
   );
 
   useEffect(() => {
     let cancelled = false;
+    setKpiLoading(true);
+    setIsLoading(true);
     (async () => {
       try {
-        setIsLoading(true);
-        const { rows, total } = await listSalesOrders({
-          search: searchQuery,
-          status: statusFilter,
-          page: currentPage,
-          pageSize: itemsPerPage,
-        });
-        if (!cancelled) {
-          setRows(rows);
-          setTotal(total);
-        }
+        await expireStaleSalesOrders();
+        const [kpis, listRes] = await Promise.all([
+          getSalesOrderKpiCounts(),
+          listSalesOrders({
+            search: debouncedSearch || undefined,
+            status: statusFilter,
+            page: currentPage,
+            pageSize: itemsPerPage,
+            skipExpireStale: true,
+          }),
+        ]);
+        if (cancelled) return;
+        setKpiTotal(kpis.total);
+        setKpiActive(kpis.active);
+        setKpiExpired(kpis.expired);
+        setRows(listRes.rows);
+        setTotal(listRes.total);
       } catch (e: unknown) {
         if (!cancelled) {
           toast({
@@ -95,28 +142,63 @@ export default function SalesOrdersPage() {
             description: e instanceof Error ? e.message : "Please try again.",
             variant: "destructive",
           });
+          setKpiTotal(0);
+          setKpiActive(0);
+          setKpiExpired(0);
+          setRows([]);
+          setTotal(0);
         }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setKpiLoading(false);
+          setIsLoading(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [searchQuery, statusFilter, currentPage, itemsPerPage, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
+  }, [
+    debouncedSearch,
+    statusFilter,
+    currentPage,
+    itemsPerPage,
+    activeCompanyScope,
+    kpiRev,
+  ]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, itemsPerPage]);
+  }, [debouncedSearch, statusFilter, itemsPerPage, activeCompanyScope]);
 
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(total / itemsPerPage)),
-    [total, itemsPerPage]
+  const kpiItems = useMemo<FeatureKpiItem[]>(
+    () => [
+      {
+        label: "Total sales orders",
+        value: kpiTotal,
+        icon: ClipboardList,
+        valueLabel: String(kpiTotal),
+      },
+      {
+        label: "Active",
+        value: kpiActive,
+        icon: BadgeCheck,
+        valueLabel: String(kpiActive),
+      },
+      {
+        label: "Expired",
+        value: kpiExpired,
+        icon: TimerOff,
+        valueLabel: String(kpiExpired),
+      },
+    ],
+    [kpiTotal, kpiActive, kpiExpired],
   );
 
   const formatCurrency = (amount: number, currency: string) =>
     new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
-      amount
+      amount,
     );
 
   const formatDate = (dateString: string) =>
@@ -164,7 +246,7 @@ export default function SalesOrdersPage() {
         id: "issueDate",
         accessorFn: (r) => new Date(r.issueDate).getTime(),
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Issue Date" />
+          <DataTableColumnHeader column={column} title="Issue date" />
         ),
         meta: { searchValue: (row: SalesOrderListRow) => row.issueDate },
         cell: ({ row }) => formatDate(row.original.issueDate),
@@ -173,7 +255,7 @@ export default function SalesOrdersPage() {
         id: "validUntil",
         accessorFn: (r) => new Date(r.validUntil).getTime(),
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Valid Until" />
+          <DataTableColumnHeader column={column} title="Valid until" />
         ),
         meta: { searchValue: (row: SalesOrderListRow) => row.validUntil },
         cell: ({ row }) => formatDate(row.original.validUntil),
@@ -248,9 +330,7 @@ export default function SalesOrdersPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
-                  onClick={() =>
-                    router.push(`/app/sales-orders/${so.id}`)
-                  }
+                  onClick={() => router.push(`/app/sales-orders/${so.id}`)}
                 >
                   <Eye className="mr-2 h-4 w-4" />
                   View
@@ -305,6 +385,7 @@ export default function SalesOrdersPage() {
       setRows((r) => r.filter((x) => x.id !== deleteId));
       setTotal((t) => Math.max(0, t - 1));
       setDeleteId(null);
+      setKpiRev((n) => n + 1);
     } catch (e: unknown) {
       toast({
         title: "Delete failed",
@@ -319,54 +400,11 @@ export default function SalesOrdersPage() {
   const salesOrderSubtitle =
     "Confirm what you’ll deliver or bill next—then turn orders into invoices when work is done.";
 
-  if (isLoading && rows.length === 0) {
-    return (
-      <AppPageShell
-        subtitle={salesOrderSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/sales-orders/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Sales Order
-          </Button>
-        }
-      >
-        <Card className="p-6">
-          <div className="h-40 rounded bg-muted animate-pulse" />
-        </Card>
-      </AppPageShell>
-    );
-  }
+  const showEmptyZero = !isLoading && total === 0 && !hasActiveFilters;
+  const showPagination = !showEmptyZero;
 
-  if (!isLoading && total === 0 && !hasActiveFilters) {
-    return (
-      <AppPageShell
-        subtitle={salesOrderSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/sales-orders/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Sales Order
-          </Button>
-        }
-      >
-        <Card className="p-12 text-center text-muted-foreground">
-          <p className="text-base font-medium text-foreground mb-2">
-            No sales orders yet
-          </p>
-          <p className="mb-4">Create your first sales order to get started.</p>
-          <Button onClick={() => router.push("/app/sales-orders/new")}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Sales Order
-          </Button>
-        </Card>
-      </AppPageShell>
-    );
-  }
+  const listDescription =
+    "Newest orders first. Click a row to open the sales order, then use Edit on the detail page when the order is still in New fulfillment.";
 
   return (
     <AppPageShell
@@ -377,104 +415,104 @@ export default function SalesOrdersPage() {
           className="gap-2"
         >
           <Plus className="h-4 w-4" />
-          Create Sales Order
+          Create sales order
         </Button>
       }
     >
-      <Card className="p-6">
-        <DataTable
-          columns={columns}
-          data={rows}
-          manualFiltering
-          searchPlaceholder="Search by order # or client…"
-          searchValue={searchQuery}
-          onSearchChange={setSearchQuery}
-          toolbarLeft={
-            <Select
-              value={statusFilter}
-              onValueChange={(v) =>
-                setStatusFilter(v as SalesOrderStatus | "all")
-              }
-            >
-              <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="Validity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="expired">Expired</SelectItem>
-              </SelectContent>
-            </Select>
-          }
-          getRowId={(r) => r.id}
-          emptyMessage={
-            hasActiveFilters ? (
-              <div className="flex flex-col items-center gap-3 py-4">
-                <div>No sales orders match your filters.</div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearchQuery("");
-                    setStatusFilter("all");
-                  }}
-                >
-                  Clear filters
-                </Button>
-              </div>
-            ) : (
-              "No sales orders."
-            )
-          }
-          footer={
-            <div className="flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
-                  Rows per page:
-                </span>
-                <Select
-                  value={String(itemsPerPage)}
-                  onValueChange={(v) => setItemsPerPage(Number(v))}
-                >
-                  <SelectTrigger className="w-[70px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="25">25</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <div className="flex gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setCurrentPage((p) => Math.min(totalPages, p + 1))
-                    }
-                    disabled={currentPage >= totalPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </div>
-          }
-        />
-      </Card>
+      <FeatureListSection
+        kpiItems={kpiItems}
+        kpiLoading={kpiLoading}
+        listTitle="Sales orders"
+        listDescription={listDescription}
+      >
+        {isLoading && rows.length === 0 ? (
+          <div
+            className="h-56 animate-pulse rounded-md bg-muted/60"
+            aria-hidden
+          />
+        ) : showEmptyZero ? (
+          <FeatureEmptyState
+            icon={ClipboardList}
+            title="No sales orders yet"
+            description="When you create a sales order it appears in this directory. Use the KPI cards above for a quick snapshot of volume by status."
+            action={
+              <Button
+                onClick={() => router.push("/app/sales-orders/new")}
+                className="gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Create sales order
+              </Button>
+            }
+          />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={rows}
+            manualFiltering
+            onRowClick={(r) => router.push(`/app/sales-orders/${r.id}`)}
+            searchPlaceholder="Search by order # or client…"
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            toolbarLeft={
+              <Select
+                value={statusFilter}
+                onValueChange={(v) =>
+                  setStatusFilter(v as SalesOrderStatus | "all")
+                }
+              >
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Validity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="expired">Expired</SelectItem>
+                </SelectContent>
+              </Select>
+            }
+            getRowId={(r) => r.id}
+            emptyMessage={
+              hasActiveFilters ? (
+                <FeatureEmptyState
+                  title="No sales orders match your filters"
+                  description="Try another search keyword, set validity back to “All”, or clear filters to see everything again."
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearchQuery("");
+                        setStatusFilter("all");
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  }
+                  className="border-0 bg-transparent py-8"
+                />
+              ) : (
+                <FeatureEmptyState
+                  title="No sales orders"
+                  description="Nothing to show on this page."
+                  className="border-0 bg-transparent py-8"
+                />
+              )
+            }
+            footer={
+              showPagination ? (
+                <DataTablePaginationFooter
+                  total={total}
+                  page={currentPage}
+                  pageSize={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={setItemsPerPage}
+                />
+              ) : null
+            }
+          />
+        )}
+      </FeatureListSection>
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
@@ -490,7 +528,7 @@ export default function SalesOrdersPage() {
             <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
-                confirmDelete();
+                void confirmDelete();
               }}
               disabled={deleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

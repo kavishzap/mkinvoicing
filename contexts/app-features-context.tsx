@@ -20,13 +20,13 @@ type Status = "loading" | "unauthenticated" | "no-company" | "ready" | "error";
 
 type AppFeaturesContextValue = {
   status: Status;
-  /** True when the current user owns the company – unlocks all features. */
+  /** True when the current user is the company owner (`company_users.is_owner`). */
   isOwner: boolean;
-  /** Raw list of features the current user has access to. */
+  /** Active `features` rows for this user’s role (`role_features` join), same columns as `f.*`. */
   features: RoleFeature[];
   /** Lookup by feature code → DB name / null when not granted. */
   featureName: (code: string) => string | null;
-  /** True when the user has the feature (owner always has access). */
+  /** True when the user's role grants this feature (active `features` via `role_features` only). */
   has: (code: string) => boolean;
   /** Error message when `status === "error"`. */
   error: string | null;
@@ -110,8 +110,8 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
   );
 
   const has = useCallback(
-    (code: string) => isOwner || featureByCode.has(code),
-    [isOwner, featureByCode]
+    (code: string) => featureByCode.has(code),
+    [featureByCode]
   );
 
   const value = useMemo<AppFeaturesContextValue>(

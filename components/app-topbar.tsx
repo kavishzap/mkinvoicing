@@ -50,12 +50,12 @@ export function AppTopbar() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex min-w-0 flex-1 items-start gap-2 sm:gap-3">
-          <h1 className="min-w-0 flex-1 truncate pt-0.5 text-base font-semibold leading-none tracking-tight text-foreground">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <h1 className="min-w-0 max-w-[min(52vw,18rem)] shrink truncate text-base font-semibold leading-tight tracking-tight text-foreground sm:max-w-xs md:max-w-md lg:max-w-lg">
             {pageTitle}
           </h1>
           {pageActions ? (
-            <div className="flex min-w-0 max-w-full flex-[1.25] basis-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2 sm:flex-none sm:max-w-[min(100%,42rem)] [&_button]:!rounded-sm [&_a]:!rounded-sm">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 [&_a]:rounded-md [&_button]:rounded-md">
               {pageActions}
             </div>
           ) : null}

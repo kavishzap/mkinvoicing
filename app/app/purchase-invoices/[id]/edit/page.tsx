@@ -525,23 +525,23 @@ export default function EditPurchaseInvoicePage() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={`${purchaseInvoiceNumber} — Update supplier, lines, or payment details, then save.`}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={
-              purchaseInvoiceId
-                ? `/app/purchase-invoices/${purchaseInvoiceId}`
-                : "/app/purchase-invoices"
-            }
-          >
-            <Button variant="ghost" size="icon" aria-label="Back to purchase invoice">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={savePurchaseInvoice} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save changes"}
+      leading={
+        <Link
+          href={
+            purchaseInvoiceId
+              ? `/app/purchase-invoices/${purchaseInvoiceId}`
+              : "/app/purchase-invoices"
+          }
+        >
+          <Button variant="ghost" size="icon" aria-label="Back to purchase invoice">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={savePurchaseInvoice} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save changes"}
+        </Button>
       }
     >
       {createdFromPurchaseOrderId ? (

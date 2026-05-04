@@ -27,13 +27,13 @@ export function AppFeatureRouteGuard({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "/app";
-  const { status, isOwner, has, error } = useAppFeatures();
+  const { status, has, error } = useAppFeatures();
   /** After first `ready`, never swap `<main>` for the full-page loader again (avoids losing client form state). */
   const hasEverBeenReady = useRef(false);
 
   const allowed = useMemo(
-    () => APP_NAV_ITEMS.filter((item) => isOwner || has(item.requires)),
-    [isOwner, has]
+    () => APP_NAV_ITEMS.filter((item) => has(item.requires)),
+    [has]
   );
 
   const requiredCode = useMemo(
@@ -43,8 +43,8 @@ export function AppFeatureRouteGuard({
 
   const hasAccess = useMemo(() => {
     if (!requiredCode) return true; // unknown path – allow by default
-    return isOwner || has(requiredCode);
-  }, [isOwner, has, requiredCode]);
+    return has(requiredCode);
+  }, [has, requiredCode]);
 
   useEffect(() => {
     if (status === "ready") {
@@ -103,7 +103,7 @@ export function AppFeatureRouteGuard({
           </h2>
           <p className="mt-2 text-xs text-muted-foreground">
             {fallback
-              ? "You don't have access to this page. Sending you to your dashboard."
+              ? "You don't have access to this page. Sending you to the first module you can open."
               : "You don't have access to any modules yet. Please contact your administrator."}
           </p>
         </div>

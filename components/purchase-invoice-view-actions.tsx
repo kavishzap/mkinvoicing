@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Copy, Download, Printer, Wallet, XCircle } from "lucide-react";
+import { Copy, Download, Edit, Printer, Wallet, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -505,6 +506,10 @@ export function PurchaseInvoiceViewActions({
   };
 
   const canPay = purchaseInvoice && purchaseInvoice.status !== "cancelled" && purchaseInvoice.status !== "paid";
+  const canEditPurchaseInvoice =
+    purchaseInvoice &&
+    purchaseInvoice.status !== "paid" &&
+    purchaseInvoice.status !== "cancelled";
 
   return (
     <>
@@ -539,6 +544,14 @@ export function PurchaseInvoiceViewActions({
           <Copy className="h-4 w-4" />
           Duplicate (prefill)
         </Button>
+        {canEditPurchaseInvoice ? (
+          <Button type="button" variant="outline" className="gap-2" asChild>
+            <Link href={`/app/purchase-invoices/${purchaseInvoiceId}/edit`}>
+              <Edit className="h-4 w-4" />
+              Edit
+            </Link>
+          </Button>
+        ) : null}
         {canPay && (
           <Button
             type="button"

@@ -42,6 +42,7 @@ export const FEATURE_CODES = {
   companySettings: "company_settings",
   dataCenter: "data_center",
   deliveryNote: "delivery_note",
+  inventory: "inventory",
 } as const;
 
 export type FeatureCode = (typeof FEATURE_CODES)[keyof typeof FEATURE_CODES];
@@ -55,7 +56,9 @@ export type NavSectionId =
   | "marketing"
   | "reports"
   | "finance"
-  | "company";
+  | "company"
+  /** Feature codes not listed in {@link APP_NAV_ITEMS} (e.g. payroll, quotations). */
+  | "other";
 
 export const NAV_SECTION_ORDER: readonly NavSectionId[] = [
   "overview",
@@ -66,6 +69,7 @@ export const NAV_SECTION_ORDER: readonly NavSectionId[] = [
   "reports",
   "finance",
   "company",
+  "other",
 ] as const;
 
 export const NAV_SECTION_LABELS: Record<NavSectionId, string> = {
@@ -77,6 +81,7 @@ export const NAV_SECTION_LABELS: Record<NavSectionId, string> = {
   reports: "Reports & analytics",
   finance: "Finance",
   company: "Company",
+  other: "Other",
 };
 
 export type AppNavItem = {
@@ -128,7 +133,7 @@ export function getNavDisplayLabel(
   item: AppNavItem,
   featureNameFn: (code: string) => string | null,
 ): string {
-  /** Sidebar / shell: inventory module uses this path; DB feature may still be named "Locations". */
+  /** Sidebar / shell: main hub uses `inventory` in DB; locations sub-routes use `locations`. */
   if (item.href === "/app/inventory") return "Inventory";
   if (item.href === "/app/inventory/products") return "Products";
   const fromDb = featureNameFn(item.requires)?.trim();
@@ -181,7 +186,7 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     section: "operations",
   },
   {
-    requires: FEATURE_CODES.locations,
+    requires: FEATURE_CODES.inventory,
     href: "/app/inventory",
     icon: Package2,
     section: "operations",
@@ -237,6 +242,71 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
   },
 ];
 
+/** Minimal shape for grouping role-form feature checkboxes. */
+export type RoleFormFeaturePick = {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+};
+
+export type RoleFormFeatureRow<
+  T extends RoleFormFeaturePick = RoleFormFeaturePick,
+> = {
+  feature: T;
+  /** Order within the app shell nav (lower first). */
+  order: number;
+  subsection?: string;
+};
+
+/**
+ * Maps a `features.code` to the same section / order as {@link APP_NAV_ITEMS}.
+ * Codes not in the nav (e.g. `payroll`) go to `other`.
+ */
+export function getNavSectionMetaForFeatureCode(code: string): {
+  section: NavSectionId;
+  subsection?: string;
+  order: number;
+} {
+  const idx = APP_NAV_ITEMS.findIndex((item) => item.requires === code);
+  if (idx >= 0) {
+    const item = APP_NAV_ITEMS[idx]!;
+    return {
+      section: item.section,
+      subsection: item.subsection,
+      order: idx,
+    };
+  }
+  return { section: "other", order: 10_000 };
+}
+
+/**
+ * Buckets plan / assignable features under the same headings as the sidebar.
+ */
+export function groupRoleFormFeaturesByNavSection<T extends RoleFormFeaturePick>(
+  features: T[]
+): Map<NavSectionId, RoleFormFeatureRow<T>[]> {
+  const map = new Map<NavSectionId, RoleFormFeatureRow<T>[]>();
+  for (const id of NAV_SECTION_ORDER) {
+    map.set(id, []);
+  }
+  for (const f of features) {
+    const meta = getNavSectionMetaForFeatureCode(f.code);
+    map.get(meta.section)!.push({
+      feature: f,
+      order: meta.order,
+      subsection: meta.subsection,
+    });
+  }
+  for (const id of NAV_SECTION_ORDER) {
+    map.get(id)!.sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.feature.name.localeCompare(b.feature.name);
+    });
+  }
+  return map;
+}
+
 /**
  * Path-prefix matchers. Order matters: longer / more specific prefixes first.
  * The first matching entry's `requires` determines what feature grants access.
@@ -255,8 +325,10 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   },
   { prefix: "/app/customers", requires: FEATURE_CODES.customers },
   { prefix: "/app/suppliers", requires: FEATURE_CODES.suppliers },
+  { prefix: "/app/inventory/locations", requires: FEATURE_CODES.locations },
   { prefix: "/app/inventory/products", requires: FEATURE_CODES.products },
-  { prefix: "/app/inventory", requires: FEATURE_CODES.locations },
+  { prefix: "/app/inventory/stock", requires: FEATURE_CODES.inventory },
+  { prefix: "/app/inventory", requires: FEATURE_CODES.inventory },
   { prefix: "/app/expenses", requires: FEATURE_CODES.expenses },
   { prefix: "/app/payroll", requires: FEATURE_CODES.payroll },
   { prefix: "/app/customer-credit", requires: FEATURE_CODES.customerCredit },

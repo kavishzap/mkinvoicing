@@ -567,23 +567,23 @@ export default function EditSalesOrderPage() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={`${salesOrderNumber} — Update customer, lines, or totals, then save.`}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={
-              salesOrderId
-                ? `/app/sales-orders/${salesOrderId}`
-                : "/app/sales-orders"
-            }
-          >
-            <Button variant="ghost" size="icon" aria-label="Back to sales order">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={saveSalesOrder} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save changes"}
+      leading={
+        <Link
+          href={
+            salesOrderId
+              ? `/app/sales-orders/${salesOrderId}`
+              : "/app/sales-orders"
+          }
+        >
+          <Button variant="ghost" size="icon" aria-label="Back to sales order">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={saveSalesOrder} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save changes"}
+        </Button>
       }
     >
       <div className="grid lg:grid-cols-2 gap-6">

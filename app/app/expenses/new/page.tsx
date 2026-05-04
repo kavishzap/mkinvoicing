@@ -8,7 +8,6 @@
  import { Input } from "@/components/ui/input";
  import { Label } from "@/components/ui/label";
  import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
- import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
  import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
  import { useToast } from "@/hooks/use-toast";
  import { addExpense, type ExpenseLineItem, type ExpensePayload } from "@/lib/expenses-service";
@@ -195,13 +194,15 @@
      <AppPageShell
        className="max-w-7xl"
        subtitle="Enter date, description, and line items—totals include tax per line."
+       leading={
+         <Link href="/app/expenses">
+           <Button variant="ghost" size="icon" aria-label="Back to expenses">
+             <ArrowLeft className="h-4 w-4" />
+           </Button>
+         </Link>
+       }
        actions={
          <div className="flex flex-wrap items-center gap-2">
-           <Link href="/app/expenses">
-             <Button variant="ghost" size="icon" aria-label="Back to expenses">
-               <ArrowLeft className="h-4 w-4" />
-             </Button>
-           </Link>
            <Button
              variant="outline"
              type="button"

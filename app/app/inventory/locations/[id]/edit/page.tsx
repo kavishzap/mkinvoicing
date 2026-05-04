@@ -167,13 +167,15 @@ export default function EditLocationPage() {
   return (
     <AppPageShell
       subtitle="Update this warehouse or site for your active company."
+      leading={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to locations">
+          <Link href="/app/inventory/locations">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" asChild aria-label="Back to locations">
-            <Link href="/app/inventory/locations">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
           <Button variant="outline" onClick={() => router.push("/app/inventory/locations")}>
             Cancel
           </Button>

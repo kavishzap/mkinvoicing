@@ -60,18 +60,20 @@ export default function NewSupplierPage() {
     <AppPageShell
       className="max-w-7xl text-left"
       subtitle="Fill in the supplier’s details and save—you can change them later from the list."
+      leading={
+        <Link href="/app/suppliers">
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            aria-label="Back to suppliers"
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+        </Link>
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Link href="/app/suppliers">
-            <Button
-              variant="ghost"
-              size="icon"
-              type="button"
-              aria-label="Back to suppliers"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
           <Button variant="outline" type="button" asChild>
             <Link href="/app/suppliers">Cancel</Link>
           </Button>

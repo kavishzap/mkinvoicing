@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -37,7 +37,11 @@ export default function EditCompanyRolePage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const roleId = params?.id;
-  const { reload: reloadAppFeatures } = useAppFeatures();
+  const {
+    reload: reloadAppFeatures,
+    features: myFeatures,
+    status: appFeatStatus,
+  } = useAppFeatures();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,6 +84,22 @@ export default function EditCompanyRolePage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const myFeatureIds = useMemo(
+    () => new Set(myFeatures.map((f) => f.id)),
+    [myFeatures]
+  );
+
+  const assignableFeatures = useMemo(
+    () => planFeatures.filter((p) => myFeatureIds.has(p.id)),
+    [planFeatures, myFeatureIds]
+  );
+
+  const waitingOnPermissions =
+    loading ||
+    (appFeatStatus !== "ready" &&
+      appFeatStatus !== "error" &&
+      appFeatStatus !== "no-company");
 
   const toggleFeature = (id: string, checked: boolean) => {
     if (isOwnerRole) return;
@@ -138,7 +158,7 @@ export default function EditCompanyRolePage() {
     }
   };
 
-  if (loading) {
+  if (waitingOnPermissions) {
     return (
       <AppPageShell compact>
         <div className="h-6 w-48 max-w-full bg-muted rounded animate-pulse" />
@@ -147,17 +167,31 @@ export default function EditCompanyRolePage() {
     );
   }
 
+  if (appFeatStatus === "error" || appFeatStatus === "no-company") {
+    return (
+      <AppPageShell compact>
+        <p className="text-sm text-muted-foreground">
+          {appFeatStatus === "no-company"
+            ? "Select a company before editing roles."
+            : "Could not load your permissions. Refresh the page or try again."}
+        </p>
+      </AppPageShell>
+    );
+  }
+
   return (
     <AppPageShell
       compact
       subtitle="Update role access and status for your company."
+      leading={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to roles">
+          <Link href="/app/settings?tab=roles">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" asChild aria-label="Back to roles">
-            <Link href="/app/settings?tab=roles">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link href="/app/settings?tab=roles">Cancel</Link>
           </Button>
@@ -175,7 +209,8 @@ export default function EditCompanyRolePage() {
         <CardHeader>
           <CardTitle>Edit role</CardTitle>
           <CardDescription>
-            Only features included in your subscription plan can be selected.
+            Features your plan allows and your own role includes — you can only
+            change permissions within that set.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -198,7 +233,7 @@ export default function EditCompanyRolePage() {
               isActive={formActive}
               onActiveChange={setFormActive}
               activeDisabled={isOwnerRole}
-              planFeatures={planFeatures}
+              planFeatures={assignableFeatures}
               selectedFeatureIds={selectedFeatureIds}
               onToggleFeature={toggleFeature}
               featuresDisabled={isOwnerRole}

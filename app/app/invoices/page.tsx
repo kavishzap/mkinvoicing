@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus, Eye, MoreHorizontal, Copy } from "lucide-react";
+import { Plus, Eye, MoreHorizontal, Copy, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -22,7 +22,6 @@ import {
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
-import { InvoiceEmptyState } from "@/components/invoice-empty-state";
 import { InvoiceTableSkeleton } from "@/components/invoice-table-skeleton";
 import { useToast } from "@/hooks/use-toast";
 
@@ -308,26 +307,6 @@ export default function InvoicesPage() {
     );
   }
 
-  // ✅ show first-time empty state ONLY when there is truly no data and no filters
-  if (!isLoading && total === 0 && !hasActiveFilters) {
-    return (
-      <AppPageShell
-        subtitle={invoiceSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/invoices/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Invoice
-          </Button>
-        }
-      >
-        <InvoiceEmptyState />
-      </AppPageShell>
-    );
-  }
-
   return (
     <AppPageShell
       subtitle={invoiceSubtitle}
@@ -363,6 +342,7 @@ export default function InvoicesPage() {
           columns={columns}
           data={rows}
           manualFiltering
+          onRowClick={(r) => router.push(`/app/invoices/${r.id}`)}
           searchPlaceholder="Search by invoice # or client…"
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}
@@ -404,8 +384,29 @@ export default function InvoicesPage() {
                   Clear filters
                 </Button>
               </div>
+            ) : total === 0 ? (
+              <div className="flex max-w-md flex-col items-center gap-4 py-8 text-center">
+                <div className="rounded-full bg-muted p-4">
+                  <FileText className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">No invoices yet</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Create your first invoice to get started with managing your billing.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => router.push("/app/invoices/new")}
+                  className="gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Create your first invoice
+                </Button>
+              </div>
             ) : (
-              "No invoices to display."
+              <div className="py-6 text-sm text-muted-foreground">
+                No invoices on this page.
+              </div>
             )
           }
           footer={

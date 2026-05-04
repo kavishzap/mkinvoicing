@@ -387,13 +387,15 @@ export default function EditInventoryProductPage() {
   return (
     <AppPageShell
       subtitle="Edit catalogue item details and image. Stock by location is read-only here."
+      leading={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to products">
+          <Link href="/app/inventory/products">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="icon" asChild aria-label="Back to products">
-            <Link href="/app/inventory/products">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </Button>
           <Button variant="outline" onClick={() => router.push("/app/inventory/products")}>
             Cancel
           </Button>

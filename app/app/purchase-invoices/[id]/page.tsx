@@ -179,7 +179,7 @@ export default function PurchaseInvoiceViewPage() {
         </Link>
       }
       subtitle={`${purchaseInvoice.number}${billName ? ` · ${billName}` : ""} — Check supplier charges, record payments, and export or share the PDF.`}
-      actions={
+      belowSubtitle={
         <div className="print:hidden">
           <PurchaseInvoiceViewActions
             purchaseInvoiceId={purchaseInvoice.id}

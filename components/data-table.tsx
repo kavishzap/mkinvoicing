@@ -26,6 +26,8 @@ type ColMeta = {
   tdClassName?: string;
   searchValue?: (row: unknown) => string;
   searchable?: boolean;
+  /** When `onRowClick` is set, clicks on this column do not trigger row navigation. */
+  stopRowClick?: boolean;
 };
 
 function buildRowSearchString<TData>(
@@ -65,6 +67,8 @@ export type DataTableProps<TData> = {
   className?: string;
   tableContainerClassName?: string;
   getRowId?: (originalRow: TData, index: number) => string;
+  /** Opens the record (e.g. view page). Clicks on the actions column do not fire this. */
+  onRowClick?: (row: TData) => void;
 };
 
 export function DataTable<TData>({
@@ -82,6 +86,7 @@ export function DataTable<TData>({
   className,
   tableContainerClassName,
   getRowId,
+  onRowClick,
 }: DataTableProps<TData>) {
   const [uncontrolledSearch, setUncontrolledSearch] =
     React.useState(defaultSearch);
@@ -182,18 +187,40 @@ export function DataTable<TData>({
               <TableRow>
                 <TableCell
                   colSpan={columns.length}
-                  className="h-24 text-center text-muted-foreground"
+                  className="h-auto min-h-[14rem] p-0 align-middle text-center text-muted-foreground"
                 >
-                  {emptyMessage}
+                  <div className="flex justify-center py-6">
+                    {emptyMessage}
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
               rows.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className={
+                    onRowClick
+                      ? "cursor-pointer hover:bg-muted/60"
+                      : undefined
+                  }
+                  onClick={
+                    onRowClick
+                      ? () => {
+                          onRowClick(row.original);
+                        }
+                      : undefined
+                  }
+                >
                   {row.getVisibleCells().map((cell) => {
                     const meta = cell.column.columnDef.meta as ColMeta | undefined;
+                    const stopRow =
+                      Boolean(meta?.stopRowClick) || cell.column.id === "actions";
                     return (
-                      <TableCell key={cell.id} className={meta?.tdClassName}>
+                      <TableCell
+                        key={cell.id}
+                        className={meta?.tdClassName}
+                        onClick={stopRow ? (e) => e.stopPropagation() : undefined}
+                      >
                         {flexRender(
                           cell.column.columnDef.cell,
                           cell.getContext(),

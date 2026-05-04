@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/types/supabase";
+import type { Database } from "@/src/types/supabase";
 import { FEATURE_CODES } from "@/lib/app-nav";
 import type { TeamMemberRow } from "@/lib/company-team-service";
 

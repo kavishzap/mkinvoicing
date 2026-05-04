@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -36,25 +34,15 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { AppPageShell } from "@/components/app-page-shell";
 import { getActiveCompanyId } from "@/lib/active-company";
-import { listCustomersForCompany, type CustomerRow } from "@/lib/customers-service";
 import {
-  addWhatsAppGroup,
   countMembersForGroups,
   deleteWhatsAppGroup,
-  listGroupMembers,
   listWhatsAppGroups,
-  setGroupMembers,
   updateWhatsAppGroup,
   type WhatsAppGroupRow,
 } from "@/lib/whatsapp-groups-service";
 
 type GroupListItem = WhatsAppGroupRow & { memberCount: number };
-
-function customerLabel(c: CustomerRow): string {
-  return c.type === "company"
-    ? c.companyName || "Company"
-    : c.fullName || "Individual";
-}
 
 export default function WhatsAppGroupsPage() {
   const { toast } = useToast();
@@ -67,18 +55,6 @@ export default function WhatsAppGroupsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [loading, setLoading] = useState(true);
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [customerSearch, setCustomerSearch] = useState("");
-  const [allCustomers, setAllCustomers] = useState<CustomerRow[]>([]);
-  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(
-    new Set()
-  );
-  const [saving, setSaving] = useState(false);
-  const [nameError, setNameError] = useState("");
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -128,106 +104,6 @@ export default function WhatsAppGroupsPage() {
     setPage(1);
   }, [search, includeInactive, pageSize]);
 
-  async function loadCustomersForDialog() {
-    try {
-      const rows = await listCustomersForCompany();
-      setAllCustomers(rows);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
-        title: "Could not load customers",
-        description: msg,
-        variant: "destructive",
-      });
-      setAllCustomers([]);
-    }
-  }
-
-  function openCreate() {
-    setEditingId(null);
-    setName("");
-    setDescription("");
-    setCustomerSearch("");
-    setSelectedCustomerIds(new Set());
-    setNameError("");
-    void loadCustomersForDialog();
-    setDialogOpen(true);
-  }
-
-  async function openEdit(g: WhatsAppGroupRow) {
-    setEditingId(g.id);
-    setName(g.name);
-    setDescription(g.description);
-    setCustomerSearch("");
-    setNameError("");
-    void loadCustomersForDialog();
-    try {
-      const members = await listGroupMembers(g.id);
-      setSelectedCustomerIds(new Set(members.map((m) => m.customer_id)));
-    } catch {
-      setSelectedCustomerIds(new Set());
-    }
-    setDialogOpen(true);
-  }
-
-  function toggleCustomer(id: string) {
-    setSelectedCustomerIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const filteredCustomers = allCustomers.filter((c) => {
-    const q = customerSearch.trim().toLowerCase();
-    if (!q) return true;
-    const blob = [
-      customerLabel(c),
-      c.email,
-      c.phone,
-      c.companyName,
-      c.fullName,
-    ]
-      .join(" ")
-      .toLowerCase();
-    return blob.includes(q);
-  });
-
-  async function handleSave() {
-    if (!name.trim()) {
-      setNameError("Name is required");
-      return;
-    }
-    setNameError("");
-    try {
-      setSaving(true);
-      const ids = [...selectedCustomerIds];
-      if (editingId) {
-        await updateWhatsAppGroup(editingId, {
-          name: name.trim(),
-          description: description.trim() || null,
-        });
-        await setGroupMembers(editingId, ids);
-        toast({ title: "Group updated" });
-      } else {
-        await addWhatsAppGroup({
-          name: name.trim(),
-          description: description.trim() || null,
-          customerIds: ids,
-        });
-        toast({ title: "Group created" });
-      }
-      setDialogOpen(false);
-      await loadGroups();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({ title: "Save failed", description: msg, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function handleToggleActive(g: WhatsAppGroupRow) {
     try {
       await updateWhatsAppGroup(g.id, { is_active: !g.isActive });
@@ -268,14 +144,19 @@ export default function WhatsAppGroupsPage() {
       }
       subtitle="Name a group and pick which customers belong to it—groups are scoped to your active company."
       actions={
-        <Button
-          onClick={openCreate}
-          className="shrink-0 gap-2"
-          disabled={companyReady !== true}
-        >
-          <Plus className="h-4 w-4" />
-          New group
-        </Button>
+        companyReady === true ? (
+          <Button asChild className="shrink-0 gap-2">
+            <Link href="/app/whatsapp/groups/new">
+              <Plus className="h-4 w-4" />
+              New group
+            </Link>
+          </Button>
+        ) : (
+          <Button type="button" className="shrink-0 gap-2" disabled>
+            <Plus className="h-4 w-4" />
+            New group
+          </Button>
+        )
       }
     >
       {companyReady === false && (
@@ -370,9 +251,11 @@ export default function WhatsAppGroupsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEdit(g)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit
+                        <DropdownMenuItem asChild>
+                          <Link href={`/app/whatsapp/groups/${g.id}/edit`}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToggleActive(g)}>
                           {g.isActive ? (
@@ -442,85 +325,6 @@ export default function WhatsAppGroupsPage() {
           </div>
         </div>
       )}
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingId ? "Edit group" : "New group"}</DialogTitle>
-            <DialogDescription>
-              Choose a unique name and tick customers to include. They must belong to your
-              company.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="g-name">Name *</Label>
-              <Input
-                id="g-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={nameError ? "border-destructive" : ""}
-              />
-              {nameError && (
-                <p className="text-xs text-destructive">{nameError}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="g-desc">Description</Label>
-              <Textarea
-                id="g-desc"
-                rows={2}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Customers</Label>
-              <Input
-                placeholder="Filter customers…"
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-              />
-              <div className="max-h-56 space-y-2 overflow-y-auto rounded-md border p-3">
-                {filteredCustomers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No customers found. Add customers with this company in Customers.
-                  </p>
-                ) : (
-                  filteredCustomers.map((c) => (
-                    <label
-                      key={c.id}
-                      className="flex cursor-pointer items-start gap-2 rounded-md py-1.5 hover:bg-muted/50"
-                    >
-                      <Checkbox
-                        checked={selectedCustomerIds.has(c.id)}
-                        onCheckedChange={() => toggleCustomer(c.id)}
-                      />
-                      <span className="text-sm">
-                        <span className="font-medium">{customerLabel(c)}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {c.phone || "No phone"} · {c.email}
-                        </span>
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {selectedCustomerIds.size} selected
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : editingId ? "Save changes" : "Create group"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent>

@@ -314,25 +314,27 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
         </Link>
       }
       subtitle={`${fmtDate(expense.expense_date)}${expense.description ? ` · ${expense.description}` : ""} — Review line items or download a PDF.`}
-      actions={
-        <Button
-          variant="outline"
-          className="gap-2"
-          onClick={async () => {
-            try {
-              await generateExpensePDF(expense, profile);
-            } catch (e: any) {
-              toast({
-                title: "Failed to generate PDF",
-                description: e?.message ?? "Please try again.",
-                variant: "destructive",
-              });
-            }
-          }}
-        >
-          <Download className="h-4 w-4" />
-          Download PDF
-        </Button>
+      belowSubtitle={
+        <div className="print:hidden flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            className="gap-2 rounded-xl"
+            onClick={async () => {
+              try {
+                await generateExpensePDF(expense, profile);
+              } catch (e: any) {
+                toast({
+                  title: "Failed to generate PDF",
+                  description: e?.message ?? "Please try again.",
+                  variant: "destructive",
+                });
+              }
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Download PDF
+          </Button>
+        </div>
       }
     >
       <Card className="shadow-lg">

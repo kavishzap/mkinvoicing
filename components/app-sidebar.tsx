@@ -49,7 +49,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
     accountAnchor,
     setAccountAnchor,
   } = useAppAccount();
-  const { status, isOwner, has, featureName } = useAppFeatures();
+  const { status, has, featureName } = useAppFeatures();
 
   /** Mobile sheet uses full labels; collapse is desktop-only. */
   const narrow = collapsed && !onNavigate;
@@ -57,9 +57,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
   type NavRow = (typeof APP_NAV_ITEMS)[number] & { displayLabel: string };
 
   const groupedItems = useMemo(() => {
-    const visible = APP_NAV_ITEMS.filter(
-      (item) => isOwner || has(item.requires)
-    ).map(
+    const visible = APP_NAV_ITEMS.filter((item) => has(item.requires)).map(
       (item): NavRow => ({
         ...item,
         displayLabel: getNavDisplayLabel(item, featureName),
@@ -77,7 +75,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
       label: NAV_SECTION_LABELS[id],
       items: bySection.get(id) ?? [],
     })).filter((g) => g.items.length > 0);
-  }, [isOwner, has, featureName]);
+  }, [has, featureName]);
 
   return (
     <aside

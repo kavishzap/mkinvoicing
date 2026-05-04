@@ -35,13 +35,10 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { AppPageShell } from "@/components/app-page-shell";
 import { getActiveCompanyId } from "@/lib/active-company";
-import { stripDataUrlPrefix } from "@/lib/products-service";
 import {
-  addCataloguePost,
   deleteCataloguePost,
   getCataloguePost,
   listCataloguePosts,
-  updateCataloguePost,
   type CataloguePostRow,
 } from "@/lib/whatsapp-catalogue-service";
 import {
@@ -56,8 +53,6 @@ import {
 } from "@/lib/whatsapp-share";
 
 const NONE = "__none__";
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function defaultShareBody(description: string): string {
   return description.trim();
@@ -73,12 +68,6 @@ export default function WhatsAppCataloguePage() {
   const [pageSize] = useState(10);
   const [loading, setLoading] = useState(true);
 
-  const [editOpen, setEditOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [desc, setDesc] = useState("");
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [imageMime, setImageMime] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const [shareOpen, setShareOpen] = useState(false);
@@ -115,83 +104,6 @@ export default function WhatsAppCataloguePage() {
     }
     loadPosts();
   }, [companyReady, loadPosts]);
-
-  function openCreate() {
-    setEditingId(null);
-    setDesc("");
-    setImageBase64(null);
-    setImageMime(null);
-    setEditOpen(true);
-  }
-
-  async function openEdit(id: string) {
-    try {
-      const p = await getCataloguePost(id);
-      setEditingId(id);
-      setDesc(p.description);
-      setImageBase64(p.imageBase64);
-      setImageMime(p.imageMimeType || null);
-      setEditOpen(true);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({ title: "Could not load post", description: msg, variant: "destructive" });
-    }
-  }
-
-  function onPickImage(file: File | null) {
-    if (!file) return;
-    if (!ALLOWED_MIME.has(file.type)) {
-      toast({
-        title: "Unsupported image",
-        description: "Use PNG, JPEG, WebP, or GIF.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      toast({ title: "File too large", description: "Max 4 MB.", variant: "destructive" });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const b64 = stripDataUrlPrefix(reader.result as string);
-        setImageBase64(b64);
-        setImageMime(file.type);
-      } catch {
-        toast({ title: "Could not read image", variant: "destructive" });
-      }
-    };
-    reader.readAsDataURL(file);
-  }
-
-  async function handleSavePost() {
-    try {
-      setSaving(true);
-      if (editingId) {
-        await updateCataloguePost(editingId, {
-          description: desc,
-          imageBase64: imageBase64,
-          imageMimeType: imageMime,
-        });
-        toast({ title: "Post updated" });
-      } else {
-        await addCataloguePost({
-          description: desc,
-          imageBase64: imageBase64,
-          imageMimeType: imageMime,
-        });
-        toast({ title: "Post created" });
-      }
-      setEditOpen(false);
-      await loadPosts();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({ title: "Save failed", description: msg, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleDeletePost(id: string) {
     try {
@@ -288,8 +200,6 @@ export default function WhatsAppCataloguePage() {
     });
   }
 
-  const previewUrl =
-    imageBase64 && imageMime ? `data:${imageMime};base64,${imageBase64}` : null;
   const sharePreviewUrl =
     sharePost?.imageBase64 && sharePost.imageMimeType
       ? `data:${sharePost.imageMimeType};base64,${sharePost.imageBase64}`
@@ -308,10 +218,19 @@ export default function WhatsAppCataloguePage() {
       }
       subtitle="Create catalogue posts with an image and description; share links prefill text only—add the image in WhatsApp after the chat opens."
       actions={
-        <Button onClick={openCreate} className="gap-2 shrink-0" disabled={companyReady !== true}>
-          <Plus className="h-4 w-4" />
-          New post
-        </Button>
+        companyReady === true ? (
+          <Button asChild className="gap-2 shrink-0">
+            <Link href="/app/whatsapp/catalogue/new">
+              <Plus className="h-4 w-4" />
+              New post
+            </Link>
+          </Button>
+        ) : (
+          <Button type="button" className="gap-2 shrink-0" disabled>
+            <Plus className="h-4 w-4" />
+            New post
+          </Button>
+        )
       }
     >
       {companyReady === false && (
@@ -370,9 +289,11 @@ export default function WhatsAppCataloguePage() {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8"
-                      onClick={() => openEdit(p.id)}
+                      asChild
                     >
-                      <Pencil className="h-4 w-4" />
+                      <Link href={`/app/whatsapp/catalogue/${p.id}/edit`}>
+                        <Pencil className="h-4 w-4" />
+                      </Link>
                     </Button>
                     <Button
                       type="button"
@@ -423,68 +344,6 @@ export default function WhatsAppCataloguePage() {
           </div>
         </div>
       )}
-
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingId ? "Edit post" : "New post"}</DialogTitle>
-            <DialogDescription>Image is stored as Base64 (optional).</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="post-desc">Description</Label>
-              <Textarea
-                id="post-desc"
-                rows={5}
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                placeholder="What you want to say when sharing…"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Image</Label>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
-                  {previewUrl ? (
-                    <img src={previewUrl} alt="" className="h-full w-full object-contain" />
-                  ) : (
-                    <ImageIcon className="h-8 w-8 text-muted-foreground" />
-                  )}
-                </div>
-                <div className="flex flex-1 flex-col gap-2">
-                  <Input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    onChange={(e) => onPickImage(e.target.files?.[0] ?? null)}
-                  />
-                  {(imageBase64 || imageMime) && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-fit"
-                      onClick={() => {
-                        setImageBase64(null);
-                        setImageMime(null);
-                      }}
-                    >
-                      Remove image
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSavePost} disabled={saving}>
-              {saving ? "Saving…" : editingId ? "Save" : "Create"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">

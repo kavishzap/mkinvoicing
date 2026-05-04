@@ -371,6 +371,7 @@ export default function QuotationsPage() {
           columns={columns}
           data={rows}
           manualFiltering
+          onRowClick={(r) => router.push(`/app/quotations/${r.id}`)}
           searchPlaceholder="Search by quotation # or client…"
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}

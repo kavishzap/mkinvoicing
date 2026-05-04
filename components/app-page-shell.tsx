@@ -50,8 +50,8 @@ export function AppPageShell({
             compact ? "mb-4 gap-3" : "mb-6 gap-4",
           )}
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               {leading}
               {subtitle ? (
                 <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">

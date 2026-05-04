@@ -1,10 +1,12 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
 import {
   Plus,
-  Search,
   MoreVertical,
   Pencil,
   Trash2,
@@ -16,8 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,903 +26,499 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { DataTable } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table-column-header";
+import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
+import { FeatureEmptyState } from "@/components/feature-empty-state";
+import type { FeatureKpiItem } from "@/components/feature-kpi-strip";
+import { FeatureListSection } from "@/components/feature-list-section";
 import { useToast } from "@/hooks/use-toast";
 import {
-  addCustomer,
   deleteCustomer,
-  deleteCustomers,
-  getCustomersByMonth,
   listCustomers,
   setCustomerActive,
-  updateCustomer,
   type CustomerRow,
-  type CustomerPayload,
 } from "@/lib/customers-service";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+} from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
-// Customers chart removed per request
 
-type FormData = {
-  type: "company" | "individual";
-  companyName: string;
-  contactName: string;
-  fullName: string;
-  email: string;
-  phone: string;
-  street: string;
-  city: string;
-  postal: string;
-  country: string;
-  address_line_1: string;
-  address_line_2: string;
-};
+function formatAddress(c: CustomerRow): string {
+  const parts = [c.address_line_1, c.address_line_2].filter(Boolean);
+  return parts.join(", ") || "—";
+}
 
 export default function CustomersPage() {
+  const router = useRouter();
   const { toast } = useToast();
 
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
-
-  // 🔹 Pagination state
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<CustomerRow | null>(
-    null
-  );
-
-  const [formData, setFormData] = useState<FormData>(emptyForm("company"));
-  const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>(
-    {}
-  );
-
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  // Customers per month chart removed per request
+  const [singleDeleting, setSingleDeleting] = useState(false);
 
-  // Load
+  const [activeCompanyScope, setActiveCompanyScope] = useState(0);
+  const [kpiRev, setKpiRev] = useState(0);
+  const [kpiLoading, setKpiLoading] = useState(true);
+  const [kpiTotal, setKpiTotal] = useState(0);
+  const [kpiCompanies, setKpiCompanies] = useState(0);
+  const [kpiIndividuals, setKpiIndividuals] = useState(0);
+
   useEffect(() => {
+    const bump = () => setActiveCompanyScope((n) => n + 1);
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setKpiLoading(true);
+    (async () => {
+      try {
+        const [all, companies, individuals] = await Promise.all([
+          listCustomers({ includeInactive: true, page: 1, pageSize: 1 }),
+          listCustomers({ includeInactive: true, type: "company", page: 1, pageSize: 1 }),
+          listCustomers({ includeInactive: true, type: "individual", page: 1, pageSize: 1 }),
+        ]);
+        if (cancelled) return;
+        setKpiTotal(all.total);
+        setKpiCompanies(companies.total);
+        setKpiIndividuals(individuals.total);
+      } catch {
+        if (!cancelled) {
+          setKpiTotal(0);
+          setKpiCompanies(0);
+          setKpiIndividuals(0);
+        }
+      } finally {
+        if (!cancelled) setKpiLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCompanyScope, kpiRev]);
+
+  const hasActiveFilters = useMemo(
+    () => searchQuery.trim() !== "" || includeInactive,
+    [searchQuery, includeInactive],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        const { rows, total } = await listCustomers({
+        const { rows, total: nextTotal } = await listCustomers({
           search: searchQuery,
           includeInactive,
           page,
           pageSize,
         });
-        setCustomers(rows);
-        setTotal(total);
-      } catch (e: any) {
-        toast({
-          title: "Failed to load customers",
-          description: e?.message ?? "Please try again.",
-          variant: "destructive",
-        });
+        if (!cancelled) {
+          setCustomers(rows);
+          setTotal(nextTotal);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          toast({
+            title: "Failed to load customers",
+            description: e instanceof Error ? e.message : "Please try again.",
+            variant: "destructive",
+          });
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [toast, searchQuery, includeInactive, page, pageSize]);
+    return () => {
+      cancelled = true;
+    };
+  }, [toast, searchQuery, includeInactive, page, pageSize, activeCompanyScope]);
 
-  // Reset to page 1 when filters/search change
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, includeInactive, pageSize]);
+  }, [searchQuery, includeInactive, pageSize, activeCompanyScope]);
 
-  useEffect(() => {
-    setSelectedIds(new Set());
-  }, [searchQuery, includeInactive, pageSize]);
-
-  const pageIds = useMemo(() => customers.map((c) => c.id), [customers]);
-  const allPageSelected =
-    pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
-  const headerCheckboxState: boolean | "indeterminate" =
-    allPageSelected ? true : somePageSelected ? "indeterminate" : false;
-
-  function toggleSelectAllOnPage(checked: boolean) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        for (const id of pageIds) next.add(id);
-      } else {
-        for (const id of pageIds) next.delete(id);
-      }
-      return next;
-    });
-  }
-
-  function toggleRowSelected(id: string, checked: boolean) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
-  function handleOpenDialog(customer?: CustomerRow) {
-    if (customer) {
-      setEditingCustomer(customer);
-      setFormData({
-        type: customer.type,
-        companyName: customer.companyName || "",
-        contactName: customer.contactName || "",
-        fullName: customer.fullName || "",
-        email: customer.email || "",
-        phone: customer.phone || "",
-        street: customer.street || "",
-        city: customer.city || "",
-        postal: customer.postal || "",
-        country: customer.country || "",
-         address_line_1: customer.address_line_1 || "",
-        address_line_2: customer.address_line_2 || "",
-      });
-    } else {
-      setEditingCustomer(null);
-      setFormData(emptyForm("company"));
-    }
-    setErrors({});
-    setIsDialogOpen(true);
-  }
-
-  async function handleSave() {
-    if (!validate()) return;
-
-    try {
-      setSaving(true);
-      if (editingCustomer) {
-        await updateCustomer(editingCustomer.id, mapFormToPayload(formData));
-        toast({
-          title: "Customer updated",
-          description: "Customer information has been updated successfully.",
-        });
-      } else {
-        await addCustomer(mapFormToPayload(formData));
-        toast({
-          title: "Customer added",
-          description: "New customer has been added successfully.",
-        });
-      }
-      await reload();
-      setIsDialogOpen(false);
-    } catch (e: any) {
-      toast({
-        title: "Save failed",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function reload() {
-    const { rows, total } = await listCustomers({
+  const reload = useCallback(async () => {
+    const { rows, total: nextTotal } = await listCustomers({
       search: searchQuery,
       includeInactive,
       page,
       pageSize,
     });
     setCustomers(rows);
-    setTotal(total);
-    return { rows, total };
-  }
+    setTotal(nextTotal);
+  }, [searchQuery, includeInactive, page, pageSize]);
 
-  function validate() {
-    const next: Partial<Record<keyof FormData, string>> = {};
-    const requiredCommon: (keyof FormData)[] = [
-      "email",
-      "phone",
-      "address_line_1",
-    ];
-    const requiredCompany: (keyof FormData)[] = [
-      "companyName",
-      ...requiredCommon,
-    ];
-    const requiredIndividual: (keyof FormData)[] = [
-      "fullName",
-      ...requiredCommon,
-    ];
+  const handleToggleActive = useCallback(
+    async (c: CustomerRow) => {
+      try {
+        await setCustomerActive(c.id, !c.isActive);
+        toast({
+          title: c.isActive ? "Customer set inactive" : "Customer activated",
+          description: c.isActive
+            ? "They will be hidden from default lists."
+            : "They are visible in lists again.",
+        });
+        await reload();
+        setKpiRev((n) => n + 1);
+      } catch (e: unknown) {
+        toast({
+          title: "Update failed",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [reload, toast],
+  );
 
-    const required =
-      formData.type === "company" ? requiredCompany : requiredIndividual;
+  const handleDelete = useCallback(
+    async (id: string) => {
+      let ok = false;
+      try {
+        setSingleDeleting(true);
+        await deleteCustomer(id);
+        ok = true;
+        toast({
+          title: "Customer deleted",
+          description: "Customer has been removed successfully.",
+        });
+      } catch (e: unknown) {
+        toast({
+          title: "Delete failed",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setSingleDeleting(false);
+        setConfirmDeleteId(null);
+        if (ok) {
+          if (customers.length === 1 && page > 1) setPage((p) => p - 1);
+          else await reload();
+          setKpiRev((n) => n + 1);
+        }
+      }
+    },
+    [customers.length, page, reload, toast],
+  );
 
-    for (const k of required) {
-      const v = formData[k];
-      if (!v || String(v).trim() === "") next[k] = "Required";
-    }
-    if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email))
-      next.email = "Invalid email";
+  const kpiItems = useMemo<FeatureKpiItem[]>(
+    () => [
+      {
+        label: "Total customers",
+        value: kpiTotal,
+        icon: Users,
+        valueLabel: String(kpiTotal),
+      },
+      {
+        label: "Companies",
+        value: kpiCompanies,
+        icon: Building2,
+        valueLabel: String(kpiCompanies),
+      },
+      {
+        label: "Individuals",
+        value: kpiIndividuals,
+        icon: User,
+        valueLabel: String(kpiIndividuals),
+      },
+    ],
+    [kpiTotal, kpiCompanies, kpiIndividuals],
+  );
 
-    setErrors(next);
-    return Object.keys(next).length === 0;
-  }
+  const columns = useMemo<ColumnDef<CustomerRow>[]>(
+    () => [
+      {
+        id: "type",
+        accessorFn: (r) => r.type,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Type" />,
+        meta: {
+          searchValue: (row: CustomerRow) => row.type,
+        },
+        cell: ({ row }) => {
+          const c = row.original;
+          return (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
+              {c.type === "company" ? (
+                <Building2 className="h-3.5 w-3.5" />
+              ) : (
+                <User className="h-3.5 w-3.5" />
+              )}
+              {c.type}
+            </span>
+          );
+        },
+      },
+      {
+        id: "name",
+        accessorFn: (r) => (r.type === "company" ? r.companyName : r.fullName) ?? "",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        meta: {
+          searchValue: (row: CustomerRow) =>
+            [row.companyName, row.fullName, row.email].filter(Boolean).join(" "),
+        },
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.type === "company"
+              ? row.original.companyName
+              : row.original.fullName}
+          </span>
+        ),
+      },
+      {
+        id: "email",
+        accessorFn: (r) => r.email ?? "",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+        meta: { searchValue: (row: CustomerRow) => row.email ?? "" },
+        cell: ({ row }) => row.original.email || "—",
+      },
+      {
+        id: "phone",
+        accessorFn: (r) => r.phone ?? "",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Phone" />,
+        meta: {
+          thClassName: "hidden md:table-cell",
+          tdClassName: "hidden md:table-cell",
+          searchValue: (row: CustomerRow) => row.phone ?? "",
+        },
+        cell: ({ row }) => row.original.phone || "—",
+      },
+      {
+        id: "address",
+        accessorFn: (r) => formatAddress(r),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Address" />,
+        meta: {
+          searchValue: (row: CustomerRow) => formatAddress(row),
+        },
+        cell: ({ row }) => (
+          <span className="line-clamp-2 max-w-[14rem] text-muted-foreground">
+            {formatAddress(row.original)}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        accessorFn: (r) => (r.isActive ? "active" : "inactive"),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        meta: {
+          searchValue: (row: CustomerRow) => (row.isActive ? "active" : "inactive"),
+        },
+        cell: ({ row }) =>
+          row.original.isActive ? (
+            <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600">
+              Active
+            </span>
+          ) : (
+            <span className="inline-flex rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+              Inactive
+            </span>
+          ),
+      },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Actions</span>,
+        meta: {
+          searchable: false,
+          thClassName: "w-[70px] text-right",
+          tdClassName: "text-right",
+        },
+        cell: ({ row }) => {
+          const c = row.original;
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <Link href={`/app/customers/${c.id}/edit`}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void handleToggleActive(c)}>
+                  {c.isActive ? (
+                    <>
+                      <Lock className="mr-2 h-4 w-4" />
+                      Set inactive
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="mr-2 h-4 w-4" />
+                      Activate
+                    </>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={() => setConfirmDeleteId(c.id)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          );
+        },
+      },
+    ],
+    [handleToggleActive],
+  );
 
-  async function handleToggleActive(c: CustomerRow) {
-    try {
-      await setCustomerActive(c.id, !c.isActive);
-      toast({
-        title: c.isActive ? "Customer set inactive" : "Customer activated",
-        description: c.isActive
-          ? "They will be hidden from default lists."
-          : "They are visible in lists again.",
-      });
-      await reload();
-    } catch (e: any) {
-      toast({
-        title: "Update failed",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    }
-  }
-
-  async function handleDelete(id: string) {
-    try {
-      await deleteCustomer(id);
-      toast({
-        title: "Customer deleted",
-        description: "Customer has been removed successfully.",
-      });
-    } catch (e: any) {
-      toast({
-        title: "Delete failed",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      // If last item on last page deleted, move back a page otherwise reload
-      if (customers.length === 1 && page > 1) setPage((p) => p - 1);
-      else void reload();
-      setConfirmDeleteId(null);
-    }
-  }
-
-  async function handleBulkDelete() {
-    const ids = Array.from(selectedIds);
-    if (ids.length === 0) return;
-    try {
-      setBulkDeleting(true);
-      await deleteCustomers(ids);
-      toast({
-        title: "Customers deleted",
-        description: `Removed ${ids.length} customer(s).`,
-      });
-      setSelectedIds(new Set());
-      setConfirmBulkDeleteOpen(false);
-      const countOnPage = customers.filter((c) => ids.includes(c.id)).length;
-      const allOnPageGone = countOnPage === customers.length && customers.length > 0;
-      if (allOnPageGone && page > 1) setPage((p) => p - 1);
-      else void reload();
-    } catch (e: any) {
-      toast({
-        title: "Delete failed",
-        description: e?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setBulkDeleting(false);
-    }
-  }
-
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const end = Math.min(total, page * pageSize);
-
-  const err = (k: keyof FormData) => (errors[k] ? "border-destructive" : "");
+  const listDescription =
+    "Newest first. Click a row to open the customer editor, or use the row menu for activate / delete. KPIs reflect your full directory (not just this page).";
 
   return (
     <AppPageShell
       subtitle="Keep everyone you sell to in one place—use these records when you quote, invoice, or follow up."
       actions={
-        <Button onClick={() => handleOpenDialog()} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Add Customer
+        <Button asChild className="gap-2">
+          <Link href="/app/customers/new">
+            <Plus className="h-4 w-4" />
+            Add customer
+          </Link>
         </Button>
       }
     >
-      {/* Search + filters OR skeleton */}
-      {loading ? (
-        <SkeletonFilters />
-      ) : (
-        <Card>
-          <CardContent className="pt-6 space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search customers by name, email, or company..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={includeInactive}
-                    onChange={(e) => setIncludeInactive(e.target.checked)}
-                  />
-                  Include inactive
-                </label>
-                <select
-                  className="h-9 rounded-md border bg-background px-2 text-sm"
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
-                >
-                  <option value={5}>5 / page</option>
-                  <option value={10}>10 / page</option>
-                  <option value={20}>20 / page</option>
-                  <option value={50}>50 / page</option>
-                </select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Table OR skeleton */}
-      {loading ? (
-        <SkeletonTable rows={Math.min(pageSize, 6)} />
-      ) : (
-        <>
-          {customers.length > 0 ? (
-            <div className="flex flex-col gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-muted-foreground">
-                {selectedIds.size > 0 ? (
-                  <>
-                    <span className="font-medium text-foreground">{selectedIds.size}</span> selected
-                  </>
-                ) : (
-                  <>Select rows to delete multiple customers at once.</>
-                )}
-              </span>
-              <Button
-                variant="destructive"
-                size="sm"
-                className="shrink-0"
-                disabled={selectedIds.size === 0}
-                onClick={() => setConfirmBulkDeleteOpen(true)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete selected
-              </Button>
-            </div>
-          ) : null}
-          <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-muted-foreground">
-              <tr>
-                <th className="w-10 p-3 text-left">
-                  <Checkbox
-                    aria-label="Select all on this page"
-                    checked={headerCheckboxState}
-                    onCheckedChange={(v) => toggleSelectAllOnPage(v === true)}
-                  />
-                </th>
-                <th className="text-left p-3">Type</th>
-                <th className="text-left p-3">Name</th>
-                <th className="text-left p-3">Email</th>
-                <th className="text-left p-3">Phone</th>
-                <th className="text-left p-3">Address</th>
-                <th className="text-left p-3">Status</th>
-                <th className="text-right p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {customers.map((c) => (
-                <tr key={c.id} className="border-t">
-                  <td className="p-3 align-middle">
-                    <Checkbox
-                      aria-label={`Select ${c.type === "company" ? c.companyName : c.fullName}`}
-                      checked={selectedIds.has(c.id)}
-                      onCheckedChange={(v) => toggleRowSelected(c.id, v === true)}
-                    />
-                  </td>
-                  <td className="p-3">
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-                      {c.type === "company" ? (
-                        <Building2 className="h-3.5 w-3.5" />
-                      ) : (
-                        <User className="h-3.5 w-3.5" />
-                      )}
-                      {c.type}
-                    </span>
-                  </td>
-                  <td className="p-3 font-medium">
-                    {c.type === "company" ? c.companyName : c.fullName}
-                  </td>
-                  <td className="p-3">{c.email}</td>
-                  <td className="p-3">{c.phone}</td>
-                  <td className="p-3">
-                    {c.address_line_1}
-                    {c.address_line_2 ? `, ${c.address_line_2}` : ""}
-                  </td>
-
-                  <td className="p-3">
-                    {c.isActive ? (
-                      <span className="inline-flex px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-xs">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex px-2 py-1 rounded-full bg-muted text-muted-foreground text-xs">
-                        Inactive
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3 text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleOpenDialog(c)}>
-                          <Pencil className="h-4 w-4 mr-2" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleToggleActive(c)}>
-                          {c.isActive ? (
-                            <>
-                              <Lock className="h-4 w-4 mr-2" />
-                              Set inactive
-                            </>
-                          ) : (
-                            <>
-                              <Unlock className="h-4 w-4 mr-2" />
-                              Activate
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => setConfirmDeleteId(c.id)}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-              ))}
-              {customers.length === 0 && !loading && (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="p-8 text-center text-muted-foreground"
-                  >
-                    <div className="flex flex-col items-center gap-2">
-                      <Users className="h-10 w-10" />
-                      {searchQuery
-                        ? "No matches. Try a different search."
-                        : "No customers yet. Add your first one!"}
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        </>
-      )}
-
-      {/* Pagination footer OR skeleton */}
-      {loading ? (
-        <SkeletonPagination />
-      ) : (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <div>
-            Showing{" "}
-            <span className="font-medium text-foreground">{start || 0}</span>–
-            <span className="font-medium text-foreground">{end || 0}</span> of{" "}
-            <span className="font-medium text-foreground">{total}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
-            >
-              Previous
-            </Button>
-            <span>
-              Page <span className="font-medium text-foreground">{page}</span> /{" "}
-              {Math.max(1, Math.ceil(total / pageSize))}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setPage((p) =>
-                  Math.min(Math.max(1, Math.ceil(total / pageSize)), p + 1)
-                )
-              }
-              disabled={page >= Math.max(1, Math.ceil(total / pageSize))}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Customers per month chart */}
-      {/* Add/Edit Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {editingCustomer ? "Edit Customer" : "Add New Customer"}
-            </DialogTitle>
-            <DialogDescription>
-              {editingCustomer
-                ? "Update customer information"
-                : "Fill in the details to add a new customer"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <CustomerFormBody
-            formData={formData}
-            setFormData={setFormData}
-            errors={errors}
-            editing={!!editingCustomer}
-          />
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : editingCustomer ? "Update" : "Add"}{" "}
-              Customer
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={!!confirmDeleteId}
-        onOpenChange={() => setConfirmDeleteId(null)}
+      <FeatureListSection
+        kpiItems={kpiItems}
+        kpiLoading={kpiLoading}
+        listTitle="Customers"
+        listDescription={listDescription}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Customer</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this customer? This action cannot
-              be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={confirmBulkDeleteOpen} onOpenChange={setConfirmBulkDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete selected customers</DialogTitle>
-            <DialogDescription>
-              Delete{" "}
-              <span className="font-medium text-foreground">{selectedIds.size}</span>{" "}
-              customer{selectedIds.size === 1 ? "" : "s"}? This cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmBulkDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={() => void handleBulkDelete()} disabled={bulkDeleting}>
-              {bulkDeleting ? "Deleting…" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </AppPageShell>
-  );
-}
-
-/* ----------------- Form subcomponent ----------------- */
-function CustomerFormBody({
-  formData,
-  setFormData,
-  errors,
-  editing,
-}: {
-  formData: FormData;
-  setFormData: React.Dispatch<React.SetStateAction<FormData>>;
-  errors: Partial<Record<keyof FormData, string>>;
-  editing: boolean;
-}) {
-  return (
-    <div className="space-y-4 py-2">
-      {!editing ? (
-        <div className="flex gap-2">
-          <Button
-            variant={formData.type === "company" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFormData({ ...formData, type: "company" })}
-            className="flex-1"
-          >
-            Company
-          </Button>
-          <Button
-            variant={formData.type === "individual" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFormData({ ...formData, type: "individual" })}
-            className="flex-1"
-          >
-            Individual
-          </Button>
-        </div>
-      ) : (
-        <div>
-          <Label>Type</Label>
-          <div className="mt-1">
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-primary/10 text-primary">
-              {formData.type === "company" ? (
-                <Building2 className="h-3.5 w-3.5" />
+        {loading && customers.length === 0 ? (
+          <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={customers}
+            manualFiltering
+            onRowClick={(r) => router.push(`/app/customers/${r.id}/edit`)}
+            searchPlaceholder="Search by name, email, or company…"
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            toolbarLeft={
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="customers-include-inactive"
+                    checked={includeInactive}
+                    onCheckedChange={(v) => setIncludeInactive(v === true)}
+                  />
+                  <Label
+                    htmlFor="customers-include-inactive"
+                    className="cursor-pointer text-sm font-normal text-muted-foreground"
+                  >
+                    Include inactive
+                  </Label>
+                </div>
+              </div>
+            }
+            getRowId={(r) => r.id}
+            emptyMessage={
+              hasActiveFilters ? (
+                <FeatureEmptyState
+                  title="No customers match your filters"
+                  description="Try another search or turn off “Include inactive” to match the default list."
+                  action={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearchQuery("");
+                        setIncludeInactive(false);
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  }
+                  className="border-0 bg-transparent py-8"
+                />
               ) : (
-                <User className="h-3.5 w-3.5" />
-              )}
-              {formData.type}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {formData.type === "company" ? (
-        <>
-          <Field
-            label="Company Name *"
-            id="companyName"
-            value={formData.companyName}
-            onChange={(v) => setFormData({ ...formData, companyName: v })}
-            error={errors.companyName}
-            placeholder="Acme Corp"
+                <div className="flex max-w-md flex-col items-center gap-4 py-10 text-center">
+                  <Users className="h-10 w-10 text-muted-foreground" aria-hidden />
+                  <div>
+                    <p className="font-semibold text-foreground">No customers yet</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Add your first customer to use them on quotations and invoices.
+                    </p>
+                  </div>
+                  <Button asChild className="gap-2">
+                    <Link href="/app/customers/new">
+                      <Plus className="h-4 w-4" />
+                      Add customer
+                    </Link>
+                  </Button>
+                </div>
+              )
+            }
+            footer={
+              <DataTablePaginationFooter
+                total={total}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+                pageSizeOptions={[5, 10, 20, 50]}
+              />
+            }
           />
-          <Field
-            label="Contact Name"
-            id="contactName"
-            value={formData.contactName}
-            onChange={(v) => setFormData({ ...formData, contactName: v })}
-            placeholder="Jane Doe"
-            required={false}
-          />
-        </>
-      ) : (
-        <Field
-          label="Full Name *"
-          id="fullName"
-          value={formData.fullName}
-          onChange={(v) => setFormData({ ...formData, fullName: v })}
-          error={errors.fullName}
-          placeholder="John Doe"
-        />
-      )}
+        )}
+      </FeatureListSection>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field
-          label="Email *"
-          id="email"
-          type="email"
-          value={formData.email}
-          onChange={(v) => setFormData({ ...formData, email: v })}
-          error={errors.email}
-          placeholder="customer@example.com"
-        />
-        <Field
-          label="Phone *"
-          id="phone"
-          value={formData.phone}
-          onChange={(v) => setFormData({ ...formData, phone: v })}
-          error={errors.phone}
-          placeholder="+230 5xx xx xx"
-        />
-      </div>
-      <Field
-        label="Address Line 1 *"
-        id="address_line_1"
-        value={formData.address_line_1}
-        onChange={(v) => setFormData({ ...formData, address_line_1: v })}
-        error={errors.address_line_1}
-        placeholder="e.g. 123 Main St, Port Louis"
-      />
-      <Field
-        label="Address Line 2"
-        id="address_line_2"
-        value={formData.address_line_2}
-        onChange={(v) => setFormData({ ...formData, address_line_2: v })}
-        error={errors.address_line_2}
-        placeholder="Apartment, suite, building, etc."
-      />
-    </div>
-  );
-}
-
-/* ----------------- Helpers ----------------- */
-function emptyForm(type: "company" | "individual"): FormData {
-  return {
-    type,
-    companyName: "",
-    contactName: "",
-    fullName: "",
-    email: "",
-    phone: "",
-    street: "",
-    city: "",
-    postal: "",
-    country: "",
-    address_line_1: "",
-    address_line_2: "",
-  };
-}
-
-function mapFormToPayload(f: FormData): CustomerPayload {
-  return {
-    type: f.type,
-    companyName: f.type === "company" ? f.companyName : undefined,
-    contactName: f.type === "company" ? f.contactName : undefined,
-    fullName: f.type === "individual" ? f.fullName : undefined,
-    email: f.email,
-    phone: f.phone,
-    street: f.street,
-    city: f.city,
-    postal: f.postal,
-    country: f.country,
-    address_line_1: f.address_line_1,
-    address_line_2: f.address_line_2 || undefined,
-  };
-}
-
-function Field(props: {
-  label: string;
-  id: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-  error?: string;
-  required?: boolean;
-}) {
-  const {
-    label,
-    id,
-    value,
-    onChange,
-    placeholder,
-    type = "text",
-    error,
-  } = props;
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={error ? "border-destructive" : ""}
-      />
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
-/* ----------------- Skeletons ----------------- */
-function SkeletonFilters() {
-  return (
-    <Card>
-      <CardContent className="pt-6 space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="h-9 w-full sm:flex-1 bg-muted rounded animate-pulse" />
-          <div className="flex items-center gap-3">
-            <div className="h-5 w-36 bg-muted rounded animate-pulse" />
-            <div className="h-9 w-28 bg-muted rounded animate-pulse" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function SkeletonTable({ rows = 6 }: { rows?: number }) {
-  return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50 text-muted-foreground">
-          <tr>
-            <th className="w-10 p-3 text-left">
-              <div className="h-4 w-4 rounded border bg-muted/80 animate-pulse" />
-            </th>
-            <th className="text-left p-3">Type</th>
-            <th className="text-left p-3">Name</th>
-            <th className="text-left p-3">Email</th>
-            <th className="text-left p-3">Phone</th>
-            <th className="text-left p-3">Address</th>
-            <th className="text-left p-3">Status</th>
-            <th className="text-right p-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Array.from({ length: rows }).map((_, i) => (
-            <tr key={i} className="border-t">
-              <td className="p-3">
-                <div className="h-4 w-4 rounded border bg-muted animate-pulse" />
-              </td>
-              <td className="p-3">
-                <div className="h-5 w-16 bg-muted rounded animate-pulse" />
-              </td>
-              <td className="p-3">
-                <div className="h-5 w-40 bg-muted rounded animate-pulse" />
-              </td>
-              <td className="p-3">
-                <div className="h-5 w-48 bg-muted rounded animate-pulse" />
-              </td>
-              <td className="p-3">
-                <div className="h-5 w-28 bg-muted rounded animate-pulse" />
-              </td>
-              <td className="p-3">
-                <div className="h-5 w-24 bg-muted rounded animate-pulse" />
-              </td>
-              <td className="p-3">
-                <div className="h-5 w-16 bg-muted rounded animate-pulse" />
-              </td>
-              <td className="p-3 text-right">
-                <div className="h-8 w-8 bg-muted rounded-md ml-auto animate-pulse" />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function SkeletonPagination() {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="h-5 w-48 bg-muted rounded animate-pulse" />
-      <div className="flex items-center gap-2">
-        <div className="h-8 w-20 bg-muted rounded animate-pulse" />
-        <div className="h-5 w-24 bg-muted rounded animate-pulse" />
-        <div className="h-8 w-16 bg-muted rounded animate-pulse" />
-      </div>
-    </div>
+      <AlertDialog open={!!confirmDeleteId} onOpenChange={() => setConfirmDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete customer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. The customer record will be removed permanently.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={singleDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={singleDeleting}
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirmDeleteId) void handleDelete(confirmDeleteId);
+              }}
+            >
+              {singleDeleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </AppPageShell>
   );
 }

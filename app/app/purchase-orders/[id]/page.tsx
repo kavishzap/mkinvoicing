@@ -161,7 +161,7 @@ export default function PurchaseOrderViewPage() {
         </Link>
       }
       subtitle={`${purchaseOrder.number}${billName ? ` · ${billName}` : ""} — Review what you ordered from the supplier, export a PDF, or convert to a purchase invoice.`}
-      actions={
+      belowSubtitle={
         <div className="print:hidden">
           <PurchaseOrderViewActions
             purchaseOrderId={purchaseOrder.id}

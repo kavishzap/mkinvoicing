@@ -530,17 +530,17 @@ function NewQuotationPageContent() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={headerSubtitle}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link href="/app/quotations">
-            <Button variant="ghost" size="icon" aria-label="Back to quotations">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={doCreateQuotation} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save & View"}
+      leading={
+        <Link href="/app/quotations">
+          <Button variant="ghost" size="icon" aria-label="Back to quotations">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={doCreateQuotation} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save & View"}
+        </Button>
       }
     >
       <div className="grid lg:grid-cols-2 gap-6">

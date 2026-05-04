@@ -435,6 +435,39 @@ export async function createSalesOrder(
   );
 }
 
+/**
+ * Parallel head-only counts for the sales order directory KPI strip.
+ * Does not run `expireStaleSalesOrders` — call that once before this when loading the list.
+ */
+export async function getSalesOrderKpiCounts(): Promise<{
+  total: number;
+  active: number;
+  expired: number;
+}> {
+  const companyId = await requireActiveCompanyId();
+  const mk = (status?: SalesOrderStatus) => {
+    let q = supabase
+      .from("sales_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+    if (status) q = q.eq("status", status);
+    return q;
+  };
+  const [allRes, activeRes, expiredRes] = await Promise.all([
+    mk(),
+    mk("active"),
+    mk("expired"),
+  ]);
+  if (allRes.error) throw allRes.error;
+  if (activeRes.error) throw activeRes.error;
+  if (expiredRes.error) throw expiredRes.error;
+  return {
+    total: allRes.count ?? 0,
+    active: activeRes.count ?? 0,
+    expired: expiredRes.count ?? 0,
+  };
+}
+
 export async function listSalesOrders(opts?: {
   search?: string;
   status?: SalesOrderStatus | "all";
@@ -442,8 +475,15 @@ export async function listSalesOrders(opts?: {
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
   page?: number;
   pageSize?: number;
+  /**
+   * When true, skips `expireStaleSalesOrders()` (caller should run it once before listing,
+   * e.g. together with `getSalesOrderKpiCounts()`).
+   */
+  skipExpireStale?: boolean;
 }): Promise<{ rows: SalesOrderListRow[]; total: number }> {
-  await expireStaleSalesOrders();
+  if (!opts?.skipExpireStale) {
+    await expireStaleSalesOrders();
+  }
   const companyId = await requireActiveCompanyId();
 
   const page = Math.max(1, opts?.page ?? 1);

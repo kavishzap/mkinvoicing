@@ -505,23 +505,23 @@ export default function EditPurchaseOrderPage() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={`${purchaseOrderNumber} — Update supplier, lines, or delivery details, then save.`}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href={
-              purchaseOrderId
-                ? `/app/purchase-orders/${purchaseOrderId}`
-                : "/app/purchase-orders"
-            }
-          >
-            <Button variant="ghost" size="icon" aria-label="Back to purchase order">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={savePurchaseOrder} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save changes"}
+      leading={
+        <Link
+          href={
+            purchaseOrderId
+              ? `/app/purchase-orders/${purchaseOrderId}`
+              : "/app/purchase-orders"
+          }
+        >
+          <Button variant="ghost" size="icon" aria-label="Back to purchase order">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={savePurchaseOrder} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save changes"}
+        </Button>
       }
     >
       <div className="grid lg:grid-cols-2 gap-6">

@@ -364,6 +364,7 @@ export default function PurchaseOrdersPage() {
           columns={columns}
           data={rows}
           manualFiltering
+          onRowClick={(r) => router.push(`/app/purchase-orders/${r.id}`)}
           searchPlaceholder="Search by PO # or supplier…"
           searchValue={searchQuery}
           onSearchChange={setSearchQuery}

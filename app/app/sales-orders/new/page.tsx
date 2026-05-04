@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -67,7 +67,6 @@ import {
 } from "@/lib/sales-orders-service";
 import { getQuotation } from "@/lib/quotations-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
-import { CustomerQuickCreateDialog } from "@/components/customer-quick-create-dialog";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
@@ -167,6 +166,7 @@ function CompactBillToClientInfo({ ci }: { ci: ClientInfo }) {
 
 function NewSalesOrderPageContent() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [duplicateSourceId] = useState(() => searchParams.get("duplicate"));
   const [convertFromQuotationId] = useState(() =>
@@ -174,14 +174,18 @@ function NewSalesOrderPageContent() {
   );
   const { toast } = useToast();
 
+  const returnToNewCustomer = useMemo(() => {
+    const qs = searchParams.toString();
+    const p = pathname ?? "/app/sales-orders/new";
+    return encodeURIComponent(qs ? `${p}?${qs}` : p);
+  }, [pathname, searchParams]);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
-  const [isCreateCustomerDialogOpen, setIsCreateCustomerDialogOpen] =
-    useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -689,17 +693,17 @@ function NewSalesOrderPageContent() {
     <AppPageShell
       className="max-w-7xl"
       subtitle={headerSubtitle}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link href="/app/sales-orders">
-            <Button variant="ghost" size="icon" aria-label="Back to sales orders">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <Button onClick={doCreateSalesOrder} disabled={saving} size="sm">
-            {saving ? "Saving..." : "Save & View"}
+      leading={
+        <Link href="/app/sales-orders">
+          <Button variant="ghost" size="icon" aria-label="Back to sales orders">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-        </div>
+        </Link>
+      }
+      actions={
+        <Button onClick={doCreateSalesOrder} disabled={saving} size="sm">
+          {saving ? "Saving..." : "Save & View"}
+        </Button>
       }
     >
       <Card>
@@ -733,10 +737,14 @@ function NewSalesOrderPageContent() {
                   variant="outline"
                   size="icon"
                   className="h-9 w-9 shrink-0"
-                  aria-label="Add new customer"
-                  onClick={() => setIsCreateCustomerDialogOpen(true)}
+                  asChild
+                  aria-label="Add new customer (full page)"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Link
+                    href={`/app/customers/new?returnTo=${returnToNewCustomer}`}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Link>
                 </Button>
               </div>
               {!selectedCustomer &&
@@ -1143,7 +1151,24 @@ function NewSalesOrderPageContent() {
 
       <Dialog
         open={isCustomerDialogOpen}
-        onOpenChange={setIsCustomerDialogOpen}
+        onOpenChange={(open) => {
+          setIsCustomerDialogOpen(open);
+          if (open) {
+            void (async () => {
+              try {
+                const { rows } = await listCustomers({
+                  search: "",
+                  includeInactive: false,
+                  page: 1,
+                  pageSize: 100,
+                });
+                setCustomers(rows);
+              } catch {
+                /* ignore */
+              }
+            })();
+          }
+        }}
       >
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
@@ -1187,7 +1212,9 @@ function NewSalesOrderPageContent() {
               {customers.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">
                   <p>No customers found</p>
-                  <Link href="/app/customers">
+                  <Link
+                    href={`/app/customers/new?returnTo=${returnToNewCustomer}`}
+                  >
                     <Button variant="link" className="mt-2">
                       Add a new customer
                     </Button>
@@ -1198,27 +1225,6 @@ function NewSalesOrderPageContent() {
           </div>
         </DialogContent>
       </Dialog>
-
-      <CustomerQuickCreateDialog
-        open={isCreateCustomerDialogOpen}
-        onOpenChange={setIsCreateCustomerDialogOpen}
-        onCreated={async (row) => {
-          handleSelectCustomer(row);
-          setErrors({});
-          setCustomerSearch("");
-          try {
-            const { rows } = await listCustomers({
-              search: "",
-              includeInactive: false,
-              page: 1,
-              pageSize: 50,
-            });
-            setCustomers(rows);
-          } catch {
-            /* ignore */
-          }
-        }}
-      />
     </AppPageShell>
   );
 }

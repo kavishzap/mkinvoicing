@@ -1,19 +1,21 @@
 import { supabase } from "@/lib/supabaseClient";
 import { isUserSystemAdmin } from "@/lib/user-system-role";
+import type { Database } from "@/src/types/supabase";
 
-export type RoleFeature = {
-  code: string;
-  name: string;
-  description: string | null;
-};
+/** One row from `public.features` (matches `SELECT f.*` on the role join). */
+export type RoleFeature = Database["public"]["Tables"]["features"]["Row"];
 
 export type RoleFeatureResult = {
-  /** True when the user owns the company – grants access to every feature. */
+  /**
+   * True when this user’s `company_users` row has `is_owner` for the company.
+   * System admins get the owner’s feature list but `isOwner` stays false here.
+   */
   isOwner: boolean;
   features: RoleFeature[];
 };
 
-const SESSION_KEY = "mkinv:role_features";
+/** Bumped when cached payload shape or source query changes (avoids stale feature lists). */
+const SESSION_KEY = "mkinv:role_features_v5";
 const SESSION_USER_KEY = "mkinv:role_features_user_id";
 const SESSION_COMPANY_KEY = "mkinv:role_features_company_id";
 
@@ -65,6 +67,9 @@ export function clearRoleFeaturesCache(): void {
   if (typeof window === "undefined") return;
   try {
     window.sessionStorage.removeItem(SESSION_KEY);
+    window.sessionStorage.removeItem("mkinv:role_features_v4");
+    window.sessionStorage.removeItem("mkinv:role_features_v3");
+    window.sessionStorage.removeItem("mkinv:role_features");
     window.sessionStorage.removeItem(SESSION_USER_KEY);
     window.sessionStorage.removeItem(SESSION_COMPANY_KEY);
   } catch {
@@ -72,138 +77,170 @@ export function clearRoleFeaturesCache(): void {
   }
 }
 
-type MembershipRow = {
-  role_id: string | null;
-  is_owner: boolean | null;
-};
+/**
+ * `company_users` → `company_roles` (same `company_id` as the membership) →
+ * `role_features` → `features`.
+ * `company_roles!inner` + `.eq("company_roles.company_id", tenantId)` ensures the
+ * role row belongs to this tenant, not another company’s role on a bad `role_id`.
+ */
+const MEMBERSHIP_ROLE_FEATURES_SELECT = `
+  is_owner,
+  company_roles!inner (
+    id,
+    company_id,
+    role_features (
+      features!inner ( id, code, name, description, is_active, created_at )
+    )
+  )
+`;
 
-type RoleFeatureRow = {
-  features: {
-    code: string | null;
-    name: string | null;
-    description: string | null;
-    is_active: boolean | null;
+type CompanyUserRoleFeaturesRow = {
+  is_owner: boolean | null;
+  company_roles: {
+    id: string;
+    company_id: string;
+    role_features: Array<{
+      features: {
+        id: string;
+        code: string | null;
+        name: string | null;
+        description: string | null;
+        is_active: boolean | null;
+        created_at: string;
+      } | null;
+    }>;
   } | null;
 };
+
+/**
+ * Equivalent to:
+ * `cu` JOIN `role_features` ON `cu.role_id` = `rf.role_id`
+ * JOIN `features` ON `rf.feature_id` = `f.id` WHERE `cu.user_id` / `cu.company_id` / `cu.is_active`.
+ */
+function roleFeaturesFromCompanyUserRow(
+  row: CompanyUserRoleFeaturesRow
+): RoleFeatureResult {
+  const isOwner = !!row.is_owner;
+  const cr = row.company_roles;
+  const role = cr == null ? null : Array.isArray(cr) ? cr[0] : cr;
+  const pairs = role?.role_features;
+  const features: RoleFeature[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(pairs)) {
+    for (const rf of pairs) {
+      const f = rf?.features;
+      if (!f?.id || !f.code || !f.is_active) continue;
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      features.push({
+        id: f.id,
+        code: f.code,
+        name: f.name ?? f.code,
+        description: f.description,
+        is_active: f.is_active,
+        created_at: f.created_at,
+      });
+    }
+  }
+  return { isOwner, features };
+}
+
+/**
+ * Features from the **company owner’s** role for this tenant (`company_id`).
+ * Same join as members, with `company_roles.company_id` matching `companyId`.
+ */
+async function loadCompanyOwnerRoleFeatures(
+  companyId: string
+): Promise<RoleFeature[]> {
+  const { data: row, error } = await supabase
+    .from("company_users")
+    .select(MEMBERSHIP_ROLE_FEATURES_SELECT)
+    .eq("company_id", companyId)
+    .eq("is_owner", true)
+    .eq("is_active", true)
+    .eq("company_roles.company_id", companyId)
+    .limit(1)
+    .maybeSingle<CompanyUserRoleFeaturesRow>();
+
+  if (error) {
+    throw new Error(
+      error.message || "Could not load the company owner’s role features."
+    );
+  }
+  if (!row) {
+    return [];
+  }
+  return roleFeaturesFromCompanyUserRow(row).features;
+}
 
 async function resolveRoleFeatures(
   userId: string,
   companyId: string
 ): Promise<RoleFeatureResult> {
   if (await isUserSystemAdmin(userId)) {
-    const { data: allFeatures, error: allErr } = await supabase
-      .from("features")
-      .select("code, name, description")
-      .eq("is_active", true);
-    if (allErr) throw new Error(allErr.message);
-    const features: RoleFeature[] = (allFeatures ?? []).map((f) => ({
-      code: f.code,
-      name: f.name,
-      description: f.description,
-    }));
-    return { isOwner: true, features };
+    const features = await loadCompanyOwnerRoleFeatures(companyId);
+    return { isOwner: false, features };
   }
 
-  const { data: membership, error: memErr } = await supabase
+  const { data: row, error: memErr } = await supabase
     .from("company_users")
-    .select("role_id, is_owner")
+    .select(MEMBERSHIP_ROLE_FEATURES_SELECT)
     .eq("user_id", userId)
     .eq("company_id", companyId)
     .eq("is_active", true)
+    .eq("company_roles.company_id", companyId)
     .limit(1)
-    .maybeSingle<MembershipRow>();
+    .maybeSingle<CompanyUserRoleFeaturesRow>();
 
   if (memErr) {
     throw new Error(
-      memErr.message || "Could not load your company membership."
+      memErr.message || "Could not load your company membership and features."
     );
   }
 
-  const isOwner = !!membership?.is_owner;
-
-  if (isOwner) {
-    const { data: allFeatures, error: allErr } = await supabase
-      .from("features")
-      .select("code, name, description")
-      .eq("is_active", true);
-    if (allErr) throw new Error(allErr.message);
-    const features: RoleFeature[] = (allFeatures ?? []).map((f) => ({
-      code: f.code,
-      name: f.name,
-      description: f.description,
-    }));
-    return { isOwner: true, features };
-  }
-
-  if (!membership?.role_id) {
+  if (!row) {
     return { isOwner: false, features: [] };
   }
 
-  const { data: rows, error } = await supabase
-    .from("role_features")
-    .select(
-      `
-      features!inner ( code, name, description, is_active )
-    `
-    )
-    .eq("role_id", membership.role_id)
-    .returns<RoleFeatureRow[]>();
-
-  if (error) {
-    throw new Error(error.message || "Could not load your role features.");
-  }
-
-  const features: RoleFeature[] = [];
-  const seen = new Set<string>();
-  for (const row of rows ?? []) {
-    const f = row.features;
-    if (!f || !f.is_active || !f.code) continue;
-    if (seen.has(f.code)) continue;
-    seen.add(f.code);
-    features.push({
-      code: f.code,
-      name: f.name ?? f.code,
-      description: f.description,
-    });
-  }
-
-  return { isOwner: false, features };
+  return roleFeaturesFromCompanyUserRow(row);
 }
 
 /**
- * Loads the feature set available to the user for this company.
+ * Loads the feature set for this user and tenant (`companyId` = active company).
+ * System admins receive the **company owner’s** `role_features` set (not every catalog feature).
  * Uses an in-memory + sessionStorage cache keyed by (userId, companyId).
  */
 export async function getRoleFeatures(
   userId: string,
   companyId: string
 ): Promise<RoleFeatureResult> {
-  if (
-    cached &&
-    cachedUserId === userId &&
-    cachedCompanyId === companyId
-  ) {
+  const tenantId = companyId?.trim() ?? "";
+  if (!tenantId) {
+    return { isOwner: false, features: [] };
+  }
+
+  if (cached && cachedUserId === userId && cachedCompanyId === tenantId) {
     return cached;
   }
 
-  const session = readSessionCache(userId, companyId);
+  const session = readSessionCache(userId, tenantId);
   if (session) {
     cached = session;
     cachedUserId = userId;
-    cachedCompanyId = companyId;
+    cachedCompanyId = tenantId;
     return session;
   }
 
-  if (inFlight && cachedUserId === userId && cachedCompanyId === companyId) {
+  if (inFlight && cachedUserId === userId && cachedCompanyId === tenantId) {
     return inFlight;
   }
 
   cachedUserId = userId;
-  cachedCompanyId = companyId;
-  inFlight = resolveRoleFeatures(userId, companyId)
+  cachedCompanyId = tenantId;
+  inFlight = resolveRoleFeatures(userId, tenantId)
     .then((result) => {
       cached = result;
-      writeSessionCache(userId, companyId, result);
+      writeSessionCache(userId, tenantId, result);
       return result;
     })
     .finally(() => {

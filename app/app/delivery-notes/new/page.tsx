@@ -164,12 +164,12 @@ export default function NewDeliveryPage() {
   return (
     <AppPageShell
       subtitle="Pick active sales orders in New fulfillment and assign a driver from your team."
-      actions={
-        <Button variant="ghost" size="icon" asChild aria-label="Back">
-          <Link href="/app/delivery-notes">
+      leading={
+        <Link href="/app/delivery-notes">
+          <Button variant="ghost" size="icon" aria-label="Back to delivery notes">
             <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
+          </Button>
+        </Link>
       }
     >
       <div className="space-y-6 max-w-7xl">
