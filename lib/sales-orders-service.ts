@@ -112,6 +112,7 @@ export type CreateSalesOrderPayload = {
   notes?: string;
   terms?: string;
   customer_id: string | null;
+  city_id?: string | null;
   client_snapshot: Record<string, unknown> | null;
   from_snapshot: Record<string, unknown>;
   bill_to_snapshot: Record<string, unknown>;
@@ -168,9 +169,10 @@ export type SalesOrderListRow = {
 function nameFromBillTo(bill?: Record<string, unknown>) {
   if (!bill) return "";
   const t = bill.type as string | undefined;
-  return t === "company"
-    ? String(bill.company_name ?? "")
-    : String(bill.full_name ?? "");
+  if (t === "company") {
+    return String(bill.company_name ?? bill.name ?? "");
+  }
+  return String(bill.full_name ?? bill.name ?? "");
 }
 
 export type SalesOrderClientInfo = {
@@ -291,7 +293,7 @@ export function billToFromCustomer(c: CustomerRow): SalesOrderClientInfo {
     email: c.email ?? "",
     phone: c.phone ?? "",
     street: c.street ?? "",
-    city: c.city ?? "",
+    city: (c.cityName ?? c.city ?? "").trim(),
     postal: c.postal ?? "",
     country: c.country ?? "",
     address_line_1: c.address_line_1 ?? "",
@@ -368,6 +370,7 @@ export async function createSalesOrder(
       notes: inv.notes ?? null,
       terms: inv.terms ?? null,
       customer_id: inv.customer_id,
+      city_id: inv.city_id ?? null,
       client_snapshot: inv.client_snapshot,
       from_snapshot: inv.from_snapshot,
       bill_to_snapshot: inv.bill_to_snapshot,
@@ -695,6 +698,7 @@ export async function updateSalesOrder(
       bill_to_snapshot: inv.bill_to_snapshot,
       client_snapshot: inv.client_snapshot,
       customer_id: inv.customer_id,
+      city_id: inv.city_id ?? null,
       subtotal,
       tax_total: taxTotal,
       discount_type: inv.discount_type,

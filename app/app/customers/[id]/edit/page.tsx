@@ -21,6 +21,7 @@ import {
   validateCustomerDirectoryForm,
   type CustomerDirectoryFormData,
 } from "@/components/customer-directory-form-fields";
+import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 function rowToForm(c: CustomerRow): CustomerDirectoryFormData {
   return {
@@ -32,6 +33,7 @@ function rowToForm(c: CustomerRow): CustomerDirectoryFormData {
     phone: c.phone ?? "",
     street: c.street ?? "",
     city: c.city ?? "",
+    cityId: c.cityId ?? "",
     postal: c.postal ?? "",
     country: c.country ?? "",
     address_line_1: c.address_line_1 ?? "",
@@ -53,6 +55,18 @@ export default function EditCustomerPage() {
     Partial<Record<keyof CustomerDirectoryFormData, string>>
   >({});
   const [saving, setSaving] = useState(false);
+  const [cities, setCities] = useState<DeliveryCityRow[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const rows = await listDeliveryCities();
+        setCities(rows);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -157,6 +171,7 @@ export default function EditCustomerPage() {
               formData={formData}
               setFormData={setFormData}
               errors={errors}
+              cities={cities}
               allowTypeChange={false}
             />
           </form>

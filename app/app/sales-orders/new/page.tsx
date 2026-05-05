@@ -70,6 +70,7 @@ import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell"
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
+import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 const DEFAULT_TAX_PERCENT = 15;
 
@@ -130,9 +131,7 @@ function CompactBillToCustomer({ c }: { c: CustomerRow }) {
   const sub =
     c.type === "company" && c.contactName?.trim() ? c.contactName : null;
   const contactLine = [c.email, c.phone].filter((x) => String(x ?? "").trim()).join(" · ");
-  const addr = [c.address_line_1, c.address_line_2]
-    .filter((x) => String(x ?? "").trim())
-    .join(", ");
+  const city = (c.cityName || c.city || "").trim();
   return (
     <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
       <p className="font-medium text-foreground">{name || "—"}</p>
@@ -140,7 +139,7 @@ function CompactBillToCustomer({ c }: { c: CustomerRow }) {
       {contactLine ? (
         <p className="text-muted-foreground">{contactLine}</p>
       ) : null}
-      {addr ? <p className="text-muted-foreground">{addr}</p> : null}
+      {city ? <p className="text-muted-foreground">{city}</p> : null}
     </div>
   );
 }
@@ -190,6 +189,7 @@ function NewSalesOrderPageContent() {
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [cities, setCities] = useState<DeliveryCityRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(
     null
@@ -295,6 +295,9 @@ function NewSalesOrderPageContent() {
           onlyWithPositiveStock: true,
         });
         if (!cancelled) setProducts(productRows);
+
+        const cityRows = await listDeliveryCities();
+        if (!cancelled) setCities(cityRows);
 
         if (convertFromQuotationId && !convertHandledRef.current) {
           convertHandledRef.current = true;
@@ -544,7 +547,7 @@ function NewSalesOrderPageContent() {
       email: c.email ?? "",
       phone: c.phone ?? "",
       street: c.street ?? "",
-      city: c.city ?? "",
+      city: c.cityName ?? c.city ?? "",
       postal: c.postal ?? "",
       country: c.country ?? "",
       address_line_1: c.address_line_1 ?? "",
@@ -643,6 +646,7 @@ function NewSalesOrderPageContent() {
         notes,
         terms,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
+        city_id: selectedCustomer?.cityId ?? null,
         client_snapshot: clientSnapshot,
         from_snapshot: fromSnap,
         bill_to_snapshot: billSnap,
@@ -748,6 +752,43 @@ function NewSalesOrderPageContent() {
                     <Plus className="h-4 w-4" />
                   </Link>
                 </Button>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="soCity">City</Label>
+                <Select
+                  value={clientInfo.city || "__none__"}
+                  onValueChange={(v) => {
+                    const nextCity = v === "__none__" ? "" : v;
+                    setClientInfo((prev) => ({ ...prev, city: nextCity }));
+                    if (selectedCustomer) {
+                      setSelectedCustomer((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              city: nextCity,
+                              cityName:
+                                cities.find((c) => c.name === nextCity)?.name ??
+                                prev.cityName,
+                            }
+                          : prev
+                      );
+                    }
+                  }}
+                >
+                  <SelectTrigger id="soCity" className="h-9">
+                    <SelectValue placeholder="Select city" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No city</SelectItem>
+                    {cities
+                      .filter((c) => c.isActive)
+                      .map((c) => (
+                        <SelectItem key={c.id} value={c.name}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
               </div>
               {!selectedCustomer &&
               !hasBillToDetails(clientInfo) &&
@@ -1191,7 +1232,7 @@ function NewSalesOrderPageContent() {
               {customers.map((c) => {
                 const label =
                   c.type === "company" ? c.companyName : c.fullName;
-                const line2 = [c.email, c.phone]
+                const line2 = [c.email, c.phone, c.cityName || c.city]
                   .filter((x) => String(x ?? "").trim())
                   .join(" · ");
                 return (

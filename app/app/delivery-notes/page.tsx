@@ -109,6 +109,7 @@ export default function DeliveryNotesPage() {
     };
   }, [toast]);
 
+
   const selectedDriverBalanceMember = useMemo(
     () =>
       drivers.find((d) => d.userId === (driverBalanceRow?.driverUserId ?? "")) ??
@@ -169,6 +170,7 @@ export default function DeliveryNotesPage() {
       setConfirmingDriverBalance(false);
     }
   }
+
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {

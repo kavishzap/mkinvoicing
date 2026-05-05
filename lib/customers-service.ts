@@ -13,12 +13,14 @@ export type CustomerPayload = {
   postal?: string;
   country?: string;
   isActive?: boolean;
+  cityId?: string | null;
   address_line_1?: string;
   address_line_2?: string;
 };
 
 export type CustomerRow = CustomerPayload & {
   id: string;
+  cityName?: string;
   created_at: string;
   updated_at: string;
   isActive?: boolean;
@@ -31,7 +33,7 @@ async function getUserId() {
 }
 
 const COLUMNS =
-  "id,type,company_name,contact_name,full_name,email,phone,address_line_1,address_line_2,is_active,created_at,updated_at";
+  "id,type,company_name,contact_name,full_name,email,phone,city,city_id,cities(name),address_line_1,address_line_2,is_active,created_at,updated_at";
 
 /**
  * Paged list with optional search & includeInactive.
@@ -155,6 +157,7 @@ export async function addCustomer(
     phone: payload.phone || null,
     street: payload.street || null,
     city: payload.city || null,
+    city_id: payload.cityId ?? null,
     postal: payload.postal || null,
     country: payload.country || null,
     address_line_1: payload.address_line_1 || null,
@@ -192,6 +195,7 @@ export async function addCustomersBulk(
     phone: payload.phone || null,
     street: payload.street || null,
     city: payload.city || null,
+    city_id: payload.cityId ?? null,
     postal: payload.postal || null,
     country: payload.country || null,
     address_line_1: payload.address_line_1 || null,
@@ -290,6 +294,7 @@ export async function updateCustomer(
   if ("phone" in payload) update.phone = payload.phone ?? null;
   if ("street" in payload) update.street = payload.street ?? null;
   if ("city" in payload) update.city = payload.city ?? null;
+  if ("cityId" in payload) update.city_id = payload.cityId ?? null;
   if ("postal" in payload) update.postal = payload.postal ?? null;
   if ("country" in payload) update.country = payload.country ?? null;
   if ("address_line_1" in payload)
@@ -460,6 +465,8 @@ export async function deleteCustomers(ids: string[]): Promise<void> {
 }
 
 function mapRow(r: any): CustomerRow {
+  const cityRel = Array.isArray(r.cities) ? r.cities[0] : r.cities;
+  const cityName = cityRel?.name ? String(cityRel.name) : "";
   return {
     id: r.id,
     type: r.type,
@@ -470,6 +477,8 @@ function mapRow(r: any): CustomerRow {
     phone: r.phone ?? "",
     street: r.street ?? "",
     city: r.city ?? "",
+    cityId: r.city_id ?? null,
+    cityName,
     postal: r.postal ?? "",
     country: r.country ?? "",
     address_line_1: r.address_line_1 ?? "",

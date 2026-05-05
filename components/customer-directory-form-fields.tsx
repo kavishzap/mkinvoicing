@@ -5,7 +5,15 @@ import { Building2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { CustomerPayload } from "@/lib/customers-service";
+import type { DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 export type CustomerDirectoryFormData = {
   type: "company" | "individual";
@@ -18,6 +26,7 @@ export type CustomerDirectoryFormData = {
   city: string;
   postal: string;
   country: string;
+  cityId: string;
   address_line_1: string;
   address_line_2: string;
 };
@@ -36,6 +45,7 @@ export function emptyCustomerDirectoryForm(
     city: "",
     postal: "",
     country: "",
+    cityId: "",
     address_line_1: "",
     address_line_2: "",
   };
@@ -53,6 +63,7 @@ export function customerDirectoryFormToPayload(
     phone: f.phone,
     street: f.street,
     city: f.city,
+    cityId: f.cityId || null,
     postal: f.postal,
     country: f.country,
     address_line_1: f.address_line_1,
@@ -67,7 +78,7 @@ export function validateCustomerDirectoryForm(
   const requiredCommon: (keyof CustomerDirectoryFormData)[] = [
     "email",
     "phone",
-    "address_line_1",
+    "cityId",
   ];
   const requiredCompany: (keyof CustomerDirectoryFormData)[] = [
     "companyName",
@@ -129,6 +140,7 @@ type CustomerDirectoryFormFieldsProps = {
   formData: CustomerDirectoryFormData;
   setFormData: Dispatch<SetStateAction<CustomerDirectoryFormData>>;
   errors: Partial<Record<keyof CustomerDirectoryFormData, string>>;
+  cities: DeliveryCityRow[];
   /** When false, type is shown read-only (edit mode). */
   allowTypeChange?: boolean;
 };
@@ -137,6 +149,7 @@ export function CustomerDirectoryFormFields({
   formData,
   setFormData,
   errors,
+  cities,
   allowTypeChange = true,
 }: CustomerDirectoryFormFieldsProps) {
   return (
@@ -226,22 +239,27 @@ export function CustomerDirectoryFormFields({
           placeholder="+230 5xx xx xx"
         />
       </div>
-      <Field
-        label="Address Line 1 *"
-        id="address_line_1"
-        value={formData.address_line_1}
-        onChange={(v) => setFormData({ ...formData, address_line_1: v })}
-        error={errors.address_line_1}
-        placeholder="e.g. 123 Main St, Port Louis"
-      />
-      <Field
-        label="Address Line 2"
-        id="address_line_2"
-        value={formData.address_line_2}
-        onChange={(v) => setFormData({ ...formData, address_line_2: v })}
-        error={errors.address_line_2}
-        placeholder="Apartment, suite, building, etc."
-      />
+      <div className="space-y-2">
+        <Label htmlFor="cityId">City *</Label>
+        <Select
+          value={formData.cityId}
+          onValueChange={(v) => setFormData({ ...formData, cityId: v })}
+        >
+          <SelectTrigger id="cityId" className={errors.cityId ? "border-destructive" : ""}>
+            <SelectValue placeholder="Select city" />
+          </SelectTrigger>
+          <SelectContent>
+            {cities
+              .filter((c) => c.isActive)
+              .map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        {errors.cityId ? <p className="text-xs text-destructive">{errors.cityId}</p> : null}
+      </div>
     </div>
   );
 }

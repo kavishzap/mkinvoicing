@@ -54,9 +54,8 @@ import {
 } from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
 
-function formatAddress(c: CustomerRow): string {
-  const parts = [c.address_line_1, c.address_line_2].filter(Boolean);
-  return parts.join(", ") || "—";
+function formatCity(c: CustomerRow): string {
+  return c.cityName || c.city || "—";
 }
 
 export default function CustomersPage() {
@@ -311,15 +310,15 @@ export default function CustomersPage() {
         cell: ({ row }) => row.original.phone || "—",
       },
       {
-        id: "address",
-        accessorFn: (r) => formatAddress(r),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Address" />,
+        id: "city",
+        accessorFn: (r) => formatCity(r),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="City" />,
         meta: {
-          searchValue: (row: CustomerRow) => formatAddress(row),
+          searchValue: (row: CustomerRow) => formatCity(row),
         },
         cell: ({ row }) => (
           <span className="line-clamp-2 max-w-[14rem] text-muted-foreground">
-            {formatAddress(row.original)}
+            {formatCity(row.original)}
           </span>
         ),
       },

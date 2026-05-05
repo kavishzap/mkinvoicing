@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -35,6 +35,10 @@ import {
   type SalesOrderPickRow,
 } from "@/lib/deliveries-service";
 import type { TeamMemberRow } from "@/lib/company-team-service";
+import {
+  getDriverZoneCityFilter,
+  type DriverZoneCityFilter,
+} from "@/lib/delivery-zones-service";
 
 function fmtMoney(n: number, ccy: string | null | undefined, fractionDigits = 2) {
   const code =
@@ -74,6 +78,12 @@ export default function NewDeliveryPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [driverId, setDriverId] = useState<string>("");
   const [notes, setNotes] = useState("");
+  const zoneReq = useRef(0);
+  const [zoneForDriver, setZoneForDriver] = useState<{
+    driverUserId: string;
+    filter: DriverZoneCityFilter;
+  } | null>(null);
+  const [zoneLoading, setZoneLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,11 +115,107 @@ export default function NewDeliveryPage() {
     };
   }, [toast]);
 
+  useEffect(() => {
+    if (!driverId.trim()) {
+      setZoneForDriver(null);
+      setZoneLoading(false);
+      return;
+    }
+    const seq = ++zoneReq.current;
+    setZoneLoading(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const filter = await getDriverZoneCityFilter(driverId);
+        if (cancelled || seq !== zoneReq.current) return;
+        setZoneForDriver({ driverUserId: driverId, filter });
+      } catch (e: unknown) {
+        if (cancelled || seq !== zoneReq.current) return;
+        const err = e as { message?: string };
+        toast({
+          title: "Could not load driver route",
+          description: err?.message ?? "Showing all eligible orders.",
+          variant: "destructive",
+        });
+        setZoneForDriver({
+          driverUserId: driverId,
+          filter: { hasZoneAssignment: false, cityIds: [], cityNamesLower: [] },
+        });
+      } finally {
+        if (!cancelled && seq === zoneReq.current) setZoneLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [driverId, toast]);
+
+  const resolvedZoneFilter =
+    zoneForDriver?.driverUserId === driverId ? zoneForDriver.filter : undefined;
+
+  const visibleOrders = useMemo(() => {
+    if (!driverId.trim()) return orders;
+
+    if (zoneLoading && resolvedZoneFilter === undefined) return [];
+
+    if (!resolvedZoneFilter || !resolvedZoneFilter.hasZoneAssignment) {
+      return orders;
+    }
+
+    if (
+      resolvedZoneFilter.cityIds.length === 0 &&
+      resolvedZoneFilter.cityNamesLower.length === 0
+    ) {
+      return [];
+    }
+
+    const idSet = new Set(resolvedZoneFilter.cityIds);
+    const nameSet = new Set(resolvedZoneFilter.cityNamesLower);
+
+    return orders.filter((o) => {
+      if (o.cityId && idSet.has(o.cityId)) return true;
+      const label = o.city.trim().toLowerCase();
+      if (!o.cityId && label && nameSet.has(label)) return true;
+      return false;
+    });
+  }, [orders, driverId, resolvedZoneFilter, zoneLoading]);
+
+  useEffect(() => {
+    const allow = new Set(visibleOrders.map((o) => o.id));
+    setSelected((prev) => {
+      let dropped = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (allow.has(id)) next.add(id);
+        else dropped = true;
+      }
+      if (!dropped && next.size === prev.size) return prev;
+      return next;
+    });
+  }, [visibleOrders]);
+
+  const zoneHint = useMemo(() => {
+    if (!driverId.trim()) return null;
+    if (zoneLoading && resolvedZoneFilter === undefined)
+      return "Loading this driver’s route…";
+    if (!resolvedZoneFilter) return null;
+    if (!resolvedZoneFilter.hasZoneAssignment)
+      return "This driver is not assigned to an active zone — showing all eligible orders.";
+    if (
+      resolvedZoneFilter.cityIds.length === 0 &&
+      resolvedZoneFilter.cityNamesLower.length === 0
+    ) {
+      return "This driver’s zone has no cities linked. Add cities under Zone Cities — otherwise no orders appear here.";
+    }
+    return `Only orders whose city is on this driver’s route are listed (${resolvedZoneFilter.cityIds.length} ${resolvedZoneFilter.cityIds.length === 1 ? "city" : "cities"}).`;
+  }, [driverId, resolvedZoneFilter, zoneLoading]);
+
   const selectedList = useMemo(
-    () => orders.filter((o) => selected.has(o.id)),
-    [orders, selected]
+    () => visibleOrders.filter((o) => selected.has(o.id)),
+    [visibleOrders, selected]
   );
-  const allSelected = orders.length > 0 && selected.size === orders.length;
+  const allSelected =
+    visibleOrders.length > 0 && selected.size === visibleOrders.length;
   const someSelected = selected.size > 0 && !allSelected;
 
   function toggle(id: string, checked: boolean) {
@@ -123,7 +229,7 @@ export default function NewDeliveryPage() {
 
   function toggleAll(checked: boolean) {
     if (checked) {
-      setSelected(new Set(orders.map((o) => o.id)));
+      setSelected(new Set(visibleOrders.map((o) => o.id)));
       return;
     }
     setSelected(new Set());
@@ -224,6 +330,9 @@ export default function NewDeliveryPage() {
                   </SelectContent>
                 </Select>
               )}
+              {zoneHint ? (
+                <p className="text-sm text-muted-foreground max-w-xl">{zoneHint}</p>
+              ) : null}
             </div>
 
             <div className="space-y-2 max-w-xl">
@@ -251,6 +360,21 @@ export default function NewDeliveryPage() {
                 No eligible sales orders. Orders must be active with fulfillment New
                 (for example, not already handed to a driver).
               </div>
+            ) : zoneLoading && driverId.trim() && resolvedZoneFilter === undefined ? (
+              <div className="p-6 text-sm text-muted-foreground">
+                Applying this driver’s route…
+              </div>
+            ) : visibleOrders.length === 0 ? (
+              <div className="p-6 text-sm text-muted-foreground">
+                {driverId.trim() &&
+                resolvedZoneFilter?.hasZoneAssignment &&
+                resolvedZoneFilter.cityIds.length === 0 &&
+                resolvedZoneFilter.cityNamesLower.length === 0
+                  ? "This driver’s zone has no cities — link cities in Zone Cities to see orders."
+                  : driverId.trim() && resolvedZoneFilter?.hasZoneAssignment
+                    ? "No eligible sales orders for this driver’s route. Try another driver or add the delivery city to the zone."
+                    : "No eligible sales orders match the current filters."}
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -266,14 +390,14 @@ export default function NewDeliveryPage() {
                       <TableHead>Order</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Phone</TableHead>
-                      <TableHead>Address</TableHead>
+                      <TableHead>City</TableHead>
                       <TableHead className="min-w-[260px]">Items & qty</TableHead>
                       <TableHead>Payment</TableHead>
                       <TableHead className="text-right">Order total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {orders.map((o) => (
+                    {visibleOrders.map((o) => (
                       <TableRow key={o.id}>
                         <TableCell>
                           <Checkbox
@@ -289,9 +413,9 @@ export default function NewDeliveryPage() {
                         </TableCell>
                         <TableCell>{o.clientName || "—"}</TableCell>
                         <TableCell className="text-sm">{o.phone || "—"}</TableCell>
-                        <TableCell className="max-w-[280px] min-w-[220px] text-sm text-muted-foreground whitespace-normal break-words leading-snug align-top">
+                        <TableCell className="max-w-[220px] min-w-[160px] text-sm text-muted-foreground whitespace-normal break-words leading-snug align-top">
                           <span className="block whitespace-normal break-words">
-                            {o.addressLines || "—"}
+                            {o.city || "—"}
                           </span>
                         </TableCell>
                         <TableCell className="align-top py-3">

@@ -70,6 +70,7 @@ import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell"
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
+import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 const DEFAULT_TAX_PERCENT = 15;
 
@@ -136,6 +137,7 @@ export default function EditSalesOrderPage() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [cities, setCities] = useState<DeliveryCityRow[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(
     null
   );
@@ -230,6 +232,8 @@ export default function EditSalesOrderPage() {
         setProfile(p);
         setPreferences(prefs);
         setProducts(prodRes.rows);
+        const cityRows = await listDeliveryCities();
+        setCities(cityRows);
         setSalesOrderNumber(q.number);
         setIssueDate(q.issue_date);
         setValidUntil(q.valid_until);
@@ -415,7 +419,7 @@ export default function EditSalesOrderPage() {
       email: c.email ?? "",
       phone: c.phone ?? "",
       street: c.street ?? "",
-      city: c.city ?? "",
+      city: c.cityName ?? c.city ?? "",
       postal: c.postal ?? "",
       country: c.country ?? "",
       address_line_1: c.address_line_1 ?? "",
@@ -521,6 +525,7 @@ export default function EditSalesOrderPage() {
         notes,
         terms,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
+        city_id: selectedCustomer?.cityId ?? null,
         client_snapshot: clientSnapshot,
         from_snapshot: fromSnap,
         bill_to_snapshot: billSnap,
@@ -848,6 +853,32 @@ export default function EditSalesOrderPage() {
                   <p className="text-xs text-destructive">{errors.phone}</p>
                 )}
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientCity">City</Label>
+              <Select
+                value={clientInfo.city || "__none__"}
+                onValueChange={(v) =>
+                  setClientInfo({
+                    ...clientInfo,
+                    city: v === "__none__" ? "" : v,
+                  })
+                }
+              >
+                <SelectTrigger id="clientCity">
+                  <SelectValue placeholder="Select city" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No city</SelectItem>
+                  {cities
+                    .filter((c) => c.isActive)
+                    .map((c) => (
+                      <SelectItem key={c.id} value={c.name}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="clientAddress1">Address Line 1 *</Label>
@@ -1235,8 +1266,7 @@ export default function EditSalesOrderPage() {
                     {c.email}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    {c.address_line_1}
-                    {c.address_line_2 ? `, ${c.address_line_2}` : ""}
+                    {[c.phone, c.cityName || c.city].filter(Boolean).join(" · ") || "—"}
                   </div>
                 </button>
               ))}

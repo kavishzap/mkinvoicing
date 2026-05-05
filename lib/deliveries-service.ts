@@ -66,6 +66,9 @@ export type SalesOrderPickRow = {
   clientName: string;
   phone: string;
   email: string;
+  /** Canonical city UUID when known (`sales_orders.city_id` or linked customer `city_id`). */
+  cityId: string | null;
+  city: string;
   addressLines: string;
   items: DeliveryLineItem[];
 };
@@ -112,10 +115,20 @@ export type DeliveryDetail = {
 };
 
 function clientNameFromBill(bill: Record<string, unknown>) {
-  const t = bill.type as string | undefined;
-  return t === "company"
-    ? String(bill.company_name ?? "")
-    : String(bill.full_name ?? "");
+  const company = String(bill.company_name ?? "").trim();
+  const full = String(bill.full_name ?? "").trim();
+  const name = String(bill.name ?? "").trim();
+  const contact = String(bill.contact_name ?? "").trim();
+  const email = String(bill.email ?? "").trim();
+  const t = String(bill.type ?? "").trim().toLowerCase();
+
+  if (t === "company") {
+    return company || contact || name || full || email;
+  }
+  if (t === "individual") {
+    return full || name || company || email;
+  }
+  return company || full || name || contact || email;
 }
 
 function billSnapshotToContact(bill: Record<string, unknown>) {
@@ -133,6 +146,60 @@ function billSnapshotToContact(bill: Record<string, unknown>) {
     .filter(Boolean);
   const addressLines = parts.join(" · ");
   return { clientName, phone, email, addressLines };
+}
+
+function cityNameFromMaybeRelation(rel: unknown): string {
+  if (rel == null) return "";
+  if (Array.isArray(rel)) {
+    const first = rel[0];
+    const n =
+      first && typeof first === "object" && first !== null
+        ? (first as { name?: unknown }).name
+        : undefined;
+    return String(n ?? "").trim();
+  }
+  if (typeof rel === "object" && rel !== null) {
+    const n = (rel as { name?: unknown }).name;
+    return String(n ?? "").trim();
+  }
+  return "";
+}
+
+function pickCityDisplayForDeliveryRow(
+  row: Record<string, unknown>,
+  bill: Record<string, unknown>
+): string {
+  const fromSoCityFk = cityNameFromMaybeRelation(row.cities);
+
+  const cust = row.customers as Record<string, unknown> | Record<string, unknown>[] | null | undefined;
+  const custObj = Array.isArray(cust)
+    ? (cust[0] as Record<string, unknown> | undefined)
+    : (cust ?? undefined);
+
+  let fromCustomer = "";
+  if (custObj) {
+    fromCustomer =
+      cityNameFromMaybeRelation(custObj.cities) ||
+      String(custObj.city ?? "").trim();
+  }
+
+  const fromBill = String(bill.city ?? "").trim();
+
+  return fromSoCityFk || fromCustomer || fromBill;
+}
+
+function pickCityIdForDeliveryRow(row: Record<string, unknown>): string | null {
+  const so = row.city_id;
+  if (so != null && String(so).trim()) return String(so);
+
+  const cust = row.customers as Record<string, unknown> | Record<string, unknown>[] | null | undefined;
+  const custObj = Array.isArray(cust)
+    ? (cust[0] as Record<string, unknown> | undefined)
+    : (cust ?? undefined);
+  const cid = custObj?.city_id;
+  if (cid != null && String(cid).trim()) return String(cid);
+
+  return null;
 }
 
 async function profileDisplayMap(
@@ -179,7 +246,13 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
     .from("sales_orders")
     .select(
       `
-      id, number, issue_date, valid_until, currency, total, payment_status, bill_to_snapshot,
+      id, number, issue_date, valid_until, currency, total, payment_status, bill_to_snapshot, city_id, cities(name),
+      customer_id,
+      customers (
+        city_id,
+        city,
+        cities ( name )
+      ),
       sales_order_items ( item, description, quantity, unit_price, tax_percent, sort_order )
     `
     )
@@ -194,6 +267,8 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
   return (data ?? []).map((row: Record<string, unknown>) => {
     const bill = (row.bill_to_snapshot ?? {}) as Record<string, unknown>;
     const { clientName, phone, email, addressLines } = billSnapshotToContact(bill);
+    const cityId = pickCityIdForDeliveryRow(row);
+    const city = pickCityDisplayForDeliveryRow(row, bill);
     const rawItems = (row.sales_order_items ?? []) as Record<string, unknown>[];
     const items: DeliveryLineItem[] = [...rawItems]
       .sort(
@@ -221,6 +296,8 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
       clientName,
       phone,
       email,
+      cityId,
+      city,
       addressLines,
       items,
     };

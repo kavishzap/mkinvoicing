@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -18,6 +18,7 @@ import {
   validateCustomerDirectoryForm,
   type CustomerDirectoryFormData,
 } from "@/components/customer-directory-form-fields";
+import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 function NewCustomerForm() {
   const router = useRouter();
@@ -30,6 +31,18 @@ function NewCustomerForm() {
     Partial<Record<keyof CustomerDirectoryFormData, string>>
   >({});
   const [saving, setSaving] = useState(false);
+  const [cities, setCities] = useState<DeliveryCityRow[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const rows = await listDeliveryCities();
+        setCities(rows);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   const returnTo = safeAppReturnTo(searchParams.get("returnTo"));
 
@@ -95,6 +108,7 @@ function NewCustomerForm() {
               formData={formData}
               setFormData={setFormData}
               errors={errors}
+              cities={cities}
               allowTypeChange
             />
           </form>

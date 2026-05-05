@@ -42,6 +42,7 @@ export const FEATURE_CODES = {
   companySettings: "company_settings",
   dataCenter: "data_center",
   deliveryNote: "delivery_note",
+  zoneCity: "zone_city",
   inventory: "inventory",
 } as const;
 
@@ -123,6 +124,7 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/settings": "Company Settings",
   "/app/data-center": "Data Center",
   "/app/delivery-notes": "Delivery Notes",
+  "/app/delivery-notes/zone-cities": "Zone Cities",
 };
 
 /**
@@ -201,6 +203,13 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.deliveryNote,
     href: "/app/delivery-notes",
     icon: PackageOpen,
+    section: "operations",
+    subsection: "Delivery",
+  },
+  {
+    requires: FEATURE_CODES.zoneCity,
+    href: "/app/delivery-notes/zone-cities",
+    icon: ScrollText,
     section: "operations",
     subsection: "Delivery",
   },
@@ -341,6 +350,7 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   { prefix: "/app/settings", requires: FEATURE_CODES.companySettings },
   { prefix: "/app/company-team", requires: FEATURE_CODES.companyTeam },
   { prefix: "/app/data-center", requires: FEATURE_CODES.dataCenter },
+  { prefix: "/app/delivery-notes/zone-cities", requires: FEATURE_CODES.zoneCity },
   { prefix: "/app/delivery-notes", requires: FEATURE_CODES.deliveryNote },
   { prefix: "/app", requires: FEATURE_CODES.dashboard },
 ];
