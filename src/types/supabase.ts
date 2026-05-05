@@ -144,6 +144,7 @@ export type Database = {
       company_users: {
         Row: {
           company_id: string
+          driver_rate: number | null
           id: string
           invited_at: string | null
           is_active: boolean
@@ -154,6 +155,7 @@ export type Database = {
         }
         Insert: {
           company_id: string
+          driver_rate?: number | null
           id?: string
           invited_at?: string | null
           is_active?: boolean
@@ -164,6 +166,7 @@ export type Database = {
         }
         Update: {
           company_id?: string
+          driver_rate?: number | null
           id?: string
           invited_at?: string | null
           is_active?: boolean

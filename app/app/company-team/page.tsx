@@ -9,6 +9,7 @@ import {
   Loader2,
   MoreVertical,
   Pencil,
+  Receipt,
   Trash2,
   UserPlus,
 } from "lucide-react";
@@ -27,6 +28,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import {
@@ -39,8 +42,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { listTeamMembers, removeTeamMember, type TeamMemberRow } from "@/lib/company-team-service";
+import {
+  listTeamMembers,
+  removeTeamMember,
+  updateDriverRate,
+  type TeamMemberRow,
+} from "@/lib/company-team-service";
 import { AppPageShell } from "@/components/app-page-shell";
 
 export default function CompanyTeamPage() {
@@ -49,6 +64,9 @@ export default function CompanyTeamPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<TeamMemberRow[]>([]);
   const [deleteRow, setDeleteRow] = useState<TeamMemberRow | null>(null);
+  const [rateRow, setRateRow] = useState<TeamMemberRow | null>(null);
+  const [rateValue, setRateValue] = useState("");
+  const [savingRate, setSavingRate] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,6 +203,19 @@ export default function CompanyTeamPage() {
                       Edit
                     </Link>
                   </DropdownMenuItem>
+                  {r.roleName.toLowerCase().includes("driver") ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setRateRow(r);
+                        setRateValue(
+                          r.driverRate != null ? String(r.driverRate) : ""
+                        );
+                      }}
+                    >
+                      <Receipt className="mr-2 h-4 w-4" />
+                      Set rate
+                    </DropdownMenuItem>
+                  ) : null}
                   {!r.isOwner && (
                     <DropdownMenuItem
                       className="text-destructive"
@@ -217,6 +248,38 @@ export default function CompanyTeamPage() {
         description: err instanceof Error ? err.message : "Try again.",
         variant: "destructive",
       });
+    }
+  };
+
+  const saveRate = async () => {
+    if (!rateRow) return;
+    const numericRate = Number(rateValue);
+    if (!Number.isFinite(numericRate) || numericRate < 0) {
+      toast({
+        title: "Invalid rate",
+        description: "Enter a valid number greater than or equal to 0.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      setSavingRate(true);
+      await updateDriverRate(rateRow.membershipId, numericRate);
+      toast({
+        title: "Rate saved",
+        description: "Driver rate has been updated.",
+      });
+      setRateRow(null);
+      setRateValue("");
+      await load();
+    } catch (err) {
+      toast({
+        title: "Could not save rate",
+        description: err instanceof Error ? err.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingRate(false);
     }
   };
 
@@ -292,6 +355,50 @@ export default function CompanyTeamPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={!!rateRow}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRateRow(null);
+            setRateValue("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set rate</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="driver-rate">Rate</Label>
+            <Input
+              id="driver-rate"
+              type="number"
+              min="0"
+              step="0.01"
+              value={rateValue}
+              onChange={(e) => setRateValue(e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setRateRow(null);
+                setRateValue("");
+              }}
+              disabled={savingRate}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void saveRate()} disabled={savingRate}>
+              {savingRate ? "Saving..." : "Save rate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppPageShell>
   );
 }

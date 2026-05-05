@@ -22,6 +22,7 @@ export type TeamMemberRow = {
   isOwner: boolean;
   invitedAt: string | null;
   joinedAt: string | null;
+  driverRate: number | null;
   profile: TeamMemberProfile | null;
 };
 
@@ -40,6 +41,7 @@ export async function listTeamMembers(): Promise<TeamMemberRow[]> {
       is_owner,
       invited_at,
       joined_at,
+      driver_rate,
       company_roles ( name )
     `
     )
@@ -92,6 +94,7 @@ export async function listTeamMembers(): Promise<TeamMemberRow[]> {
       isOwner: Boolean(m.is_owner),
       invitedAt: (m.invited_at as string | null) ?? null,
       joinedAt: (m.joined_at as string | null) ?? null,
+      driverRate: (m.driver_rate as number | null) ?? null,
       profile: prof,
     } satisfies TeamMemberRow;
   });
@@ -113,6 +116,7 @@ export async function getTeamMember(
       is_owner,
       invited_at,
       joined_at,
+      driver_rate,
       company_roles ( name )
     `
     )
@@ -155,8 +159,25 @@ export async function getTeamMember(
     isOwner: Boolean(m.is_owner),
     invitedAt: (m.invited_at as string | null) ?? null,
     joinedAt: (m.joined_at as string | null) ?? null,
+    driverRate: (m.driver_rate as number | null) ?? null,
     profile: prof,
   };
+}
+
+export async function updateDriverRate(
+  membershipId: string,
+  rate: number
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  if (!Number.isFinite(rate) || rate < 0) {
+    throw new Error("Rate must be a valid number greater than or equal to 0.");
+  }
+  const { error } = await supabase
+    .from("company_users")
+    .update({ driver_rate: rate } as never)
+    .eq("id", membershipId)
+    .eq("company_id", companyId);
+  if (error) throw new Error(error.message);
 }
 
 export type UpdateTeamMemberPayload = {

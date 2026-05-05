@@ -154,176 +154,176 @@ export default function DeliveryDetailPage() {
         </div>
       }
     >
-      <div className="w-full space-y-6">
-        <Card>
-          <CardHeader className="pb-2 flex flex-row flex-wrap items-start justify-between gap-3">
-            <CardTitle className="text-base">Summary</CardTitle>
-            <DeliveryNoteStatusBadge status={delivery.status} />
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="space-y-2 max-w-xs">
-              <Label htmlFor="delivery-note-status" className="text-muted-foreground">
-                Delivery note status
-              </Label>
-              <Select
-                value={delivery.status}
-                disabled={statusBusy || delivery.status === "completed"}
-                onValueChange={async (value) => {
-                  const target = value as DeliveryNoteStatus;
-                  if (target === delivery.status) return;
-                  const allowedNext = getNextDeliveryNoteStatus(delivery.status);
-                  if (allowedNext !== target) {
-                    toast({
-                      title: "One step at a time",
-                      description:
-                        "Choose the next status in order (you cannot skip from New to Completed).",
-                      variant: "destructive",
-                    });
-                    return;
-                  }
-                  setStatusBusy(true);
-                  try {
-                    const updated = await advanceDeliveryNoteStatus(delivery.id);
-                    if (updated) {
-                      setDelivery(updated);
-                      const soMsg =
-                        target === "delivered_to_driver"
-                          ? " All linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
-                          : target === "completed"
-                            ? " Linked sales orders on this delivery are set to Delivered to customer where applicable."
-                            : "";
-                      toast({
-                        title: "Status updated",
-                        description: `${DELIVERY_NOTE_STATUS_LABELS[target]}.${soMsg}`,
-                      });
-                    }
-                  } catch (e: unknown) {
-                    const err = e as { message?: string };
-                    toast({
-                      title: "Could not update status",
-                      description: err?.message ?? "Please try again.",
-                      variant: "destructive",
-                    });
-                  } finally {
-                    setStatusBusy(false);
-                  }
-                }}
-              >
-                <SelectTrigger id="delivery-note-status" size="sm" className="w-full max-w-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DELIVERY_NOTE_STATUSES.map((s) => {
-                    const i = DELIVERY_NOTE_STATUSES.indexOf(s);
-                    const disabled =
-                      delivery.status === "completed"
-                        ? s !== "completed"
-                        : i < statusIdx || i > statusIdx + 1;
-                    return (
-                      <SelectItem key={s} value={s} disabled={disabled}>
-                        {DELIVERY_NOTE_STATUS_LABELS[s]}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-              {delivery.status === "new" && nextStatus ? (
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  Moving to <span className="font-medium text-foreground">Delivered to driver</span>{" "}
-                  updates every sales order on this delivery to the same fulfillment status, except
-                  orders that are cancelled or already delivered to the customer.
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1">
-              <span className="text-muted-foreground">Driver</span>
-              <span className="font-medium">{delivery.driverDisplay}</span>
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1">
-              <span className="text-muted-foreground">Created by</span>
-              <span>{delivery.createdByDisplay}</span>
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1">
-              <span className="text-muted-foreground">Orders</span>
-              <span>{delivery.salesOrders.length}</span>
-            </div>
-            {delivery.notes ? (
-              <div className="pt-2">
-                <span className="text-muted-foreground block text-xs uppercase tracking-wide mb-1">
-                  Notes
-                </span>
-                <p className="whitespace-pre-wrap">{delivery.notes}</p>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+      <div className="w-full space-y-4">
+        <div className="overflow-x-auto rounded-lg border-2 border-primary/40 bg-primary/5 shadow-sm">
+          <table className="w-full min-w-[1100px] border-collapse text-sm">
+            <tbody>
+              <tr className="bg-primary/15">
+                <th className="border px-3 py-2 text-left font-semibold" colSpan={8}>
+                  Delivery Summary
+                </th>
+              </tr>
+              <tr>
+                <td className="border px-3 py-2 font-medium">Delivery status</td>
+                <td className="border px-3 py-2">
+                  <div className="max-w-xs space-y-2">
+                    <Select
+                      value={delivery.status}
+                      disabled={statusBusy || delivery.status === "completed"}
+                      onValueChange={async (value) => {
+                        const target = value as DeliveryNoteStatus;
+                        if (target === delivery.status) return;
+                        const allowedNext = getNextDeliveryNoteStatus(delivery.status);
+                        if (allowedNext !== target) {
+                          toast({
+                            title: "One step at a time",
+                            description:
+                              "Choose the next status in order (you cannot skip from New to Completed).",
+                            variant: "destructive",
+                          });
+                          return;
+                        }
+                        setStatusBusy(true);
+                        try {
+                          const updated = await advanceDeliveryNoteStatus(delivery.id);
+                          if (updated) {
+                            setDelivery(updated);
+                            const soMsg =
+                              target === "delivered_to_driver"
+                                ? " All linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
+                                : target === "completed"
+                                  ? " Linked sales orders on this delivery are set to Delivered to customer where applicable."
+                                  : "";
+                            toast({
+                              title: "Status updated",
+                              description: `${DELIVERY_NOTE_STATUS_LABELS[target]}.${soMsg}`,
+                            });
+                          }
+                        } catch (e: unknown) {
+                          const err = e as { message?: string };
+                          toast({
+                            title: "Could not update status",
+                            description: err?.message ?? "Please try again.",
+                            variant: "destructive",
+                          });
+                        } finally {
+                          setStatusBusy(false);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="delivery-note-status" size="sm" className="w-full max-w-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {DELIVERY_NOTE_STATUSES.map((s) => {
+                          const i = DELIVERY_NOTE_STATUSES.indexOf(s);
+                          const disabled =
+                            delivery.status === "completed"
+                              ? s !== "completed"
+                              : i < statusIdx || i > statusIdx + 1;
+                          return (
+                            <SelectItem key={s} value={s} disabled={disabled}>
+                              {DELIVERY_NOTE_STATUS_LABELS[s]}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                    {delivery.status === "new" && nextStatus ? (
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Moving to{" "}
+                        <span className="font-medium text-foreground">
+                          Delivered to driver
+                        </span>{" "}
+                        updates every sales order on this delivery to the same
+                        fulfillment status, except orders that are cancelled or already
+                        delivered to the customer.
+                      </p>
+                    ) : null}
+                  </div>
+                </td>
+                <td className="border px-3 py-2 font-medium">Current</td>
+                <td className="border px-3 py-2">
+                  <DeliveryNoteStatusBadge status={delivery.status} />
+                </td>
+                <td className="border px-3 py-2 font-medium">Driver</td>
+                <td className="border px-3 py-2">{delivery.driverDisplay}</td>
+                <td className="border px-3 py-2 font-medium">Orders</td>
+                <td className="border px-3 py-2">{delivery.salesOrders.length}</td>
+              </tr>
+              <tr>
+                <td className="border px-3 py-2 font-medium">Created by</td>
+                <td className="border px-3 py-2">{delivery.createdByDisplay}</td>
+                <td className="border px-3 py-2 font-medium">Created at</td>
+                <td className="border px-3 py-2">{fmtWhen(delivery.createdAt)}</td>
+                <td className="border px-3 py-2 font-medium">Updated at</td>
+                <td className="border px-3 py-2">{fmtWhen(delivery.updatedAt)}</td>
+                <td className="border px-3 py-2 font-medium">Delivery ID</td>
+                <td className="border px-3 py-2 break-all">{delivery.id}</td>
+              </tr>
+              <tr>
+                <td className="border px-3 py-2 font-medium">Notes</td>
+                <td className="border px-3 py-2 whitespace-pre-wrap" colSpan={7}>
+                  {delivery.notes?.trim() ? delivery.notes : "—"}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-        {delivery.salesOrders.map((so) => (
-          <Card key={so.linkId}>
-            <CardHeader className="pb-2 flex flex-row flex-wrap items-start justify-between gap-2">
-              <div>
-                <CardTitle className="text-base">{so.number}</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {so.clientName}
-                  {so.phone ? ` · ${so.phone}` : ""}
-                </p>
-                {so.email ? (
-                  <p className="text-sm text-muted-foreground">{so.email}</p>
-                ) : null}
-                {so.addressLines ? (
-                  <p className="text-sm mt-1">{so.addressLines}</p>
-                ) : null}
-              </div>
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-sm font-semibold tabular-nums">
-                  {fmtMoney(so.total, so.currency)}
-                </span>
-                <SalesOrderFulfillmentStatusBadge status={so.fulfillmentStatus} />
-              </div>
-            </CardHeader>
-            <Separator />
-            <CardContent className="pt-4">
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Line items
-              </p>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Price</TableHead>
-                      <TableHead className="text-right">Tax %</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(so.items ?? []).map((it, idx) => (
-                      <TableRow key={`${so.salesOrderId}-${idx}`}>
-                        <TableCell>
-                          <div className="font-medium">{it.item}</div>
-                          {it.description ? (
-                            <div className="text-xs text-muted-foreground">
-                              {it.description}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {it.quantity}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {fmtMoney(it.unit_price, so.currency)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {it.tax_percent}%
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        <div className="overflow-x-auto rounded-lg border bg-background">
+          <table className="w-full min-w-[1150px] border-collapse text-sm">
+            <thead className="bg-muted/40">
+              <tr>
+                <th className="border px-3 py-2 text-left font-semibold">SO Number</th>
+                <th className="border px-3 py-2 text-left font-semibold">Client</th>
+                <th className="border px-3 py-2 text-left font-semibold">Phone</th>
+                <th className="border px-3 py-2 text-left font-semibold">Address</th>
+                <th className="border px-3 py-2 text-right font-semibold">SO Total</th>
+                <th className="border px-3 py-2 text-left font-semibold">Fulfillment</th>
+                <th className="border px-3 py-2 text-left font-semibold">Item</th>
+                <th className="border px-3 py-2 text-right font-semibold">Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {delivery.salesOrders.flatMap((so) => {
+                const items = so.items?.length
+                  ? so.items
+                  : [{ item: "—", description: null, quantity: 0, unit_price: 0, tax_percent: 0 }];
+                return items.map((it, idx) => (
+                  <tr key={`${so.linkId}-${idx}`} className="align-top">
+                    {idx === 0 ? (
+                      <>
+                        <td className="border px-3 py-2 font-medium" rowSpan={items.length}>
+                          {so.number}
+                        </td>
+                        <td className="border px-3 py-2" rowSpan={items.length}>
+                          {so.clientName}
+                        </td>
+                        <td className="border px-3 py-2" rowSpan={items.length}>
+                          {so.phone || "—"}
+                        </td>
+                        <td className="border px-3 py-2" rowSpan={items.length}>
+                          {so.addressLines || "—"}
+                        </td>
+                        <td className="border px-3 py-2 text-right tabular-nums" rowSpan={items.length}>
+                          {fmtMoney(so.total, so.currency)}
+                        </td>
+                        <td className="border px-3 py-2" rowSpan={items.length}>
+                          <SalesOrderFulfillmentStatusBadge status={so.fulfillmentStatus} />
+                        </td>
+                      </>
+                    ) : null}
+                    <td className="border px-3 py-2">
+                      <div className="font-medium">{it.item}</div>
+                    </td>
+                    <td className="border px-3 py-2 text-right tabular-nums">{it.quantity}</td>
+                  </tr>
+                ));
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </AppPageShell>
   );

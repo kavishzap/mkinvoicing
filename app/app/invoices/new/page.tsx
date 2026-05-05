@@ -71,6 +71,8 @@ import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 
+const DEFAULT_TAX_PERCENT = 15;
+
 type LineItem = {
   id: string;
   /** `products.id`; required before save (same pattern as sales orders). */
@@ -193,7 +195,7 @@ function NewInvoicePageContent() {
       description: "",
       quantity: 1,
       unitPrice: 0,
-      tax: 0,
+      tax: DEFAULT_TAX_PERCENT,
     },
   ]);
   const [discount, setDiscount] = useState({
@@ -559,7 +561,7 @@ function NewInvoicePageContent() {
         description: "",
         quantity: 1,
         unitPrice: 0,
-        tax: 0,
+        tax: DEFAULT_TAX_PERCENT,
       },
     ]);
 

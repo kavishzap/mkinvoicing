@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Copy, Download, Edit, Printer, FileText } from "lucide-react";
+import { Copy, Download, Edit, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
@@ -14,6 +14,7 @@ import {
   normalizeSalesOrderPaymentStatus,
   SALES_ORDER_FULFILLMENT_LABELS,
   SALES_ORDER_PAYMENT_LABELS,
+  updateSalesOrderPaymentStatus,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
@@ -129,17 +130,36 @@ export function SalesOrderViewActions({
     );
   };
 
-  const handleConvertToInvoice = () => {
+  const handleMarkAsPaid = async () => {
     if (busy) return;
-    router.push(
-      `/app/invoices/new?convertFromSalesOrder=${encodeURIComponent(salesOrderId)}&markSalesOrderPaid=1`
-    );
+    try {
+      setBusy(true);
+      await updateSalesOrderPaymentStatus(salesOrderId, "paid");
+      toast({
+        title: "Sales order updated",
+        description: "Payment status set to Paid.",
+      });
+      router.refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Please try again.";
+      toast({
+        title: "Could not mark as paid",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const canEditSalesOrder =
     salesOrder != null &&
     normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status) ===
       "new";
+  const canMarkAsPaid =
+    salesOrder == null
+      ? true
+      : normalizeSalesOrderPaymentStatus(salesOrder.payment_status) !== "paid";
 
   const renderPdf = async (mode: "download" | "print") => {
     if (busy) return;
@@ -469,23 +489,19 @@ export function SalesOrderViewActions({
         <Copy className="h-4 w-4 shrink-0" />
         <span className="whitespace-nowrap">Duplicate</span>
       </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-auto min-h-8 max-w-full shrink-0 gap-1.5 px-2.5 py-1.5 text-left leading-snug sm:h-9 sm:max-w-[min(100%,20rem)] sm:py-0"
-        onClick={handleConvertToInvoice}
-        disabled={busy}
-        title="Convert to invoice and mark as paid"
-      >
-        <FileText className="h-4 w-4 shrink-0 sm:mt-0.5" />
-        <span className="min-w-0 sm:whitespace-nowrap">
-          <span className="sm:hidden">Invoice + mark paid</span>
-          <span className="hidden sm:inline">
-            Convert to invoice and mark as paid
-          </span>
-        </span>
-      </Button>
+      {canMarkAsPaid ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
+          onClick={() => void handleMarkAsPaid()}
+          disabled={busy}
+          title="Mark as paid"
+        >
+          <span className="whitespace-nowrap">Mark as paid</span>
+        </Button>
+      ) : null}
       {canEditSalesOrder ? (
         <Button
           type="button"

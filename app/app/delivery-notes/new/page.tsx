@@ -109,6 +109,8 @@ export default function NewDeliveryPage() {
     () => orders.filter((o) => selected.has(o.id)),
     [orders, selected]
   );
+  const allSelected = orders.length > 0 && selected.size === orders.length;
+  const someSelected = selected.size > 0 && !allSelected;
 
   function toggle(id: string, checked: boolean) {
     setSelected((prev) => {
@@ -117,6 +119,14 @@ export default function NewDeliveryPage() {
       else next.delete(id);
       return next;
     });
+  }
+
+  function toggleAll(checked: boolean) {
+    if (checked) {
+      setSelected(new Set(orders.map((o) => o.id)));
+      return;
+    }
+    setSelected(new Set());
   }
 
   async function handleSave() {
@@ -246,7 +256,13 @@ export default function NewDeliveryPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10" />
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                          onCheckedChange={(c) => toggleAll(c === true)}
+                          aria-label="Select all sales orders"
+                        />
+                      </TableHead>
                       <TableHead>Order</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Phone</TableHead>
@@ -273,8 +289,10 @@ export default function NewDeliveryPage() {
                         </TableCell>
                         <TableCell>{o.clientName || "—"}</TableCell>
                         <TableCell className="text-sm">{o.phone || "—"}</TableCell>
-                        <TableCell className="max-w-[200px] text-sm text-muted-foreground">
-                          {o.addressLines || "—"}
+                        <TableCell className="max-w-[280px] min-w-[220px] text-sm text-muted-foreground whitespace-normal break-words leading-snug align-top">
+                          <span className="block whitespace-normal break-words">
+                            {o.addressLines || "—"}
+                          </span>
                         </TableCell>
                         <TableCell className="align-top py-3">
                           {o.items.length === 0 ? (

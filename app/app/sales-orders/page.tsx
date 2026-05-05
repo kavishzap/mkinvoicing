@@ -10,7 +10,6 @@ import {
   Trash2,
   MoreHorizontal,
   Copy,
-  FileText,
   ClipboardList,
   BadgeCheck,
   TimerOff,
@@ -54,6 +53,7 @@ import {
   deleteSalesOrder,
   expireStaleSalesOrders,
   getSalesOrderKpiCounts,
+  updateSalesOrderPaymentStatus,
   type SalesOrderListRow,
   type SalesOrderStatus,
 } from "@/lib/sales-orders-service";
@@ -215,6 +215,28 @@ export default function SalesOrdersPage() {
     [router],
   );
 
+  const handleMarkAsPaid = useCallback(
+    async (id: string) => {
+      try {
+        await updateSalesOrderPaymentStatus(id, "paid");
+        setRows((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, paymentStatus: "paid" } : r)),
+        );
+        toast({
+          title: "Sales order updated",
+          description: "Payment status set to Paid.",
+        });
+      } catch (e: unknown) {
+        toast({
+          title: "Could not mark as paid",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast],
+  );
+
   const columns = useMemo<ColumnDef<SalesOrderListRow>[]>(
     () => [
       {
@@ -349,16 +371,12 @@ export default function SalesOrdersPage() {
                   <Copy className="mr-2 h-4 w-4" />
                   Duplicate (prefill new)
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() =>
-                    router.push(
-                      `/app/invoices/new?convertFromSalesOrder=${encodeURIComponent(so.id)}&markSalesOrderPaid=1`,
-                    )
-                  }
-                >
-                  <FileText className="mr-2 h-4 w-4" />
-                  Convert to invoice and mark as paid
-                </DropdownMenuItem>
+                {so.paymentStatus !== "paid" ? (
+                  <DropdownMenuItem onClick={() => void handleMarkAsPaid(so.id)}>
+                    <BadgeCheck className="mr-2 h-4 w-4" />
+                    Mark as paid
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
@@ -373,7 +391,7 @@ export default function SalesOrdersPage() {
         },
       },
     ],
-    [router, handleDuplicate],
+    [router, handleDuplicate, handleMarkAsPaid],
   );
 
   const confirmDelete = async () => {

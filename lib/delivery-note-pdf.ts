@@ -123,7 +123,7 @@ async function buildDeliveryNotePdf(
   const resolvedLogo =
     branding.logoUrl || profile?.logoUrl || "/kredence.png";
 
-  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const M = 40;
@@ -155,118 +155,96 @@ async function buildDeliveryNotePdf(
   doc.setTextColor("#000000");
 
   let y = 88;
-  doc.setFont("helvetica", "bold").setFontSize(11).text("Delivery details", M, y);
-  doc.setFont("helvetica", "bold").setFontSize(11).text("Reference", rightX - 200, y);
-  y += 16;
-
-  const leftMeta = [
-    `Status: ${DELIVERY_NOTE_STATUS_LABELS[delivery.status]}`,
-    `Created: ${fmtWhen(delivery.createdAt)}`,
-    `Created by: ${delivery.createdByDisplay}`,
-    `Driver: ${delivery.driverDisplay}`,
-    `Sales orders: ${delivery.salesOrders.length}`,
-  ].join("\n");
-  const leftW = (pageW - 2 * M) * 0.55;
-  const rightW = (pageW - 2 * M) * 0.4;
   doc.setFont("helvetica", "normal").setFontSize(10);
-  const leftWrapped = doc.splitTextToSize(leftMeta, leftW);
-  doc.text(leftWrapped, M, y);
-  const refWrapped = doc.splitTextToSize(delivery.id, rightW);
-  doc.text(refWrapped, rightX, y, { align: "right" });
+  doc.text(`Date: ${fmtWhen(delivery.createdAt)}`, M, y);
+  doc.text(`Driver: ${delivery.driverDisplay}`, M + 220, y);
+  doc.text(`Status: ${DELIVERY_NOTE_STATUS_LABELS[delivery.status]}`, M + 460, y);
+  y += 8;
 
-  const leftLines = Array.isArray(leftWrapped) ? leftWrapped.length : 1;
-  const rightLines = Array.isArray(refWrapped) ? refWrapped.length : 1;
-  y += Math.max(leftLines, rightLines) * 13 + 12;
+  const bodyRows: RowInput[] = delivery.salesOrders.map((so, index) => {
+    const qty = (so.items ?? []).reduce(
+      (sum, it) => sum + Number(it.quantity ?? 0),
+      0
+    );
+    const productNames = (so.items ?? [])
+      .map((it) => String(it.item ?? "").trim())
+      .filter(Boolean)
+      .join(", ");
+    return [
+      String(index + 1),
+      so.number || "-",
+      so.clientName || "-",
+      so.addressLines || "-",
+      so.phone || "-",
+      String(qty),
+      productNames || "-",
+      pdfMoney(so.total, so.currency),
+      "",
+    ];
+  });
+
+  autoTable(doc, {
+    head: [
+      [
+        "No",
+        "Order No",
+        "Name",
+        "Address",
+        "Phone",
+        "Qty",
+        "Products",
+        "Amount",
+        "Remark",
+      ],
+    ],
+    body:
+      bodyRows.length > 0
+        ? bodyRows
+        : [["1", "-", "No orders", "-", "-", "0", "-", pdfMoney(0, "MUR"), ""]],
+    startY: y + 8,
+    styles: {
+      font: "helvetica",
+      fontSize: 8,
+      cellPadding: 3,
+      lineColor: 80,
+      lineWidth: 0.4,
+      textColor: 20,
+      valign: "middle",
+      overflow: "linebreak",
+    },
+    headStyles: {
+      fillColor: [226, 232, 240],
+      textColor: 15,
+      lineColor: 80,
+      lineWidth: 0.5,
+      fontStyle: "bold",
+    },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 24 },
+      1: { cellWidth: 64 },
+      2: { cellWidth: 84 },
+      3: { cellWidth: 138 },
+      4: { cellWidth: 68 },
+      5: { halign: "right", cellWidth: 32 },
+      6: { cellWidth: 116 },
+      7: { halign: "right", cellWidth: 58 },
+      8: { cellWidth: 92 },
+    },
+    margin: { left: M, right: M },
+    theme: "grid",
+  });
+
+  const afterTable =
+    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
+      ?.finalY ?? y;
+  y = afterTable + 14;
 
   if (delivery.notes?.trim()) {
-    doc.setFont("helvetica", "bold").setFontSize(11).text("Notes", M, y);
-    y += 14;
+    doc.setFont("helvetica", "bold").setFontSize(10).text("Notes:", M, y);
     doc.setFont("helvetica", "normal").setFontSize(10);
-    const noteLines = doc.splitTextToSize(delivery.notes.trim(), pageW - 2 * M);
-    doc.text(noteLines, M, y);
-    y += (Array.isArray(noteLines) ? noteLines.length : 1) * 13 + 16;
-  }
-
-  for (const so of delivery.salesOrders) {
-    if (y > pageH - 140) {
-      doc.addPage();
-      y = M;
-    }
-
-    doc.setFont("helvetica", "bold").setFontSize(12).text(`Order ${so.number}`, M, y);
-    y += 16;
-
-    const deliverLines = [
-      `Deliver to: ${so.clientName}`,
-      so.phone ? `Phone: ${so.phone}` : "",
-      so.email ? `Email: ${so.email}` : "",
-      so.addressLines ? `Address: ${so.addressLines}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    doc.setFont("helvetica", "normal").setFontSize(10);
-    const dWrapped = doc.splitTextToSize(deliverLines, pageW - 2 * M);
-    doc.text(dWrapped, M, y);
-    y += (Array.isArray(dWrapped) ? dWrapped.length : 1) * 13 + 8;
-
-    const bodyRows: RowInput[] = (so.items ?? []).map((it) => {
-      const qty = Number(it.quantity);
-      const unit = Number(it.unit_price);
-      const line = qty * unit;
-      const taxAmt = line * (Number(it.tax_percent) / 100);
-      const lineTotal = line + taxAmt;
-      return [
-        it.item ?? "",
-        it.description ?? "",
-        String(qty),
-        pdfMoney(unit, so.currency),
-        `${it.tax_percent ?? 0}%`,
-        pdfMoney(lineTotal, so.currency),
-      ];
-    });
-
-    const emptyRow: RowInput = [
-      "—",
-      "No line items",
-      "0",
-      pdfMoney(0, so.currency),
-      "0%",
-      pdfMoney(0, so.currency),
-    ];
-
-    autoTable(doc, {
-      head: [["Item", "Description", "Qty", "Price", "Tax", "Total"]],
-      body: bodyRows.length ? bodyRows : [emptyRow],
-      startY: y,
-      styles: {
-        font: "helvetica",
-        fontSize: 10,
-        cellPadding: 6,
-        lineColor: 230,
-        lineWidth: 0.4,
-      },
-      headStyles: { fillColor: [15, 23, 42], textColor: 255 },
-      bodyStyles: { valign: "top" },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      columnStyles: {
-        2: { halign: "right", cellWidth: 50 },
-        3: { halign: "right", cellWidth: 70 },
-        4: { halign: "right", cellWidth: 50 },
-        5: { halign: "right", cellWidth: 80 },
-      },
-      margin: { left: M, right: M },
-    });
-
-    const afterTable =
-      (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
-        ?.finalY ?? y;
-    y = afterTable + 10;
-
-    doc.setFont("helvetica", "bold").setFontSize(10);
-    doc.text(`Order total: ${pdfMoney(so.total, so.currency)}`, rightX, y, {
-      align: "right",
-    });
-    y += 28;
+    const noteLines = doc.splitTextToSize(delivery.notes.trim(), pageW - 2 * M - 40);
+    doc.text(noteLines, M + 40, y);
+    y += (Array.isArray(noteLines) ? noteLines.length : 1) * 12 + 12;
   }
 
   if (y > pageH - 200) {

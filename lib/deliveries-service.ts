@@ -73,6 +73,7 @@ export type SalesOrderPickRow = {
 export type DeliveryListRow = {
   id: string;
   status: DeliveryNoteStatus;
+  driverStatus: boolean;
   driverUserId: string;
   driverDisplay: string;
   createdByUserId: string;
@@ -80,6 +81,7 @@ export type DeliveryListRow = {
   notes: string | null;
   createdAt: string;
   orderCount: number;
+  totalAmount: number;
 };
 
 export type DeliveryDetailSalesOrder = {
@@ -234,12 +236,16 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       `
       id,
       status,
+      driver_status,
       driver_user_id,
       created_by,
       notes,
       created_at,
       updated_at,
-      delivery_sales_orders ( id )
+      delivery_sales_orders (
+        id,
+        sales_orders ( total )
+      )
     `
     )
     .eq("company_id", companyId)
@@ -256,12 +262,20 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
   const names = await profileDisplayMap(userIds);
 
   return rows.map((r: Record<string, unknown>) => {
-    const lines = (r.delivery_sales_orders ?? []) as unknown[];
+    const lines = (r.delivery_sales_orders ?? []) as Record<string, unknown>[];
+    const totalAmount = lines.reduce((sum, line) => {
+      const nested = line.sales_orders;
+      const so = (Array.isArray(nested) ? nested[0] : nested) as
+        | Record<string, unknown>
+        | undefined;
+      return sum + Number(so?.total ?? 0);
+    }, 0);
     const driverId = r.driver_user_id as string;
     const createdId = r.created_by as string;
     return {
       id: r.id as string,
       status: normalizeDeliveryNoteStatus(r.status as string | null | undefined),
+      driverStatus: Boolean(r.driver_status),
       driverUserId: driverId,
       driverDisplay: names.get(driverId) ?? driverId.slice(0, 8),
       createdByUserId: createdId,
@@ -269,8 +283,25 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       notes: (r.notes as string | null) ?? null,
       createdAt: String(r.created_at ?? ""),
       orderCount: lines.length,
+      totalAmount,
     };
   });
+}
+
+export async function setDeliveryDriverStatus(
+  deliveryId: string,
+  driverStatus: boolean
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("deliveries")
+    .update({
+      driver_status: driverStatus,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", deliveryId)
+    .eq("company_id", companyId);
+  if (error) throw new Error(error.message);
 }
 
 export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
