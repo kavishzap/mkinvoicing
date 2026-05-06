@@ -358,6 +358,7 @@ export type Database = {
           company_id: string
           created_at: string
           created_by: string
+          delivery_date: string | null
           driver_user_id: string
           id: string
           notes: string | null
@@ -368,6 +369,7 @@ export type Database = {
           company_id: string
           created_at?: string
           created_by: string
+          delivery_date?: string | null
           driver_user_id: string
           id?: string
           notes?: string | null
@@ -378,6 +380,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           created_by?: string
+          delivery_date?: string | null
           driver_user_id?: string
           id?: string
           notes?: string | null
@@ -962,6 +965,8 @@ export type Database = {
           id: string
           is_active: boolean
           is_default: boolean
+          is_primary_warehouse: boolean
+          location_type: Database["public"]["Enums"]["location_type"]
           map_link: string | null
           name: string
           postal: string | null
@@ -980,6 +985,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_default?: boolean
+          is_primary_warehouse?: boolean
+          location_type?: Database["public"]["Enums"]["location_type"]
           map_link?: string | null
           name: string
           postal?: string | null
@@ -998,6 +1005,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_default?: boolean
+          is_primary_warehouse?: boolean
+          location_type?: Database["public"]["Enums"]["location_type"]
           map_link?: string | null
           name?: string
           postal?: string | null
@@ -2063,6 +2072,7 @@ export type Database = {
           created_from_quotation_id: string | null
           currency: string
           customer_id: string | null
+          delivery_date: string | null
           discount_amount: number
           discount_type: string | null
           from_snapshot: Json
@@ -2090,6 +2100,7 @@ export type Database = {
           created_from_quotation_id?: string | null
           currency?: string
           customer_id?: string | null
+          delivery_date?: string | null
           discount_amount?: number
           discount_type?: string | null
           from_snapshot: Json
@@ -2117,6 +2128,7 @@ export type Database = {
           created_from_quotation_id?: string | null
           currency?: string
           customer_id?: string | null
+          delivery_date?: string | null
           discount_amount?: number
           discount_type?: string | null
           from_snapshot?: Json
@@ -2780,6 +2792,10 @@ export type Database = {
         }
       }
       get_plans: { Args: never; Returns: Json }
+      mark_delivery_delivered_to_driver: {
+        Args: { p_delivery_id: string; p_user_id: string }
+        Returns: undefined
+      }
       get_product_for_company: {
         Args: { p_company_id: string; p_product_id: string }
         Returns: {
@@ -2805,6 +2821,10 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      location_type_enum_values: {
+        Args: Record<string, never>
+        Returns: string[]
       }
       list_customers_for_company: {
         Args: { p_company_id: string }
@@ -2967,6 +2987,7 @@ export type Database = {
         | "paid"
         | "void"
         | "cancelled"
+      location_type: "warehouse" | "store" | "driver_location"
       purchase_invoice_status:
         | "unpaid"
         | "partially_paid"
@@ -2986,8 +3007,9 @@ export type Database = {
         | "new"
         | "delivered to driver"
         | "delivered to customer"
+        | "completed"
         | "cancelled"
-        | "Rescheduled"
+        | "rescheduled"
         | "delivery note created"
       sales_order_payment_status: "unpaid" | "partial paid" | "paid"
       sales_order_status: "active" | "expired"
@@ -3138,6 +3160,7 @@ export const Constants = {
         "void",
         "cancelled",
       ],
+      location_type: ["warehouse", "store", "driver_location"],
       purchase_invoice_status: [
         "unpaid",
         "partially_paid",
@@ -3159,8 +3182,9 @@ export const Constants = {
         "new",
         "delivered to driver",
         "delivered to customer",
+        "completed",
         "cancelled",
-        "Rescheduled",
+        "rescheduled",
         "delivery note created",
       ],
       sales_order_payment_status: ["unpaid", "partial paid", "paid"],

@@ -16,6 +16,8 @@ export type StockBalanceRow = {
 export type InventoryMovementRow = {
   id: string;
   user_id: string;
+  /** Resolved from `user_profiles` when available. */
+  recorded_by_label: string;
   product_id: string;
   product_name: string;
   product_sku: string;
@@ -150,6 +152,33 @@ async function fetchProductNames(
   return map;
 }
 
+async function fetchUserDisplayLabels(userIds: string[]): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("id, full_name, email")
+    .in("id", uniq);
+
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    const r = row as {
+      id: string;
+      full_name: string | null;
+      email: string | null;
+    };
+    const label =
+      (r.full_name && r.full_name.trim()) ||
+      (r.email && r.email.trim()) ||
+      r.id.slice(0, 8);
+    map.set(r.id, label);
+  }
+  return map;
+}
+
 async function fetchLocationLabels(
   companyId: string,
   ids: string[]
@@ -175,6 +204,8 @@ async function fetchLocationLabels(
 export async function listInventoryMovements(opts?: {
   page?: number;
   pageSize?: number;
+  /** When set, only movements for this product are returned. */
+  productId?: string;
 }): Promise<{ rows: InventoryMovementRow[]; total: number }> {
   const companyId = await requireCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
@@ -182,7 +213,7 @@ export async function listInventoryMovements(opts?: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  const { data, error, count } = await supabase
+  let query = supabase
     .from("inventory_movements")
     .select(
       "id, user_id, product_id, event_type, from_location_id, to_location_id, quantity, note, created_at",
@@ -192,19 +223,28 @@ export async function listInventoryMovements(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
+  if (opts?.productId) {
+    query = query.eq("product_id", opts.productId);
+  }
+
+  const { data, error, count } = await query;
+
   if (error) throw error;
 
   const rowsRaw = data ?? [];
   const productIds = [...new Set(rowsRaw.map((r) => r.product_id as string))];
   const locIds = new Set<string>();
+  const actorIds = new Set<string>();
   for (const r of rowsRaw) {
     if (r.from_location_id) locIds.add(r.from_location_id as string);
     if (r.to_location_id) locIds.add(r.to_location_id as string);
+    if (r.user_id) actorIds.add(String(r.user_id));
   }
 
-  const [products, locs] = await Promise.all([
+  const [products, locs, users] = await Promise.all([
     fetchProductNames(companyId, productIds),
     fetchLocationLabels(companyId, [...locIds]),
+    fetchUserDisplayLabels([...actorIds]),
   ]);
 
   const rows: InventoryMovementRow[] = rowsRaw.map((r) => {
@@ -212,9 +252,11 @@ export async function listInventoryMovements(opts?: {
     const p = products.get(pid);
     const fromId = r.from_location_id as string | null;
     const toId = r.to_location_id as string | null;
+    const uid = String(r.user_id ?? "");
     return {
       id: String(r.id),
-      user_id: String(r.user_id ?? ""),
+      user_id: uid,
+      recorded_by_label: users.get(uid) ?? uid.slice(0, 8),
       product_id: pid,
       product_name: p?.name ?? "—",
       product_sku: p?.sku ?? "",

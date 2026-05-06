@@ -1,15 +1,22 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
+  CalendarDays,
   ChevronDown,
   ChevronUp,
+  ListOrdered,
   Plus,
+  Receipt,
+  Save,
+  ScrollText,
+  Store,
   Trash2,
   UserPlus,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,13 +73,57 @@ import {
   SALES_ORDER_FULFILLMENT_LABELS,
 } from "@/lib/sales-orders-service";
 import { getQuotation } from "@/lib/quotations-service";
-import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { AppPageShell } from "@/components/app-page-shell";
+import { cn } from "@/lib/utils";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 const DEFAULT_TAX_PERCENT = 15;
+
+const fieldLabelClass =
+  "text-xs font-medium text-neutral-600 dark:text-neutral-400";
+const sectionTitleClass =
+  "text-sm font-semibold leading-snug text-neutral-700 dark:text-neutral-300";
+const sectionIconBoxClass =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
+const sectionIconClass = "h-3.5 w-3.5 text-neutral-600 dark:text-neutral-400";
+
+/** Location `/locations/new` uses `flex-1` on a single grid; sales-order forms stack sections — no `flex-1` or rows steal viewport height. */
+const salesOrderTwoColGridClass =
+  "grid min-h-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10 [&>*]:min-w-0";
+
+function SectionCard({
+  icon: Icon,
+  title,
+  children,
+  className,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card
+      className={cn(
+        "flex min-h-0 w-full max-w-full flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm self-start",
+        className,
+      )}
+    >
+      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
+        <div className={sectionIconBoxClass}>
+          <Icon className={sectionIconClass} aria-hidden />
+        </div>
+        <CardTitle className={sectionTitleClass}>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="field-controls flex min-h-0 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs [&_textarea]:text-xs">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
 
 type LineItem = {
   id: string;
@@ -102,6 +153,7 @@ type ClientInfo = {
 
 type FieldErrors = Partial<
   Record<
+    | "billTo"
     | "companyName"
     | "fullName"
     | "email"
@@ -133,13 +185,17 @@ function CompactBillToCustomer({ c }: { c: CustomerRow }) {
   const contactLine = [c.email, c.phone].filter((x) => String(x ?? "").trim()).join(" · ");
   const city = (c.cityName || c.city || "").trim();
   return (
-    <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
-      <p className="font-medium text-foreground">{name || "—"}</p>
-      {sub ? <p className="text-muted-foreground">{sub}</p> : null}
-      {contactLine ? (
-        <p className="text-muted-foreground">{contactLine}</p>
+    <div className="min-w-0 w-full max-w-full rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
+      <p className="break-words font-medium text-foreground">{name || "—"}</p>
+      {sub ? (
+        <p className="break-words text-muted-foreground">{sub}</p>
       ) : null}
-      {city ? <p className="text-muted-foreground">{city}</p> : null}
+      {contactLine ? (
+        <p className="break-words text-muted-foreground">{contactLine}</p>
+      ) : null}
+      {city ? (
+        <p className="break-words text-muted-foreground">{city}</p>
+      ) : null}
     </div>
   );
 }
@@ -154,13 +210,17 @@ function CompactBillToClientInfo({ ci }: { ci: ClientInfo }) {
   const contactLine = [ci.email, ci.phone].filter(Boolean).join(" · ");
   const addr = [ci.address_line_1, ci.address_line_2].filter(Boolean).join(", ");
   return (
-    <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
-      <p className="font-medium text-foreground">{name}</p>
-      {sub ? <p className="text-muted-foreground">{sub}</p> : null}
-      {contactLine ? (
-        <p className="text-muted-foreground">{contactLine}</p>
+    <div className="min-w-0 w-full max-w-full rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
+      <p className="break-words font-medium text-foreground">{name}</p>
+      {sub ? (
+        <p className="break-words text-muted-foreground">{sub}</p>
       ) : null}
-      {addr ? <p className="text-muted-foreground">{addr}</p> : null}
+      {contactLine ? (
+        <p className="break-words text-muted-foreground">{contactLine}</p>
+      ) : null}
+      {addr ? (
+        <p className="break-words text-muted-foreground">{addr}</p>
+      ) : null}
     </div>
   );
 }
@@ -218,6 +278,8 @@ function NewSalesOrderPageContent() {
     new Date().toISOString().split("T")[0]
   );
   const [validForDays, setValidForDays] = useState("14");
+  /** Optional `sales_orders.delivery_date` (YYYY-MM-DD). */
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [lifecycleStatus, setLifecycleStatus] =
     useState<SalesOrderStatus>("active");
   const [fulfillmentStatus, setFulfillmentStatus] =
@@ -409,6 +471,9 @@ function NewSalesOrderPageContent() {
               const match = rows.find((c) => c.id === q.customer_id);
               if (match) setSelectedCustomer(match);
             }
+            setDeliveryDate(
+              q.delivery_date ? String(q.delivery_date).slice(0, 10) : "",
+            );
             setDuplicatedFromNumber(q.number);
             toast({
               title: "Form filled from sales order",
@@ -554,24 +619,42 @@ function NewSalesOrderPageContent() {
       address_line_2: c.address_line_2 ?? "",
     });
     setIsCustomerDialogOpen(false);
+    setErrors((e) => {
+      const next = { ...e };
+      delete next.billTo;
+      delete next.companyName;
+      delete next.fullName;
+      delete next.email;
+      delete next.phone;
+      delete next.address_line_1;
+      return next;
+    });
   };
 
-  function validate(): boolean {
+  function validate(): FieldErrors {
     const next: FieldErrors = {};
 
-    const needCompany = clientInfo.type === "company";
-    if (needCompany && !clientInfo.companyName.trim())
-      next.companyName = "Company name is required";
-    if (!needCompany && !clientInfo.fullName.trim())
-      next.fullName = "Full name is required";
+    if (selectedCustomer) {
+      // Linked customer: bill-to panel does not expose email/phone/address inputs.
+      // Snapshot uses clientInfo copied from the customer row; do not block save on legacy sparse rows.
+    } else if (!hasBillToDetails(clientInfo)) {
+      next.billTo =
+        "Choose a customer from your list before saving (or load bill-to from convert / duplicate).";
+    } else {
+      const needCompany = clientInfo.type === "company";
+      if (needCompany && !clientInfo.companyName.trim())
+        next.companyName = "Company name is required";
+      if (!needCompany && !clientInfo.fullName.trim())
+        next.fullName = "Full name is required";
 
-    const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!clientInfo.email.trim()) next.email = "Email is required";
-    else if (!emailRx.test(clientInfo.email)) next.email = "Invalid email";
+      const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!clientInfo.email.trim()) next.email = "Email is required";
+      else if (!emailRx.test(clientInfo.email)) next.email = "Invalid email";
 
-    if (!clientInfo.phone.trim()) next.phone = "Phone is required";
-    if (!clientInfo.address_line_1.trim())
-      next.address_line_1 = "Address line 1 is required";
+      if (!clientInfo.phone.trim()) next.phone = "Phone is required";
+      if (!clientInfo.address_line_1.trim())
+        next.address_line_1 = "Address line 1 is required";
+    }
 
     if (lineItems.length === 0) {
       next.lineItems = "At least one line item is required";
@@ -587,13 +670,18 @@ function NewSalesOrderPageContent() {
     }
 
     setErrors(next);
-    return Object.keys(next).length === 0;
+    return next;
   }
 
   async function doCreateSalesOrder() {
-    if (!validate()) {
+    const validation = validate();
+    if (Object.keys(validation).length > 0) {
+      const firstMsg = Object.values(validation).find(
+        (v): v is string => typeof v === "string" && v.length > 0
+      );
       toast({
         title: "Please fix the highlighted fields.",
+        description: firstMsg,
         variant: "destructive",
       });
       return;
@@ -652,6 +740,7 @@ function NewSalesOrderPageContent() {
         bill_to_snapshot: billSnap,
         created_from_quotation_id:
           convertFromQuotationId || undefined,
+        delivery_date: deliveryDate.trim() || null,
         items: itemsPayload,
       });
 
@@ -680,51 +769,60 @@ function NewSalesOrderPageContent() {
 
   if (loading) {
     return (
-      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="flex gap-2">
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      >
+        <div className="flex min-w-0 flex-col gap-6 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+          <div className={salesOrderTwoColGridClass}>
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+          </div>
+          <div className="h-40 animate-pulse rounded-lg bg-muted" />
+          <div className={salesOrderTwoColGridClass}>
+            <div className="h-36 animate-pulse rounded-lg bg-muted" />
+            <div className="h-36 animate-pulse rounded-lg bg-muted" />
           </div>
         </div>
-        <div className="max-w-7xl">
-          <div className="h-28 rounded bg-muted animate-pulse" />
-        </div>
-        <div className="h-64 rounded bg-muted animate-pulse" />
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
     <AppPageShell
-      className="max-w-7xl"
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       subtitle={headerSubtitle}
-      leading={
-        <Link href="/app/sales-orders">
-          <Button variant="ghost" size="icon" aria-label="Back to sales orders">
+      subtitleClassName="w-full min-w-0 max-w-none"
+      titleBefore={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to sales orders">
+          <Link href="/app/sales-orders">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       }
       actions={
-        <Button onClick={doCreateSalesOrder} disabled={saving} size="sm">
-          {saving ? "Saving..." : "Save & View"}
+        <Button
+          onClick={doCreateSalesOrder}
+          disabled={saving}
+          className="gap-2 rounded font-semibold shadow-sm"
+        >
+          <Save className="size-3.5 shrink-0" aria-hidden />
+          {saving ? "Saving…" : "Save & view"}
         </Button>
       }
     >
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle>Bill to & dates</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-nowrap items-end gap-3 md:gap-4 overflow-x-auto pb-1">
-            <div className="min-w-[min(100%,12rem)] shrink-0 basis-[min(100%,20rem)] max-w-md space-y-3">
+      <div className="flex min-w-0 flex-col gap-6 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        <div className={salesOrderTwoColGridClass}>
+          <SectionCard icon={Store} title="Bill to">
+            <div className="min-w-0 space-y-3">
               {selectedCustomer ? (
                 <CompactBillToCustomer c={selectedCustomer} />
               ) : hasBillToDetails(clientInfo) ? (
                 <CompactBillToClientInfo ci={clientInfo} />
               ) : (
-                <p className="text-sm text-muted-foreground py-0.5">
+                <p className="text-xs text-muted-foreground">
                   Pick someone from your customer list.
                 </p>
               )}
@@ -742,7 +840,7 @@ function NewSalesOrderPageContent() {
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-9 w-9 shrink-0"
+                  className="h-8 w-8 shrink-0"
                   asChild
                   aria-label="Add new customer (full page)"
                 >
@@ -754,7 +852,9 @@ function NewSalesOrderPageContent() {
                 </Button>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="soCity">City</Label>
+                <Label htmlFor="soCity" className={fieldLabelClass}>
+                  City
+                </Label>
                 <Select
                   value={clientInfo.city || "__none__"}
                   onValueChange={(v) => {
@@ -775,7 +875,10 @@ function NewSalesOrderPageContent() {
                     }
                   }}
                 >
-                  <SelectTrigger id="soCity" className="h-9">
+                  <SelectTrigger
+                    id="soCity"
+                    className="h-8 w-full rounded-sm text-xs"
+                  >
                     <SelectValue placeholder="Select city" />
                   </SelectTrigger>
                   <SelectContent>
@@ -790,6 +893,9 @@ function NewSalesOrderPageContent() {
                   </SelectContent>
                 </Select>
               </div>
+              {errors.billTo ? (
+                <p className="text-xs text-destructive">{errors.billTo}</p>
+              ) : null}
               {!selectedCustomer &&
               !hasBillToDetails(clientInfo) &&
               (errors.companyName ||
@@ -797,123 +903,149 @@ function NewSalesOrderPageContent() {
                 errors.email ||
                 errors.phone ||
                 errors.address_line_1) ? (
-                <p className="text-sm text-destructive">
+                <p className="text-xs text-destructive">
                   Select a customer from the list to continue.
                 </p>
               ) : null}
             </div>
-            <div
-              className="hidden sm:block w-px shrink-0 self-stretch min-h-[5.5rem] bg-border"
-              aria-hidden
-            />
-            <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
-              <Label htmlFor="issueDate">Issue Date</Label>
-              <Input
-                id="issueDate"
-                type="date"
-                className="w-full min-w-0 h-9"
-                value={issueDate}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setIssueDate(v);
-                  const base = new Date(v);
-                  const days = Number(validForDays) || 14;
-                  base.setDate(base.getDate() + days);
-                  setValidUntil(base.toISOString().split("T")[0]);
-                }}
-              />
-            </div>
-            <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
-              <Label htmlFor="validUntil">Valid Until</Label>
-              <Input
-                id="validUntil"
-                type="date"
-                className="w-full min-w-0 h-9"
-                value={validUntil}
-                onChange={(e) => setValidUntil(e.target.value)}
-              />
-            </div>
-            <div className="shrink-0 space-y-2 w-[min(100%,9.5rem)]">
-              <Label htmlFor="validForDays">Valid for (days)</Label>
-              <Select
-                value={validForDays}
-                onValueChange={(v) => {
-                  setValidForDays(v);
-                  const days = Number(v) || 14;
-                  const base = new Date(
-                    issueDate || new Date().toISOString().split("T")[0]
-                  );
-                  base.setDate(base.getDate() + days);
-                  setValidUntil(base.toISOString().split("T")[0]);
-                }}
-              >
-                <SelectTrigger id="validForDays" className="w-full min-w-0 h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="7">7 days</SelectItem>
-                  <SelectItem value="14">14 days</SelectItem>
-                  <SelectItem value="30">30 days</SelectItem>
-                  <SelectItem value="60">60 days</SelectItem>
-                  <SelectItem value="90">90 days</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="shrink-0 space-y-2 w-[min(100%,10.5rem)]">
-              <Label htmlFor="soFulfillment">Fulfillment status</Label>
-              <Select
-                value={fulfillmentStatus}
-                onValueChange={(v) =>
-                  setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
-                }
-              >
-                <SelectTrigger id="soFulfillment" className="w-full min-w-0 h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
-                    <SelectItem key={v} value={v}>
-                      {SALES_ORDER_FULFILLMENT_LABELS[v]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Line Items</CardTitle>
-        </CardHeader>
-        <CardContent>
+          <SectionCard icon={CalendarDays} title="Dates & fulfillment">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="issueDate" className={fieldLabelClass}>
+                  Issue date
+                </Label>
+                <Input
+                  id="issueDate"
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setIssueDate(v);
+                    const base = new Date(v);
+                    const days = Number(validForDays) || 14;
+                    base.setDate(base.getDate() + days);
+                    setValidUntil(base.toISOString().split("T")[0]);
+                  }}
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="validUntil" className={fieldLabelClass}>
+                  Valid until
+                </Label>
+                <Input
+                  id="validUntil"
+                  type="date"
+                  value={validUntil}
+                  onChange={(e) => setValidUntil(e.target.value)}
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="validForDays" className={fieldLabelClass}>
+                  Valid for (days)
+                </Label>
+                <Select
+                  value={validForDays}
+                  onValueChange={(v) => {
+                    setValidForDays(v);
+                    const days = Number(v) || 14;
+                    const base = new Date(
+                      issueDate || new Date().toISOString().split("T")[0]
+                    );
+                    base.setDate(base.getDate() + days);
+                    setValidUntil(base.toISOString().split("T")[0]);
+                  }}
+                >
+                  <SelectTrigger
+                    id="validForDays"
+                    className="h-8 w-full rounded-sm text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="14">14 days</SelectItem>
+                    <SelectItem value="30">30 days</SelectItem>
+                    <SelectItem value="60">60 days</SelectItem>
+                    <SelectItem value="90">90 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor="soDeliveryDate" className={fieldLabelClass}>
+                  Delivery date
+                </Label>
+                <Input
+                  id="soDeliveryDate"
+                  type="date"
+                  value={deliveryDate}
+                  onChange={(e) => setDeliveryDate(e.target.value)}
+                />
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  Optional. Read-only on the sales order view.
+                </p>
+              </div>
+              <div className="min-w-0 space-y-2 sm:col-span-2">
+                <Label htmlFor="soFulfillment" className={fieldLabelClass}>
+                  Fulfillment status
+                </Label>
+                <Select
+                  value={fulfillmentStatus}
+                  onValueChange={(v) =>
+                    setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
+                  }
+                >
+                  <SelectTrigger
+                    id="soFulfillment"
+                    className="h-8 w-full max-w-md rounded-sm text-xs"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {SALES_ORDER_FULFILLMENT_LABELS[v]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+      <SectionCard
+          icon={ListOrdered}
+          title="Line items"
+          className="min-w-0 max-w-full"
+        >
           {errors.lineItems && (
             <p className="mb-2 text-xs text-destructive">{errors.lineItems}</p>
           )}
-          <div className="rounded-lg border overflow-x-auto">
-            <Table>
+          <div className="max-w-full min-w-0 overflow-x-auto rounded-lg border">
+            <Table className="w-max min-w-full">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[72px] text-center align-middle">
+                  <TableHead className="w-[72px] min-w-[72px] text-center align-middle">
                     Order
                   </TableHead>
-                  <TableHead className="w-[min(14rem,22vw)] align-middle">
+                  <TableHead className="min-w-[9rem] align-middle">
                     Product *
                   </TableHead>
-                  <TableHead className="w-[200px] align-middle">Item</TableHead>
-                  <TableHead className="w-[250px] align-middle">
+                  <TableHead className="min-w-[7rem] align-middle">Item</TableHead>
+                  <TableHead className="min-w-[10rem] align-middle">
                     Description
                   </TableHead>
-                  <TableHead className="w-[100px] align-middle">Qty *</TableHead>
-                  <TableHead className="w-[120px] align-middle">
+                  <TableHead className="min-w-[4.5rem] align-middle">Qty *</TableHead>
+                  <TableHead className="min-w-[5.5rem] align-middle">
                     Unit Price *
                   </TableHead>
-                  <TableHead className="w-[100px] align-middle">Tax %</TableHead>
-                  <TableHead className="w-[120px] text-right align-middle">
+                  <TableHead className="min-w-[4.5rem] align-middle">Tax %</TableHead>
+                  <TableHead className="min-w-[5.5rem] text-right align-middle">
                     Total
                   </TableHead>
-                  <TableHead className="w-[50px] align-middle"></TableHead>
+                  <TableHead className="w-10 min-w-10 align-middle"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -998,7 +1130,7 @@ function NewSalesOrderPageContent() {
                           className="h-9 bg-muted/40 pointer-events-none"
                         />
                       </TableCell>
-                      <TableCell className="align-middle py-2">
+                      <TableCell className="max-w-[18rem] whitespace-normal align-middle py-2">
                         <Input
                           value={item.description}
                           onChange={(e) =>
@@ -1104,92 +1236,90 @@ function NewSalesOrderPageContent() {
             <Plus className="h-4 w-4" />
             Add Row
           </Button>
-        </CardContent>
-      </Card>
+      </SectionCard>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Notes & Terms</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <div className={salesOrderTwoColGridClass}>
+        <SectionCard icon={ScrollText} title="Notes & terms">
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
+              <Label htmlFor="notes" className={fieldLabelClass}>
+                Notes
+              </Label>
               <Textarea
                 id="notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Additional notes..."
-                rows={3}
+                rows={5}
+                className="min-h-[120px] resize-y rounded-sm py-2"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="terms">Terms & Conditions</Label>
+              <Label htmlFor="terms" className={fieldLabelClass}>
+                Terms & conditions
+              </Label>
               <Textarea
                 id="terms"
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
                 placeholder="Sales order terms..."
-                rows={3}
+                rows={5}
+                className="min-h-[120px] resize-y rounded-sm py-2"
               />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>
-                  {preferences?.currency} {subtotal.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax</span>
-                <span>
-                  {preferences?.currency} {taxTotal.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-muted-foreground">Discount</span>
-                <div className="flex items-center gap-2">
-                  <DiscountTypeToggle
-                    value={discount.type}
-                    onChange={(t) => setDiscount({ ...discount, type: t })}
-                    currencyLabel={preferences?.currency ?? ""}
-                  />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={discount.amount}
-                    onChange={(e) =>
-                      setDiscount({
-                        ...discount,
-                        amount: Number(e.target.value),
-                      })
-                    }
-                    className="w-[100px] h-8"
-                  />
-                  <span className="text-sm min-w-[80px] text-right">
-                    -{preferences?.currency} {discountAmount.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-              <Separator />
-              <div className="flex justify-between text-base font-bold">
-                <span>Total</span>
-                <span>
-                  {preferences?.currency} {total.toFixed(2)}
+        <SectionCard icon={Receipt} title="Summary">
+          <div className="space-y-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Subtotal</span>
+              <span className="tabular-nums font-medium">
+                {preferences?.currency} {subtotal.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Tax</span>
+              <span className="tabular-nums font-medium">
+                {preferences?.currency} {taxTotal.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <span className="text-sm text-muted-foreground">Discount</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <DiscountTypeToggle
+                  value={discount.type}
+                  onChange={(t) => setDiscount({ ...discount, type: t })}
+                  currencyLabel={preferences?.currency ?? ""}
+                />
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={discount.amount}
+                  onChange={(e) =>
+                    setDiscount({
+                      ...discount,
+                      amount: Number(e.target.value),
+                    })
+                  }
+                  className="h-8 w-[100px]"
+                />
+                <span className="min-w-[80px] text-right text-sm tabular-nums">
+                  −{preferences?.currency} {discountAmount.toFixed(2)}
                 </span>
               </div>
             </div>
-          </CardContent>
-        </Card>
+            <Separator />
+            <div className="flex justify-between text-base font-semibold">
+              <span>Total</span>
+              <span className="tabular-nums">
+                {preferences?.currency} {total.toFixed(2)}
+              </span>
+            </div>
+          </div>
+        </SectionCard>
+      </div>
       </div>
 
       <Dialog
@@ -1276,12 +1406,23 @@ export default function NewSalesOrderPage() {
   return (
     <Suspense
       fallback={
-        <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="max-w-7xl">
-            <div className="h-28 rounded bg-muted animate-pulse" />
+        <AppPageShell
+          fillHeight
+          className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+        >
+          <div className="flex min-w-0 flex-col gap-6 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+            <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+            <div className={salesOrderTwoColGridClass}>
+              <div className="h-56 animate-pulse rounded-lg bg-muted" />
+              <div className="h-56 animate-pulse rounded-lg bg-muted" />
+            </div>
+            <div className="h-40 animate-pulse rounded-lg bg-muted" />
+            <div className={salesOrderTwoColGridClass}>
+              <div className="h-36 animate-pulse rounded-lg bg-muted" />
+              <div className="h-36 animate-pulse rounded-lg bg-muted" />
+            </div>
           </div>
-        </div>
+        </AppPageShell>
       }
     >
       <NewSalesOrderPageContent />

@@ -6,6 +6,7 @@ import {
   FileInput,
   FileText,
   LayoutDashboard,
+  MapPin,
   MessageCircle,
   Package,
   Package2,
@@ -31,7 +32,7 @@ export const FEATURE_CODES = {
   purchaseInvoices: "purchase_invoices",
   customers: "customers",
   suppliers: "suppliers",
-  locations: "locations",
+  locations: "location",
   expenses: "expenses",
   payroll: "payroll",
   customerCredit: "customer_credit",
@@ -113,7 +114,8 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/customers": "Customers",
   "/app/suppliers": "Suppliers",
   "/app/inventory": "Inventory",
-  "/app/inventory/products": "Products",
+  "/app/products": "Products",
+  "/app/locations": "Locations",
   "/app/expenses": "Expenses",
   "/app/payroll": "Payroll",
   "/app/customer-credit": "Customer Credit",
@@ -135,9 +137,10 @@ export function getNavDisplayLabel(
   item: AppNavItem,
   featureNameFn: (code: string) => string | null,
 ): string {
-  /** Sidebar / shell: main hub uses `inventory` in DB; locations sub-routes use `locations`. */
+  /** Sidebar / shell: main hub uses `inventory` in DB; locations routes use `location`. */
   if (item.href === "/app/inventory") return "Inventory";
-  if (item.href === "/app/inventory/products") return "Products";
+  if (item.href === "/app/products") return "Products";
+  if (item.href === "/app/locations") return "Locations";
   const fromDb = featureNameFn(item.requires)?.trim();
   if (fromDb) return fromDb;
   return NAV_LABEL_FALLBACK_BY_HREF[item.href] ?? item.requires;
@@ -183,7 +186,7 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
   { requires: FEATURE_CODES.suppliers, href: "/app/suppliers", icon: Truck, section: "purchasing" },
   {
     requires: FEATURE_CODES.products,
-    href: "/app/inventory/products",
+    href: "/app/products",
     icon: Package,
     section: "operations",
   },
@@ -191,6 +194,12 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.inventory,
     href: "/app/inventory",
     icon: Package2,
+    section: "operations",
+  },
+  {
+    requires: FEATURE_CODES.locations,
+    href: "/app/locations",
+    icon: MapPin,
     section: "operations",
   },
   {
@@ -334,8 +343,8 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   },
   { prefix: "/app/customers", requires: FEATURE_CODES.customers },
   { prefix: "/app/suppliers", requires: FEATURE_CODES.suppliers },
-  { prefix: "/app/inventory/locations", requires: FEATURE_CODES.locations },
-  { prefix: "/app/inventory/products", requires: FEATURE_CODES.products },
+  { prefix: "/app/locations", requires: FEATURE_CODES.locations },
+  { prefix: "/app/products", requires: FEATURE_CODES.products },
   { prefix: "/app/inventory/stock", requires: FEATURE_CODES.inventory },
   { prefix: "/app/inventory", requires: FEATURE_CODES.inventory },
   { prefix: "/app/expenses", requires: FEATURE_CODES.expenses },
@@ -372,7 +381,7 @@ export function resolveCurrentNavLabel(
   featureNameFn: (code: string) => string | null
 ): string {
   if (
-    pathname.startsWith("/app/inventory/products/") &&
+    pathname.startsWith("/app/products/") &&
     pathname.endsWith("/edit")
   ) {
     return "Edit product";

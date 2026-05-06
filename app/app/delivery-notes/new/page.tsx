@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -27,6 +28,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppPageShell } from "@/components/app-page-shell";
 import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
+import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   createDelivery,
@@ -78,6 +80,9 @@ export default function NewDeliveryPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [driverId, setDriverId] = useState<string>("");
   const [notes, setNotes] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState(() =>
+    new Date().toISOString().split("T")[0],
+  );
   const zoneReq = useRef(0);
   const [zoneForDriver, setZoneForDriver] = useState<{
     driverUserId: string;
@@ -153,13 +158,24 @@ export default function NewDeliveryPage() {
   const resolvedZoneFilter =
     zoneForDriver?.driverUserId === driverId ? zoneForDriver.filter : undefined;
 
+  /** Orders with no SO delivery date always show; if SO has a date it must match the note date. */
+  const dateFilteredOrders = useMemo(() => {
+    const noteDate = deliveryDate.trim().slice(0, 10);
+    if (!noteDate) return orders;
+    return orders.filter((o) => {
+      const so = o.deliveryDate?.trim();
+      if (!so) return true;
+      return so.slice(0, 10) === noteDate;
+    });
+  }, [orders, deliveryDate]);
+
   const visibleOrders = useMemo(() => {
-    if (!driverId.trim()) return orders;
+    if (!driverId.trim()) return dateFilteredOrders;
 
     if (zoneLoading && resolvedZoneFilter === undefined) return [];
 
     if (!resolvedZoneFilter || !resolvedZoneFilter.hasZoneAssignment) {
-      return orders;
+      return dateFilteredOrders;
     }
 
     if (
@@ -172,13 +188,13 @@ export default function NewDeliveryPage() {
     const idSet = new Set(resolvedZoneFilter.cityIds);
     const nameSet = new Set(resolvedZoneFilter.cityNamesLower);
 
-    return orders.filter((o) => {
+    return dateFilteredOrders.filter((o) => {
       if (o.cityId && idSet.has(o.cityId)) return true;
       const label = o.city.trim().toLowerCase();
       if (!o.cityId && label && nameSet.has(label)) return true;
       return false;
     });
-  }, [orders, driverId, resolvedZoneFilter, zoneLoading]);
+  }, [dateFilteredOrders, driverId, resolvedZoneFilter, zoneLoading]);
 
   useEffect(() => {
     const allow = new Set(visibleOrders.map((o) => o.id));
@@ -247,7 +263,16 @@ export default function NewDeliveryPage() {
     if (selected.size === 0) {
       toast({
         title: "Select sales orders",
-        description: "Pick at least one order with fulfillment New.",
+        description: "Pick at least one order with fulfillment New or Rescheduled.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!deliveryDate.trim()) {
+      toast({
+        title: "Delivery date required",
+        description: "Choose the scheduled delivery date for this run.",
         variant: "destructive",
       });
       return;
@@ -259,6 +284,7 @@ export default function NewDeliveryPage() {
         driverUserId: driverId,
         salesOrderIds: [...selected],
         notes: notes.trim() || null,
+        deliveryDate: deliveryDate.trim(),
       });
       toast({
         title: "Delivery saved",
@@ -279,7 +305,7 @@ export default function NewDeliveryPage() {
 
   return (
     <AppPageShell
-      subtitle="Pick active sales orders in New fulfillment and assign a driver from your team."
+      subtitle="Pick active sales orders with fulfillment New or Rescheduled and assign a driver from your team."
       leading={
         <Link href="/app/delivery-notes">
           <Button variant="ghost" size="icon" aria-label="Back to delivery notes">
@@ -335,6 +361,23 @@ export default function NewDeliveryPage() {
               ) : null}
             </div>
 
+            <div className="grid gap-4 sm:max-w-md">
+              <div className="space-y-2">
+                <Label htmlFor="del-delivery-date">Delivery date</Label>
+                <Input
+                  id="del-delivery-date"
+                  type="date"
+                  value={deliveryDate}
+                  onChange={(e) => setDeliveryDate(e.target.value)}
+                  className="max-w-xs"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Stored on the delivery note and shown on the PDF. Only sales orders
+                  with no delivery date or the same date appear in the list below.
+                </p>
+              </div>
+            </div>
+
             <div className="space-y-2 max-w-xl">
               <Label htmlFor="del-notes">Notes (optional)</Label>
               <Textarea
@@ -350,15 +393,15 @@ export default function NewDeliveryPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Sales orders (New)</CardTitle>
+            <CardTitle className="text-base">Sales orders (New / Rescheduled)</CardTitle>
           </CardHeader>
           <CardContent className="p-0 sm:p-2">
             {loading ? (
               <div className="p-6 text-sm text-muted-foreground">Loading orders…</div>
             ) : orders.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">
-                No eligible sales orders. Orders must be active with fulfillment New
-                (for example, not already handed to a driver).
+                No eligible sales orders. Orders must be active with fulfillment New or
+                Rescheduled (for example, not already on a delivery note).
               </div>
             ) : zoneLoading && driverId.trim() && resolvedZoneFilter === undefined ? (
               <div className="p-6 text-sm text-muted-foreground">
@@ -366,14 +409,22 @@ export default function NewDeliveryPage() {
               </div>
             ) : visibleOrders.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">
-                {driverId.trim() &&
-                resolvedZoneFilter?.hasZoneAssignment &&
-                resolvedZoneFilter.cityIds.length === 0 &&
-                resolvedZoneFilter.cityNamesLower.length === 0
-                  ? "This driver’s zone has no cities — link cities in Zone Cities to see orders."
-                  : driverId.trim() && resolvedZoneFilter?.hasZoneAssignment
-                    ? "No eligible sales orders for this driver’s route. Try another driver or add the delivery city to the zone."
-                    : "No eligible sales orders match the current filters."}
+                {orders.length > 0 && dateFilteredOrders.length === 0 ? (
+                  <>
+                    No sales orders match this delivery date. Change the date above,
+                    or clear or align delivery dates on sales orders — orders without
+                    a delivery date always appear here.
+                  </>
+                ) : driverId.trim() &&
+                  resolvedZoneFilter?.hasZoneAssignment &&
+                  resolvedZoneFilter.cityIds.length === 0 &&
+                  resolvedZoneFilter.cityNamesLower.length === 0 ? (
+                  "This driver’s zone has no cities — link cities in Zone Cities to see orders."
+                ) : driverId.trim() && resolvedZoneFilter?.hasZoneAssignment ? (
+                  "No eligible sales orders for this driver’s route. Try another driver or add the delivery city to the zone."
+                ) : (
+                  "No eligible sales orders match the current filters."
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -388,6 +439,7 @@ export default function NewDeliveryPage() {
                         />
                       </TableHead>
                       <TableHead>Order</TableHead>
+                      <TableHead>Fulfillment</TableHead>
                       <TableHead>Customer</TableHead>
                       <TableHead>Phone</TableHead>
                       <TableHead>City</TableHead>
@@ -410,6 +462,11 @@ export default function NewDeliveryPage() {
                         </TableCell>
                         <TableCell className="font-medium whitespace-nowrap">
                           {o.number}
+                        </TableCell>
+                        <TableCell className="align-top whitespace-nowrap">
+                          <SalesOrderFulfillmentStatusBadge
+                            status={o.fulfillmentStatus}
+                          />
                         </TableCell>
                         <TableCell>{o.clientName || "—"}</TableCell>
                         <TableCell className="text-sm">{o.phone || "—"}</TableCell>

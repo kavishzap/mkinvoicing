@@ -7,7 +7,7 @@ import {
 } from "@/lib/settings-service";
 import type { Profile } from "@/lib/settings-service";
 import type { CustomerRow } from "@/lib/customers-service";
-import type { Database } from "@/types/supabase";
+import type { Database } from "@/src/types/supabase";
 
 /** Only `active` (current) and `expired` (past valid_until or manual). */
 export type SalesOrderStatus = "active" | "expired";
@@ -21,8 +21,9 @@ export const SALES_ORDER_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] = [
   "delivery note created",
   "delivered to driver",
   "delivered to customer",
+  "completed",
   "cancelled",
-  "Rescheduled",
+  "rescheduled",
 ];
 
 /** Older app / DB values → current enum (best-effort). */
@@ -40,9 +41,12 @@ export function normalizeSalesOrderFulfillmentStatus(
   raw: string | null | undefined
 ): SalesOrderFulfillmentStatus {
   const v = String(raw ?? "").trim();
-  const fromLegacy = FULFILLMENT_LEGACY[v];
+  const fromLegacy =
+    FULFILLMENT_LEGACY[v] ?? FULFILLMENT_LEGACY[v.toLowerCase()];
   if (fromLegacy) return fromLegacy;
-  if (v.toLowerCase() === "rescheduled") return "Rescheduled";
+  /** DB enum is lowercase `rescheduled`; accept legacy capital-R from older snapshots. */
+  if (v.toLowerCase() === "rescheduled") return "rescheduled";
+  if (v.toLowerCase() === "completed") return "completed";
   if (
     SALES_ORDER_FULFILLMENT_STATUSES.includes(v as SalesOrderFulfillmentStatus)
   ) {
@@ -59,8 +63,9 @@ export const SALES_ORDER_FULFILLMENT_LABELS: Record<
   "delivery note created": "Delivery note created",
   "delivered to driver": "Delivered to driver",
   "delivered to customer": "Delivered to customer",
+  completed: "Completed",
   cancelled: "Cancelled",
-  Rescheduled: "Rescheduled",
+  rescheduled: "Rescheduled",
 };
 
 /** Stored as `sales_orders.payment_status`. */
@@ -118,6 +123,8 @@ export type CreateSalesOrderPayload = {
   bill_to_snapshot: Record<string, unknown>;
   /** When converting from quotation — pass quotation id */
   created_from_quotation_id?: string | null;
+  /** Planned delivery date (`sales_orders.delivery_date`). */
+  delivery_date?: string | null;
   items: SalesOrderLinePayload[];
 };
 
@@ -129,6 +136,9 @@ export type SalesOrderItemRow = {
   tax_percent: number;
   sort_order?: number;
   product_id?: string | null;
+  /** From joined `products` row when `product_id` is set. */
+  product_name?: string | null;
+  product_sku?: string | null;
 };
 
 export type SalesOrderDetail = {
@@ -150,6 +160,8 @@ export type SalesOrderDetail = {
   shipping_amount: number;
   notes: string | null;
   terms: string | null;
+  /** ISO date string `YYYY-MM-DD` or null. */
+  delivery_date: string | null;
   items: SalesOrderItemRow[];
 };
 
@@ -158,6 +170,8 @@ export type SalesOrderListRow = {
   number: string;
   issueDate: string;
   validUntil: string;
+  /** ISO `YYYY-MM-DD` or null when not set. */
+  deliveryDate: string | null;
   status: SalesOrderStatus;
   fulfillmentStatus: SalesOrderFulfillmentStatus;
   paymentStatus: SalesOrderPaymentStatus;
@@ -375,6 +389,9 @@ export async function createSalesOrder(
       from_snapshot: inv.from_snapshot,
       bill_to_snapshot: inv.bill_to_snapshot,
       created_from_quotation_id: created_from_quotation_id || null,
+      delivery_date: inv.delivery_date?.trim()
+        ? inv.delivery_date.trim().slice(0, 10)
+        : null,
     };
 
     const { data: inserted, error: insSo } = await supabase
@@ -476,6 +493,8 @@ export async function listSalesOrders(opts?: {
   status?: SalesOrderStatus | "all";
   /** When set (not `"all"`), filter by `sales_orders.fulfillment_status`. */
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
+  /** When set, only orders linked to this customer (`sales_orders.customer_id`). */
+  customerId?: string;
   page?: number;
   pageSize?: number;
   /**
@@ -497,7 +516,7 @@ export async function listSalesOrders(opts?: {
   let q = supabase
     .from("sales_orders")
     .select(
-      "id, number, issue_date, valid_until, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total",
+      "id, number, issue_date, valid_until, delivery_date, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total",
       { count: "exact" }
     )
     .eq("company_id", companyId)
@@ -510,6 +529,11 @@ export async function listSalesOrders(opts?: {
 
   if (opts?.fulfillmentStatus && opts.fulfillmentStatus !== "all") {
     q = q.eq("fulfillment_status", opts.fulfillmentStatus);
+  }
+
+  const cid = opts?.customerId?.trim();
+  if (cid) {
+    q = q.eq("customer_id", cid);
   }
 
   if (opts?.search?.trim()) {
@@ -529,6 +553,10 @@ export async function listSalesOrders(opts?: {
     number: r.number,
     issueDate: r.issue_date,
     validUntil: r.valid_until,
+    deliveryDate:
+      r.delivery_date != null && String(r.delivery_date).trim()
+        ? String(r.delivery_date).slice(0, 10)
+        : null,
     status: normalizeSalesOrderStatus(String(r.status)),
     fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
       r.fulfillment_status
@@ -542,57 +570,150 @@ export async function listSalesOrders(opts?: {
   return { rows, total: count ?? 0 };
 }
 
-export async function getSalesOrder(id: string): Promise<SalesOrderDetail | null> {
-  await expireStaleSalesOrders();
+/** Shape of `sales_orders` row returned by `getSalesOrder` embedded select (dynamic string breaks generated Supabase types). */
+type SalesOrderSingleQueryRow = {
+  id: string;
+  number: string;
+  issue_date: string;
+  valid_until: string;
+  delivery_date?: string | null;
+  status: string;
+  fulfillment_status?: string | null;
+  payment_status?: string | null;
+  currency: string;
+  customer_id?: string | null;
+  created_from_quotation_id?: string | null;
+  from_snapshot?: unknown;
+  bill_to_snapshot?: unknown;
+  client_snapshot?: unknown;
+  discount_type?: string;
+  discount_amount?: unknown;
+  shipping_amount?: unknown;
+  notes?: string | null;
+  terms?: string | null;
+  sales_order_items?: Record<string, unknown>[];
+};
+
+/**
+ * Load a single sales order. Does **not** run `expireStaleSalesOrders` (that belongs on the list
+ * flow only — it updates many rows and is slow on every detail view).
+ *
+ * @param mode `view` — omits `client_snapshot`; line items still include `product_id` and catalog name/SKU when linked.
+ *   Use `full` (default) for edit / duplicate / invoice conversion.
+ */
+export async function getSalesOrder(
+  id: string,
+  opts?: { mode?: "view" | "full" }
+): Promise<SalesOrderDetail | null> {
+  const mode = opts?.mode ?? "full";
   const companyId = await requireActiveCompanyId();
+
+  const itemsSelect = `
+      sales_order_items (
+        item,
+        description,
+        quantity,
+        unit_price,
+        tax_percent,
+        sort_order,
+        product_id,
+        products ( id, name, sku )
+      )
+    `;
+
+  const headerSelect =
+    mode === "view"
+      ? `
+      id, number, issue_date, valid_until, delivery_date, status, fulfillment_status, payment_status, currency, customer_id, created_from_quotation_id,
+      from_snapshot, bill_to_snapshot,
+      discount_type, discount_amount, shipping_amount, notes, terms,
+      ${itemsSelect}
+    `
+      : `
+      id, number, issue_date, valid_until, delivery_date, status, fulfillment_status, payment_status, currency, customer_id, created_from_quotation_id,
+      from_snapshot, bill_to_snapshot, client_snapshot,
+      discount_type, discount_amount, shipping_amount, notes, terms,
+      ${itemsSelect}
+    `;
 
   const { data, error } = await supabase
     .from("sales_orders")
-    .select(
-      `
-      id, number, issue_date, valid_until, status, fulfillment_status, payment_status, currency, customer_id, created_from_quotation_id,
-      from_snapshot, bill_to_snapshot, client_snapshot,
-      discount_type, discount_amount, shipping_amount, notes, terms,
-      sales_order_items ( item, description, quantity, unit_price, tax_percent, sort_order, product_id )
-    `
-    )
+    .select(headerSelect)
     .eq("id", id)
     .eq("company_id", companyId)
     .single();
 
-  if (error) return null;
+  if (error || data == null) return null;
 
-  const raw = (data.sales_order_items ?? []) as SalesOrderItemRow[];
-  const items = [...raw].sort(
-    (a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-  );
+  const row = data as unknown as SalesOrderSingleQueryRow;
+
+  const rawItems = (row.sales_order_items ?? []) as Record<string, unknown>[];
+  const items: SalesOrderItemRow[] = [...rawItems]
+    .sort(
+      (a, b) =>
+        Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+    )
+    .map((row) => {
+      const nested = row.products;
+      const pr = Array.isArray(nested) ? nested[0] : nested;
+      const p =
+        pr && typeof pr === "object"
+          ? (pr as Record<string, unknown>)
+          : null;
+      const pid =
+        row.product_id != null && String(row.product_id).trim()
+          ? String(row.product_id)
+          : null;
+      return {
+        item: String(row.item ?? ""),
+        description: (row.description as string | null) ?? null,
+        quantity: Number(row.quantity ?? 0),
+        unit_price: Number(row.unit_price ?? 0),
+        tax_percent: Number(row.tax_percent ?? 0),
+        sort_order:
+          row.sort_order != null ? Number(row.sort_order) : undefined,
+        product_id: pid,
+        product_name:
+          p?.name != null && String(p.name).trim()
+            ? String(p.name)
+            : null,
+        product_sku:
+          p?.sku != null && String(p.sku).trim()
+            ? String(p.sku)
+            : null,
+      };
+    });
+
+  const rawDelivery = row.delivery_date;
 
   return {
-    id: data.id,
-    number: data.number,
-    issue_date: data.issue_date,
-    valid_until: data.valid_until,
-    status: normalizeSalesOrderStatus(String(data.status)),
+    id: row.id,
+    number: row.number,
+    issue_date: row.issue_date,
+    valid_until: row.valid_until,
+    status: normalizeSalesOrderStatus(String(row.status)),
     fulfillment_status: normalizeSalesOrderFulfillmentStatus(
-      (data as { fulfillment_status?: string | null }).fulfillment_status
+      row.fulfillment_status
     ),
-    payment_status: normalizeSalesOrderPaymentStatus(
-      (data as { payment_status?: string | null }).payment_status
-    ),
-    currency: data.currency,
-    customer_id: (data.customer_id as string) ?? null,
-    created_from_quotation_id: (data.created_from_quotation_id as string) ?? null,
-    from_snapshot: (data.from_snapshot ?? {}) as Record<string, unknown>,
-    bill_to_snapshot: (data.bill_to_snapshot ?? {}) as Record<string, unknown>,
-    client_snapshot: (data.client_snapshot ?? null) as Record<
-      string,
-      unknown
-    > | null,
-    discount_type: data.discount_type as "value" | "percent",
-    discount_amount: Number(data.discount_amount ?? 0),
-    shipping_amount: Number(data.shipping_amount ?? 0),
-    notes: data.notes,
-    terms: data.terms,
+    payment_status: normalizeSalesOrderPaymentStatus(row.payment_status),
+    currency: row.currency,
+    customer_id: row.customer_id ?? null,
+    created_from_quotation_id: row.created_from_quotation_id ?? null,
+    from_snapshot: (row.from_snapshot ?? {}) as Record<string, unknown>,
+    bill_to_snapshot: (row.bill_to_snapshot ?? {}) as Record<string, unknown>,
+    client_snapshot:
+      mode === "view"
+        ? null
+        : ((row.client_snapshot ?? null) as Record<string, unknown> | null),
+    discount_type: row.discount_type as "value" | "percent",
+    discount_amount: Number(row.discount_amount ?? 0),
+    shipping_amount: Number(row.shipping_amount ?? 0),
+    notes: row.notes ?? null,
+    terms: row.terms ?? null,
+    delivery_date:
+      rawDelivery != null && String(rawDelivery).trim()
+        ? String(rawDelivery).slice(0, 10)
+        : null,
     items,
   };
 }
@@ -606,6 +727,22 @@ export async function updateSalesOrderPaymentStatus(
     .from("sales_orders")
     .update({
       payment_status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("company_id", companyId);
+  if (error) throw error;
+}
+
+export async function updateSalesOrderFulfillmentStatus(
+  id: string,
+  fulfillment_status: SalesOrderFulfillmentStatus
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("sales_orders")
+    .update({
+      fulfillment_status,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -707,6 +844,9 @@ export async function updateSalesOrder(
       total,
       notes: inv.notes ?? null,
       terms: inv.terms ?? null,
+      delivery_date: inv.delivery_date?.trim()
+        ? inv.delivery_date.trim().slice(0, 10)
+        : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)

@@ -9,7 +9,7 @@ BEGIN
     'delivered to driver',
     'delivered to customer',
     'cancelled',
-    'Rescheduled'
+    'rescheduled'
   );
 EXCEPTION
   WHEN duplicate_object THEN NULL;

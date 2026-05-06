@@ -1,6 +1,61 @@
 import { supabase } from "@/lib/supabaseClient";
 import { getActiveCompanyId } from "@/lib/active-company";
 
+/** Postgres enum label `public.location_type` (values come from `fetchLocationTypeEnumValues`). */
+export type LocationType = string;
+
+/** Display label derived from the enum label (e.g. `driver_location` → Driver location). */
+export function formatLocationTypeLabel(enumLabel: string): string {
+  if (!enumLabel.trim()) return "";
+  return enumLabel
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Ordered labels for `public.location_type` from Postgres (`pg_enum`).
+ * Requires RPC `location_type_enum_values` — see `sql/patch_location_type_enum_rpc.sql`.
+ */
+export async function fetchLocationTypeEnumValues(): Promise<string[]> {
+  const { data, error } = await supabase.rpc("location_type_enum_values");
+  if (error) throw error;
+  if (!data || !Array.isArray(data)) return [];
+  return data.filter((x): x is string => typeof x === "string");
+}
+
+/**
+ * Keeps Postgres enum order, appends `currentValue` if missing (e.g. RPC failed or stale row).
+ */
+export function mergeLocationTypeEnumOptions(
+  orderedLabels: string[],
+  currentValue?: string
+): string[] {
+  const cur = currentValue?.trim();
+  if (!cur) return orderedLabels;
+  if (orderedLabels.includes(cur)) return orderedLabels;
+  return [...orderedLabels, cur];
+}
+
+async function resolveLocationTypeForInsert(
+  requested: string | undefined
+): Promise<string> {
+  const values = await fetchLocationTypeEnumValues();
+  if (values.length === 0) {
+    throw new Error(
+      "Could not load location types. Apply sql/patch_location_type_enum_rpc.sql in Supabase and ensure enum public.location_type exists."
+    );
+  }
+  if (requested !== undefined && requested !== "") {
+    if (!values.includes(requested)) {
+      throw new Error("Invalid location type.");
+    }
+    return requested;
+  }
+  return values[0];
+}
+
 export type LocationPayload = {
   name: string;
   code?: string | null;
@@ -11,8 +66,12 @@ export type LocationPayload = {
   city?: string | null;
   postal?: string | null;
   country?: string | null;
+  /** Postgres `location_type`; defaults to first enum label when omitted on insert. */
+  location_type?: LocationType;
   is_active?: boolean;
   is_default?: boolean;
+  /** Only valid for `warehouse`; DB enforces one active primary per company. */
+  is_primary_warehouse?: boolean;
 };
 
 export type LocationRow = {
@@ -30,12 +89,15 @@ export type LocationRow = {
   country: string;
   isActive: boolean;
   isDefault: boolean;
+  /** Stock source for delivery transfers when this warehouse is the company primary. */
+  isPrimaryWarehouse: boolean;
+  locationType: LocationType;
   created_at: string;
   updated_at: string;
 };
 
 const COLUMNS =
-  "id,company_id,user_id,name,code,description,map_link,address_line_1,address_line_2,city,postal,country,is_active,is_default,created_at,updated_at";
+  "id,company_id,user_id,name,code,description,map_link,address_line_1,address_line_2,city,postal,country,location_type,is_active,is_default,is_primary_warehouse,created_at,updated_at";
 
 async function getUserId() {
   const { data, error } = await supabase.auth.getUser();
@@ -64,9 +126,79 @@ async function clearDefaultForCompany(companyId: string, exceptId?: string) {
   if (error) throw error;
 }
 
+async function clearPrimaryWarehouseForCompany(
+  companyId: string,
+  exceptId?: string
+) {
+  let q = supabase
+    .from("locations")
+    .update({ is_primary_warehouse: false })
+    .eq("company_id", companyId)
+    .eq("is_primary_warehouse", true);
+  if (exceptId) q = q.neq("id", exceptId);
+  const { error } = await q;
+  if (error) throw error;
+}
+
+export type LocationListFacets = {
+  /** Total locations for company (no filters). */
+  companyTotal: number;
+  activeCount: number;
+  inactiveCount: number;
+  /** Per-type counts (active + inactive). */
+  typeCounts: { type: string; count: number }[];
+  enumTypes: string[];
+};
+
+/** Counts for the type sidebar (all statuses). */
+export async function fetchLocationListFacets(): Promise<LocationListFacets> {
+  const companyId = await requireCompanyId();
+  const enumTypes = await fetchLocationTypeEnumValues();
+
+  const head = () =>
+    supabase
+      .from("locations")
+      .select("*", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const countOf = async (
+    builder: ReturnType<typeof head>,
+  ): Promise<number> => {
+    const { count, error } = await builder;
+    if (error) throw error;
+    return count ?? 0;
+  };
+
+  const { count: companyTotalRaw } = await head();
+  const companyTotal = companyTotalRaw ?? 0;
+
+  const [activeCount, inactiveCount] = await Promise.all([
+    countOf(head().eq("is_active", true)),
+    countOf(head().eq("is_active", false)),
+  ]);
+
+  const typeCounts: { type: string; count: number }[] = await Promise.all(
+    enumTypes.map(async (t) => ({
+      type: t,
+      count: await countOf(head().eq("location_type", t)),
+    })),
+  );
+
+  return {
+    companyTotal,
+    activeCount,
+    inactiveCount,
+    typeCounts,
+    enumTypes,
+  };
+}
+
 export async function listLocations(opts?: {
   search?: string;
-  includeInactive?: boolean;
+  /** When set, filter by Postgres `location_type`. */
+  locationType?: string | null;
+  /** Narrow list by active flag; omit or `'all'` for both. */
+  statusFilter?: "all" | "active" | "inactive";
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: LocationRow[]; total: number }> {
@@ -83,8 +215,16 @@ export async function listLocations(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (!opts?.includeInactive) {
+  const lt = opts?.locationType?.trim();
+  if (lt) {
+    q = q.eq("location_type", lt);
+  }
+
+  const sf = opts?.statusFilter ?? "all";
+  if (sf === "active") {
     q = q.eq("is_active", true);
+  } else if (sf === "inactive") {
+    q = q.eq("is_active", false);
   }
 
   const term = opts?.search?.trim();
@@ -128,6 +268,16 @@ export async function addLocation(
     await clearDefaultForCompany(companyId);
   }
 
+  const location_type = await resolveLocationTypeForInsert(payload.location_type);
+
+  const wantsPrimary = payload.is_primary_warehouse === true;
+  if (wantsPrimary && location_type !== "warehouse") {
+    throw new Error("Only a warehouse can be marked as the primary warehouse.");
+  }
+  if (wantsPrimary) {
+    await clearPrimaryWarehouseForCompany(companyId);
+  }
+
   const insert = {
     company_id: companyId,
     user_id: userId,
@@ -140,8 +290,10 @@ export async function addLocation(
     city: payload.city?.trim() || null,
     postal: payload.postal?.trim() || null,
     country: payload.country?.trim() || null,
+    location_type,
     is_active: payload.is_active ?? true,
     is_default: payload.is_default ?? false,
+    is_primary_warehouse: wantsPrimary,
   };
 
   const { data, error } = await supabase
@@ -164,6 +316,13 @@ export async function updateLocation(
     await clearDefaultForCompany(companyId, id);
   }
 
+  const touchesTypeOrPrimary =
+    ("location_type" in payload && payload.location_type !== undefined) ||
+    ("is_primary_warehouse" in payload &&
+      payload.is_primary_warehouse !== undefined);
+
+  const existing = touchesTypeOrPrimary ? await getLocation(id) : null;
+
   const update: Record<string, unknown> = {};
   if ("name" in payload && payload.name !== undefined)
     update.name = payload.name.trim();
@@ -178,6 +337,39 @@ export async function updateLocation(
   if ("city" in payload) update.city = payload.city?.trim() || null;
   if ("postal" in payload) update.postal = payload.postal?.trim() || null;
   if ("country" in payload) update.country = payload.country?.trim() || null;
+
+  if ("location_type" in payload && payload.location_type !== undefined) {
+    const values = await fetchLocationTypeEnumValues();
+    if (!values.includes(payload.location_type)) {
+      throw new Error("Invalid location type.");
+    }
+    update.location_type = payload.location_type;
+    if (payload.location_type !== "warehouse") {
+      update.is_primary_warehouse = false;
+    }
+  }
+
+  if (
+    "is_primary_warehouse" in payload &&
+    payload.is_primary_warehouse !== undefined
+  ) {
+    const typeForPrimary =
+      (update.location_type as string | undefined) ??
+      existing?.locationType ??
+      "";
+    if (payload.is_primary_warehouse === true) {
+      if (typeForPrimary !== "warehouse") {
+        throw new Error(
+          "Only a warehouse can be marked as the primary warehouse."
+        );
+      }
+      await clearPrimaryWarehouseForCompany(companyId, id);
+      update.is_primary_warehouse = true;
+    } else {
+      update.is_primary_warehouse = false;
+    }
+  }
+
   if ("is_active" in payload) update.is_active = payload.is_active;
   if ("is_default" in payload) update.is_default = payload.is_default;
 
@@ -246,6 +438,10 @@ export async function listActiveLocationsForSelect(): Promise<LocationOption[]> 
   }));
 }
 
+function parseLocationType(v: unknown): LocationType {
+  return typeof v === "string" && v.length > 0 ? v : "";
+}
+
 function mapRow(r: Record<string, unknown>): LocationRow {
   return {
     id: String(r.id),
@@ -262,6 +458,8 @@ function mapRow(r: Record<string, unknown>): LocationRow {
     country: String(r.country ?? ""),
     isActive: !!r.is_active,
     isDefault: !!r.is_default,
+    isPrimaryWarehouse: !!r.is_primary_warehouse,
+    locationType: parseLocationType(r.location_type),
     created_at: String(r.created_at ?? ""),
     updated_at: String(r.updated_at ?? ""),
   };

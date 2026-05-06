@@ -11,6 +11,8 @@ import React, {
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
   clearActiveCompanyCache,
   getActiveCompanyId,
 } from "@/lib/active-company";
@@ -41,6 +43,10 @@ type AppAccountContextValue = {
   systemRoleLabel: string | null;
   companyRoleLabel: string | null;
   companyName: string | null;
+  /** From `companies.company_logo_url` (URL or `data:image/...` base64). */
+  companyLogoUrl: string | null;
+  /** Re-fetch user chip, company name, and logo (e.g. after updating settings). */
+  refreshAccount: () => Promise<void>;
   /** Where the account popover is anchored; `closed` when not open. */
   accountAnchor: AccountAnchor;
   setAccountAnchor: (anchor: AccountAnchor) => void;
@@ -64,6 +70,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
   const [systemRoleLabel, setSystemRoleLabel] = useState<string | null>(null);
   const [companyRoleLabel, setCompanyRoleLabel] = useState<string | null>(null);
   const [companyName, setCompanyName] = useState<string | null>(null);
+  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null>(null);
   const [accountAnchor, setAccountAnchor] = useState<AccountAnchor>("closed");
   const [logoutOpen, setLogoutOpen] = useState(false);
 
@@ -85,98 +92,110 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
     openAccountFromTopbar,
   ]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (cancelled || !user) {
-        if (!cancelled) {
-          setUserChip(null);
-          setSystemRoleLabel(null);
-          setCompanyRoleLabel(null);
-          setCompanyName(null);
-        }
-        return;
-      }
-      const email = user.email ?? "";
-      const { data: row } = await supabase
-        .from("user_profiles")
-        .select("full_name, avatar_url, email, system_role, is_active")
-        .eq("id", user.id)
-        .maybeSingle();
-      const meta = user.user_metadata as { full_name?: string } | undefined;
-      const name =
-        (row?.full_name as string | null)?.trim() ||
-        meta?.full_name?.trim() ||
-        email.split("@")[0] ||
-        "User";
-      if (!cancelled) {
-        setUserChip({
-          name,
-          email: (row?.email as string | null) || email,
-          avatarUrl: (row?.avatar_url as string | null) ?? null,
-        });
-      }
+  const refreshAccount = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setUserChip(null);
+      setSystemRoleLabel(null);
+      setCompanyRoleLabel(null);
+      setCompanyName(null);
+      setCompanyLogoUrl(null);
+      return;
+    }
 
-      const activeProfile = row?.is_active !== false;
-      const sr = (row?.system_role as string | null | undefined)?.toLowerCase();
-      let sysLabel: string | null = null;
-      if (row && activeProfile) {
-        if (sr === "admin") sysLabel = "Admin";
-        else if (sr === "owner") sysLabel = "Owner";
-        else if (sr === "member") sysLabel = "Member";
-        else if (sr) sysLabel = sr.charAt(0).toUpperCase() + sr.slice(1);
-      } else if (row && !activeProfile) {
-        sysLabel = "Inactive";
-      }
-      if (!cancelled) setSystemRoleLabel(sysLabel);
+    const email = user.email ?? "";
+    const { data: row } = await supabase
+      .from("user_profiles")
+      .select("full_name, avatar_url, email, system_role, is_active")
+      .eq("id", user.id)
+      .maybeSingle();
+    const meta = user.user_metadata as { full_name?: string } | undefined;
+    const name =
+      (row?.full_name as string | null)?.trim() ||
+      meta?.full_name?.trim() ||
+      email.split("@")[0] ||
+      "User";
+    setUserChip({
+      name,
+      email: (row?.email as string | null) || email,
+      avatarUrl: (row?.avatar_url as string | null) ?? null,
+    });
 
-      let role: string | null = null;
-      const companyId = await getActiveCompanyId();
-      if (!companyId || cancelled) {
-        if (!cancelled) {
-          setCompanyName(null);
-          setCompanyRoleLabel(null);
-        }
+    const activeProfile = row?.is_active !== false;
+    const sr = (row?.system_role as string | null | undefined)?.toLowerCase();
+    let sysLabel: string | null = null;
+    if (row && activeProfile) {
+      if (sr === "admin") sysLabel = "Admin";
+      else if (sr === "owner") sysLabel = "Owner";
+      else if (sr === "member") sysLabel = "Member";
+      else if (sr) sysLabel = sr.charAt(0).toUpperCase() + sr.slice(1);
+    } else if (row && !activeProfile) {
+      sysLabel = "Inactive";
+    }
+    setSystemRoleLabel(sysLabel);
+
+    let role: string | null = null;
+    const companyId = await getActiveCompanyId();
+    if (!companyId) {
+      setCompanyName(null);
+      setCompanyRoleLabel(null);
+      setCompanyLogoUrl(null);
+      return;
+    }
+
+    const { data: co } = await supabase
+      .from("companies")
+      .select("name, company_logo_url")
+      .eq("id", companyId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    setCompanyName(co?.name ? String(co.name).trim() || null : null);
+    const logoRaw = co?.company_logo_url;
+    setCompanyLogoUrl(
+      logoRaw != null && String(logoRaw).trim()
+        ? String(logoRaw).trim()
+        : null,
+    );
+
+    const { data: mem } = await supabase
+      .from("company_users")
+      .select("is_owner, company_roles ( name )")
+      .eq("user_id", user.id)
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (mem) {
+      if (mem.is_owner) {
+        role = "Owner";
       } else {
-        const { data: co } = await supabase
-          .from("companies")
-          .select("name")
-          .eq("id", companyId)
-          .eq("is_active", true)
-          .maybeSingle();
-        if (!cancelled) {
-          setCompanyName(
-            co?.name ? String(co.name).trim() || null : null
-          );
-        }
-
-        const { data: mem } = await supabase
-          .from("company_users")
-          .select("is_owner, company_roles ( name )")
-          .eq("user_id", user.id)
-          .eq("company_id", companyId)
-          .eq("is_active", true)
-          .maybeSingle();
-        if (!cancelled && mem) {
-          if (mem.is_owner) {
-            role = "Owner";
-          } else {
-            const cr = mem.company_roles as unknown as {
-              name: string | null;
-            } | null;
-            role = cr?.name?.trim() || "Member";
-          }
-        }
-        if (!cancelled) setCompanyRoleLabel(role);
+        const cr = mem.company_roles as unknown as {
+          name: string | null;
+        } | null;
+        role = cr?.name?.trim() || "Member";
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    }
+    setCompanyRoleLabel(role);
   }, []);
+
+  useEffect(() => {
+    void refreshAccount();
+  }, [refreshAccount]);
+
+  useEffect(() => {
+    const bump = () => void refreshAccount();
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refreshAccount]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -196,6 +215,8 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
       systemRoleLabel,
       companyRoleLabel,
       companyName,
+      companyLogoUrl,
+      refreshAccount,
       accountAnchor,
       setAccountAnchor,
       openAccountFromTopbar,
@@ -212,6 +233,8 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
       systemRoleLabel,
       companyRoleLabel,
       companyName,
+      companyLogoUrl,
+      refreshAccount,
       accountAnchor,
       openAccountFromTopbar,
       openAccountFromSidebar,

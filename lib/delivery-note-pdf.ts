@@ -79,6 +79,19 @@ function fmtWhen(iso: string) {
   }
 }
 
+function fmtScheduleDay(yyyyMmDd: string | null) {
+  if (!yyyyMmDd?.trim()) return "—";
+  try {
+    return new Date(`${yyyyMmDd.trim()}T12:00:00`).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return yyyyMmDd;
+  }
+}
+
 function senderLabel(profile: Profile, branding: Branding): string {
   if (branding.companyName?.trim()) return branding.companyName.trim();
   return profile.accountType === "company"
@@ -156,9 +169,15 @@ async function buildDeliveryNotePdf(
 
   let y = 88;
   doc.setFont("helvetica", "normal").setFontSize(10);
-  doc.text(`Date: ${fmtWhen(delivery.createdAt)}`, M, y);
-  doc.text(`Driver: ${delivery.driverDisplay}`, M + 220, y);
+  doc.text(`Created: ${fmtWhen(delivery.createdAt)}`, M, y);
+  doc.text(`Driver: ${delivery.driverDisplay}`, M + 260, y);
   doc.text(`Status: ${DELIVERY_NOTE_STATUS_LABELS[delivery.status]}`, M + 460, y);
+  y += 14;
+  doc.text(
+    `Scheduled delivery: ${fmtScheduleDay(delivery.deliveryDate)}`,
+    M,
+    y,
+  );
   y += 8;
 
   const bodyRows: RowInput[] = delivery.salesOrders.map((so, index) => {

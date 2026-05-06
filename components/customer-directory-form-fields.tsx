@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import type { CustomerPayload } from "@/lib/customers-service";
 import type { DeliveryCityRow } from "@/lib/delivery-zones-service";
+import { cn } from "@/lib/utils";
 
 export type CustomerDirectoryFormData = {
   type: "company" | "individual";
@@ -75,28 +76,13 @@ export function validateCustomerDirectoryForm(
   formData: CustomerDirectoryFormData,
 ): Partial<Record<keyof CustomerDirectoryFormData, string>> {
   const next: Partial<Record<keyof CustomerDirectoryFormData, string>> = {};
-  const requiredCommon: (keyof CustomerDirectoryFormData)[] = [
-    "email",
-    "phone",
-    "cityId",
-  ];
-  const requiredCompany: (keyof CustomerDirectoryFormData)[] = [
-    "companyName",
-    ...requiredCommon,
-  ];
-  const requiredIndividual: (keyof CustomerDirectoryFormData)[] = [
-    "fullName",
-    ...requiredCommon,
-  ];
-
-  const required =
-    formData.type === "company" ? requiredCompany : requiredIndividual;
+  const required: (keyof CustomerDirectoryFormData)[] = ["phone", "cityId"];
 
   for (const k of required) {
     const v = formData[k];
     if (!v || String(v).trim() === "") next[k] = "Required";
   }
-  if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+  if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
     next.email = "Invalid email";
   }
   return next;
@@ -122,14 +108,16 @@ function Field(props: {
   } = props;
   return (
     <div className="space-y-2">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id} className="text-xs font-medium">
+        {label}
+      </Label>
       <Input
         id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={error ? "border-destructive" : ""}
+        className={cn("h-8 text-xs", error ? "border-destructive" : "")}
       />
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
@@ -143,6 +131,7 @@ type CustomerDirectoryFormFieldsProps = {
   cities: DeliveryCityRow[];
   /** When false, type is shown read-only (edit mode). */
   allowTypeChange?: boolean;
+  className?: string;
 };
 
 export function CustomerDirectoryFormFields({
@@ -151,9 +140,10 @@ export function CustomerDirectoryFormFields({
   errors,
   cities,
   allowTypeChange = true,
+  className,
 }: CustomerDirectoryFormFieldsProps) {
   return (
-    <div className="space-y-4 py-2">
+    <div className={cn("space-y-4 py-2", className)}>
       {allowTypeChange ? (
         <div className="flex gap-2">
           <Button
@@ -177,7 +167,7 @@ export function CustomerDirectoryFormFields({
         </div>
       ) : (
         <div>
-          <Label>Type</Label>
+          <Label className="text-xs font-medium">Type</Label>
           <div className="mt-1">
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
               {formData.type === "company" ? (
@@ -194,7 +184,7 @@ export function CustomerDirectoryFormFields({
       {formData.type === "company" ? (
         <>
           <Field
-            label="Company Name *"
+            label="Company name"
             id="companyName"
             value={formData.companyName}
             onChange={(v) => setFormData({ ...formData, companyName: v })}
@@ -211,7 +201,7 @@ export function CustomerDirectoryFormFields({
         </>
       ) : (
         <Field
-          label="Full Name *"
+          label="Full name"
           id="fullName"
           value={formData.fullName}
           onChange={(v) => setFormData({ ...formData, fullName: v })}
@@ -222,7 +212,7 @@ export function CustomerDirectoryFormFields({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
-          label="Email *"
+          label="Email"
           id="email"
           type="email"
           value={formData.email}
@@ -240,12 +230,20 @@ export function CustomerDirectoryFormFields({
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="cityId">City *</Label>
+        <Label htmlFor="cityId" className="text-xs font-medium">
+          City *
+        </Label>
         <Select
           value={formData.cityId}
           onValueChange={(v) => setFormData({ ...formData, cityId: v })}
         >
-          <SelectTrigger id="cityId" className={errors.cityId ? "border-destructive" : ""}>
+          <SelectTrigger
+            id="cityId"
+            className={cn(
+              "h-8 text-xs",
+              errors.cityId ? "border-destructive" : "",
+            )}
+          >
             <SelectValue placeholder="Select city" />
           </SelectTrigger>
           <SelectContent>

@@ -23,7 +23,8 @@ import { useAppPageActions } from "@/contexts/app-page-actions-context";
 export function AppTopbar() {
   const pathname = usePathname() ?? "/app";
   const { featureName } = useAppFeatures();
-  const { actions: pageActions } = useAppPageActions();
+  const { actions: pageActions, titleBefore, trailingBeforeTheme } =
+    useAppPageActions();
   const { userChip, companyName, accountAnchor, setAccountAnchor } =
     useAppAccount();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -34,7 +35,7 @@ export function AppTopbar() {
   );
 
   return (
-    <header className="print:hidden sticky top-0 z-40 flex h-14 w-full shrink-0 items-center gap-2 border-b border-border bg-card/95 text-sm backdrop-blur supports-[backdrop-filter]:bg-card/60">
+    <header className="print:hidden sticky top-0 z-40 flex min-h-16 w-full shrink-0 items-center gap-2 border-b border-border bg-card/95 py-2 text-sm backdrop-blur supports-[backdrop-filter]:bg-card/60">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 px-2 sm:gap-2 sm:px-3">
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           <SheetTrigger asChild className="md:hidden shrink-0">
@@ -50,12 +51,17 @@ export function AppTopbar() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-          <h1 className="min-w-0 max-w-[min(52vw,18rem)] shrink truncate text-base font-semibold leading-tight tracking-tight text-foreground sm:max-w-xs md:max-w-md lg:max-w-lg">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-2 sm:gap-x-4 md:gap-x-6">
+          {titleBefore ? (
+            <div className="flex shrink-0 items-center overflow-hidden rounded-lg border border-border bg-muted/40 shadow-sm [&_button]:shadow-none [&_a]:rounded-md [&_button]:rounded-md">
+              {titleBefore}
+            </div>
+          ) : null}
+          <h1 className="min-w-0 max-w-[min(52vw,14rem)] shrink truncate text-lg font-semibold leading-snug tracking-tight text-foreground sm:max-w-xs md:max-w-md lg:max-w-lg">
             {pageTitle}
           </h1>
           {pageActions ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2 [&_a]:rounded-md [&_button]:rounded-md">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 [&_a]:rounded [&_button]:rounded">
               {pageActions}
             </div>
           ) : null}
@@ -70,6 +76,11 @@ export function AppTopbar() {
           >
             {companyName}
           </span>
+        ) : null}
+        {trailingBeforeTheme ? (
+          <div className="flex shrink-0 items-center [&_button]:rounded-md">
+            {trailingBeforeTheme}
+          </div>
         ) : null}
         <ThemeToggle />
         <Popover

@@ -6,7 +6,8 @@ export type CustomerPayload = {
   companyName?: string;
   contactName?: string;
   fullName?: string;
-  email: string;
+  /** Empty / omitted is stored as null when the DB allows it. */
+  email?: string;
   phone?: string;
   street?: string;
   city?: string;
@@ -35,13 +36,58 @@ async function getUserId() {
 const COLUMNS =
   "id,type,company_name,contact_name,full_name,email,phone,city,city_id,cities(name),address_line_1,address_line_2,is_active,created_at,updated_at";
 
+export type CustomerStatusFilter = "all" | "active" | "inactive";
+
+export type CustomerListFacets = {
+  companyTotal: number;
+  activeCount: number;
+  inactiveCount: number;
+  companyTypeCount: number;
+  individualTypeCount: number;
+};
+
+/** Facet counts for the active company (not filtered by search or list filters). */
+export async function fetchCustomerListFacets(): Promise<CustomerListFacets> {
+  const companyId = await requireActiveCompanyId();
+  const scoped = () =>
+    supabase
+      .from("customers")
+      .select("*", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const [
+    { count: total },
+    { count: active },
+    { count: companyType },
+    { count: individualType },
+  ] = await Promise.all([
+    scoped(),
+    scoped().eq("is_active", true),
+    scoped().eq("type", "company"),
+    scoped().eq("type", "individual"),
+  ]);
+
+  const t = total ?? 0;
+  const a = active ?? 0;
+  return {
+    companyTotal: t,
+    activeCount: a,
+    inactiveCount: Math.max(0, t - a),
+    companyTypeCount: companyType ?? 0,
+    individualTypeCount: individualType ?? 0,
+  };
+}
+
 /**
- * Paged list with optional search & includeInactive.
+ * Paged list with optional search, status, and type.
  * Returns { rows, total }.
  */
 export async function listCustomers(opts?: {
   search?: string;
+  /** When true, include active and inactive rows (same as `statusFilter: "all"`). */
   includeInactive?: boolean;
+  /** Overrides `includeInactive` when set. */
+  statusFilter?: CustomerStatusFilter;
   /** When set, only rows of this customer type. */
   type?: "company" | "individual";
   page?: number; // 1-based
@@ -53,6 +99,10 @@ export async function listCustomers(opts?: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  const statusFilter: CustomerStatusFilter =
+    opts?.statusFilter ??
+    (opts?.includeInactive ? "all" : "active");
+
   let q = supabase
     .from("customers")
     .select(COLUMNS, { count: "exact" })
@@ -60,8 +110,10 @@ export async function listCustomers(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (!opts?.includeInactive) {
+  if (statusFilter === "active") {
     q = q.eq("is_active", true);
+  } else if (statusFilter === "inactive") {
+    q = q.eq("is_active", false);
   }
 
   if (opts?.type) {
@@ -153,7 +205,9 @@ export async function addCustomer(
     company_name: payload.companyName || null,
     contact_name: payload.contactName || null,
     full_name: payload.fullName || null,
-    email: (payload.email || "").toLowerCase(),
+    email: payload.email?.trim()
+      ? payload.email.trim().toLowerCase()
+      : null,
     phone: payload.phone || null,
     street: payload.street || null,
     city: payload.city || null,
@@ -191,7 +245,9 @@ export async function addCustomersBulk(
     company_name: payload.companyName || null,
     contact_name: payload.contactName || null,
     full_name: payload.fullName || null,
-    email: (payload.email || "").toLowerCase(),
+    email: payload.email?.trim()
+      ? payload.email.trim().toLowerCase()
+      : null,
     phone: payload.phone || null,
     street: payload.street || null,
     city: payload.city || null,
@@ -290,7 +346,9 @@ export async function updateCustomer(
     update.contact_name = payload.contactName ?? null;
   if ("fullName" in payload) update.full_name = payload.fullName ?? null;
   if ("email" in payload)
-    update.email = payload.email ? payload.email.toLowerCase() : null;
+    update.email = payload.email?.trim()
+      ? payload.email.trim().toLowerCase()
+      : null;
   if ("phone" in payload) update.phone = payload.phone ?? null;
   if ("street" in payload) update.street = payload.street ?? null;
   if ("city" in payload) update.city = payload.city ?? null;

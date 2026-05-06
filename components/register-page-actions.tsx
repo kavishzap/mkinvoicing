@@ -16,3 +16,31 @@ export function RegisterPageActions({
   }, [children, setActions]);
   return null;
 }
+
+/** Registers content immediately before the top bar page title (e.g. back button). */
+export function RegisterPageTitleBefore({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { setTitleBefore } = useAppPageActions();
+  useLayoutEffect(() => {
+    setTitleBefore(children);
+    return () => setTitleBefore(null);
+  }, [children, setTitleBefore]);
+  return null;
+}
+
+/** Registers content after the company name and before the theme toggle in the top bar. */
+export function RegisterTopbarTrailingBeforeTheme({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { setTrailingBeforeTheme } = useAppPageActions();
+  useLayoutEffect(() => {
+    setTrailingBeforeTheme(children);
+    return () => setTrailingBeforeTheme(null);
+  }, [children, setTrailingBeforeTheme]);
+  return null;
+}

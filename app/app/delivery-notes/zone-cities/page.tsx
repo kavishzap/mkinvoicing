@@ -1,628 +1,923 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Check, ChevronsUpDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowLeft,
+  Ban,
+  Building2,
+  Check,
+  MapPinned,
+  Plus,
+  Search,
+  SlidersVertical,
+  Truck,
+  UserX,
+} from "lucide-react";
 import { AppPageShell } from "@/components/app-page-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { cn } from "@/lib/utils";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DataTable } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table-column-header";
+import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
+import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { useToast } from "@/hooks/use-toast";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
 import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 import {
-  assignCityToZone,
   createDeliveryCity,
-  createDeliveryZone,
   listDeliveryCities,
-  listDeliveryZones,
-  listZoneCities,
-  updateDeliveryZoneDriver,
-  updateZoneCityAssignment,
+  listDeliveryZonesWithCityCounts,
   type DeliveryCityRow,
-  type DeliveryZoneCityRow,
-  type DeliveryZoneRow,
+  type DeliveryZoneWithCityCount,
 } from "@/lib/delivery-zones-service";
+import { cn } from "@/lib/utils";
 
-function SearchableCitySelect({
-  cities,
-  value,
-  onChange,
-  placeholder,
-  compact = false,
-}: {
-  cities: DeliveryCityRow[];
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  compact?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = cities.find((c) => c.id === value);
+type ZoneListFacets = {
+  companyTotal: number;
+  activeCount: number;
+  inactiveCount: number;
+  unassignedCount: number;
+  driverRows: { userId: string; label: string; count: number }[];
+};
+
+function teamDriverMembers(team: TeamMemberRow[]): TeamMemberRow[] {
+  return team.filter((m) => m.roleName.toLowerCase().includes("driver"));
+}
+
+function memberLabel(m: TeamMemberRow): string {
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className={cn("w-full justify-between", compact ? "h-8" : "h-10")}
-        >
-          <span className="truncate">{selected?.name ?? placeholder}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        <Command>
-          <CommandInput placeholder="Search city..." />
-          <CommandList>
-            <CommandEmpty>No city found.</CommandEmpty>
-            {cities.map((c) => (
-              <CommandItem
-                key={c.id}
-                value={c.name}
-                onSelect={() => {
-                  onChange(c.id);
-                  setOpen(false);
-                }}
-              >
-                <Check
+    m.profile?.full_name?.trim() ||
+    m.profile?.email?.trim() ||
+    m.userId.slice(0, 8)
+  );
+}
+
+function buildZoneFacets(
+  zones: DeliveryZoneWithCityCount[],
+  drivers: TeamMemberRow[],
+): ZoneListFacets {
+  const activeCount = zones.filter((z) => z.isActive).length;
+  const inactiveCount = zones.filter((z) => !z.isActive).length;
+  const unassignedCount = zones.filter((z) => !z.driverUserId).length;
+  const driverRows = drivers.map((d) => ({
+    userId: d.userId,
+    label: memberLabel(d),
+    count: zones.filter((z) => z.driverUserId === d.userId).length,
+  }));
+  return {
+    companyTotal: zones.length,
+    activeCount,
+    inactiveCount,
+    unassignedCount,
+    driverRows,
+  };
+}
+
+function ZonesFilterSidebar({
+  facets,
+  statusFilter,
+  onStatusChange,
+  driverFilter,
+  onDriverChange,
+}: {
+  facets: ZoneListFacets;
+  statusFilter: "all" | "active" | "inactive";
+  onStatusChange: (v: "all" | "active" | "inactive") => void;
+  driverFilter: "all" | "unassigned" | string;
+  onDriverChange: (v: "all" | "unassigned" | string) => void;
+}) {
+  const statusRows: {
+    id: "all" | "active" | "inactive";
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All zones",
+      icon: MapPinned,
+      count: facets.companyTotal,
+    },
+    {
+      id: "active",
+      label: "Active",
+      icon: Check,
+      count: facets.activeCount,
+    },
+    {
+      id: "inactive",
+      label: "Inactive",
+      icon: Ban,
+      count: facets.inactiveCount,
+    },
+  ];
+
+  const driverRows: {
+    id: "all" | "unassigned" | string;
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All drivers",
+      icon: Truck,
+      count: facets.companyTotal,
+    },
+    {
+      id: "unassigned",
+      label: "Unassigned",
+      icon: UserX,
+      count: facets.unassignedCount,
+    },
+    ...facets.driverRows.map((d) => ({
+      id: d.userId,
+      label: d.label,
+      icon: Truck,
+      count: d.count,
+    })),
+  ];
+
+  const rowBtn =
+    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors leading-snug";
+
+  return (
+    <aside className="w-full shrink-0 lg:self-stretch">
+      <div className="space-y-7 py-1">
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By status
+          </h3>
+          <nav className="flex flex-col gap-px" aria-label="Filter zones by status">
+            {statusRows.map((item) => {
+              const Icon = item.icon;
+              const selected = statusFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onStatusChange(item.id)}
+                  aria-pressed={selected}
                   className={cn(
-                    "mr-2 h-4 w-4",
-                    value === c.id ? "opacity-100" : "opacity-0"
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                   )}
-                />
-                {c.name}
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By driver
+          </h3>
+          <nav className="flex flex-col gap-px" aria-label="Filter zones by driver">
+            {driverRows.map((item) => {
+              const Icon = item.icon;
+              const selected = driverFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onDriverChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+    </aside>
   );
 }
 
 export default function DeliveryZoneCitiesPage() {
+  const router = useRouter();
   const { toast } = useToast();
-  const [drivers, setDrivers] = useState<TeamMemberRow[]>([]);
+
+  const [companyReady, setCompanyReady] = useState<boolean | null>(null);
+  const [activeCompanyScope, setActiveCompanyScope] = useState(0);
+  const [zones, setZones] = useState<DeliveryZoneWithCityCount[]>([]);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
-  const [zones, setZones] = useState<DeliveryZoneRow[]>([]);
-  const [selectedZoneId, setSelectedZoneId] = useState("");
-  const [zoneCities, setZoneCities] = useState<DeliveryZoneCityRow[]>([]);
   const [cityName, setCityName] = useState("");
-  const [zoneName, setZoneName] = useState("");
-  const [zoneDescription, setZoneDescription] = useState("");
-  const [zoneDriverId, setZoneDriverId] = useState("");
-  const [assignCityId, setAssignCityId] = useState("");
-  const [assignSortOrder, setAssignSortOrder] = useState("1");
-  const [saving, setSaving] = useState(false);
-  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
-  const [editingCityId, setEditingCityId] = useState("");
-  const [editingSortOrder, setEditingSortOrder] = useState("");
-  const [selectedZoneDriverId, setSelectedZoneDriverId] = useState("");
+  const [savingCity, setSavingCity] = useState(false);
 
-  const reloadZoneData = async () => {
-    const [cityRows, zoneRows, team] = await Promise.all([
-      listDeliveryCities(),
-      listDeliveryZones(),
-      listTeamMembers(),
-    ]);
-    setCities(cityRows);
-    setZones(zoneRows);
-    setDrivers(team.filter((m) => m.roleName.toLowerCase().includes("driver")));
-    if (!selectedZoneId && zoneRows.length > 0) {
-      setSelectedZoneId(zoneRows[0].id);
-    } else if (
-      selectedZoneId &&
-      zoneRows.every((z) => z.id !== selectedZoneId)
-    ) {
-      setSelectedZoneId(zoneRows[0]?.id ?? "");
-    }
-  };
+  const [facets, setFacets] = useState<ZoneListFacets | null>(null);
+  const [listLoading, setListLoading] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
+    "all",
+  );
+  const [driverFilter, setDriverFilter] = useState<"all" | "unassigned" | string>(
+    "all",
+  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const [mainTab, setMainTab] = useState<"zones" | "cities">("zones");
+
+  const [citySearchQuery, setCitySearchQuery] = useState("");
+  const [debouncedCitySearch, setDebouncedCitySearch] = useState("");
+  const [cityPage, setCityPage] = useState(1);
+  const [cityPageSize, setCityPageSize] = useState(10);
+
+  const prevListDepsRef = useRef({
+    debouncedSearch: "",
+    statusFilter: "all" as "all" | "active" | "inactive",
+    driverFilter: "all" as "all" | "unassigned" | string,
+    pageSize: 10,
+    activeCompanyScope: 0,
+  });
+
+  const prevCityListDepsRef = useRef({
+    debouncedCitySearch: "",
+    cityPageSize: 10,
+    activeCompanyScope: 0,
+  });
 
   useEffect(() => {
-    if (!selectedZoneId) {
-      setSelectedZoneDriverId("__none__");
+    const t = window.setTimeout(
+      () => setDebouncedSearch(searchQuery.trim()),
+      220,
+    );
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const t = window.setTimeout(
+      () => setDebouncedCitySearch(citySearchQuery.trim()),
+      220,
+    );
+    return () => window.clearTimeout(t);
+  }, [citySearchQuery]);
+
+  useEffect(() => {
+    const bump = () => setActiveCompanyScope((n) => n + 1);
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    const id = await getActiveCompanyId();
+    if (!id) {
+      setCompanyReady(false);
+      setZones([]);
+      setCities([]);
+      setFacets(null);
       return;
     }
-    const zone = zones.find((z) => z.id === selectedZoneId);
-    setSelectedZoneDriverId(zone?.driverUserId ?? "__none__");
-  }, [selectedZoneId, zones]);
+    setCompanyReady(true);
+    setListLoading(true);
+    try {
+      const [zoneRows, cityRows, teamRows] = await Promise.all([
+        listDeliveryZonesWithCityCounts(),
+        listDeliveryCities(),
+        listTeamMembers(),
+      ]);
+      setZones(zoneRows);
+      setCities(cityRows);
+      const drivers = teamDriverMembers(teamRows);
+      setFacets(buildZoneFacets(zoneRows, drivers));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Please try again.";
+      toast({
+        title: "Failed to load zones",
+        description: msg,
+        variant: "destructive",
+      });
+      setFacets(null);
+    } finally {
+      setListLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity unstable
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await reloadZoneData();
-      } catch (e: unknown) {
-        if (!cancelled) {
-          const err = e as { message?: string };
-          toast({
-            title: "Failed to load zone cities",
-            description: err?.message ?? "Please try again.",
-            variant: "destructive",
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]);
+    void loadAll();
+  }, [activeCompanyScope, loadAll]);
+
+  const filteredZones = useMemo(() => {
+    let r = zones;
+    if (statusFilter === "active") r = r.filter((z) => z.isActive);
+    else if (statusFilter === "inactive") r = r.filter((z) => !z.isActive);
+    if (driverFilter === "unassigned") r = r.filter((z) => !z.driverUserId);
+    else if (driverFilter !== "all")
+      r = r.filter((z) => z.driverUserId === driverFilter);
+    const q = debouncedSearch.toLowerCase();
+    if (q) {
+      r = r.filter(
+        (z) =>
+          z.name.toLowerCase().includes(q) ||
+          z.driverDisplay.toLowerCase().includes(q),
+      );
+    }
+    return r;
+  }, [zones, statusFilter, driverFilter, debouncedSearch]);
 
   useEffect(() => {
-    if (!selectedZoneId) {
-      setZoneCities([]);
+    const prev = prevListDepsRef.current;
+    const depsChanged =
+      prev.debouncedSearch !== debouncedSearch ||
+      prev.statusFilter !== statusFilter ||
+      prev.driverFilter !== driverFilter ||
+      prev.pageSize !== pageSize ||
+      prev.activeCompanyScope !== activeCompanyScope;
+
+    if (depsChanged && page !== 1) {
+      setPage(1);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      try {
-        const rows = await listZoneCities(selectedZoneId);
-        if (!cancelled) setZoneCities(rows);
-      } catch (e: unknown) {
-        if (!cancelled) {
-          const err = e as { message?: string };
-          toast({
-            title: "Failed to load cities for zone",
-            description: err?.message ?? "Please try again.",
-            variant: "destructive",
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
+
+    prevListDepsRef.current = {
+      debouncedSearch,
+      statusFilter,
+      driverFilter,
+      pageSize,
+      activeCompanyScope,
     };
-  }, [selectedZoneId, toast]);
+  }, [
+    debouncedSearch,
+    statusFilter,
+    driverFilter,
+    pageSize,
+    activeCompanyScope,
+    page,
+  ]);
+
+  const totalFiltered = filteredZones.length;
+  const pageRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredZones.slice(start, start + pageSize);
+  }, [filteredZones, page, pageSize]);
+
+  const listRangeLabel = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const from = totalFiltered === 0 ? 0 : (safePage - 1) * pageSize + 1;
+    const to = Math.min(safePage * pageSize, totalFiltered);
+    if (totalFiltered === 0) return "0–0 of 0";
+    return `${from}–${to} of ${totalFiltered}`;
+  }, [totalFiltered, page, pageSize]);
+
+  const filteredCities = useMemo(() => {
+    const q = debouncedCitySearch.toLowerCase();
+    if (!q) return cities;
+    return cities.filter((c) => c.name.toLowerCase().includes(q));
+  }, [cities, debouncedCitySearch]);
+
+  useEffect(() => {
+    const prev = prevCityListDepsRef.current;
+    const depsChanged =
+      prev.debouncedCitySearch !== debouncedCitySearch ||
+      prev.cityPageSize !== cityPageSize ||
+      prev.activeCompanyScope !== activeCompanyScope;
+
+    if (depsChanged && cityPage !== 1) {
+      setCityPage(1);
+      return;
+    }
+
+    prevCityListDepsRef.current = {
+      debouncedCitySearch,
+      cityPageSize,
+      activeCompanyScope,
+    };
+  }, [
+    debouncedCitySearch,
+    cityPageSize,
+    activeCompanyScope,
+    cityPage,
+  ]);
+
+  const totalFilteredCities = filteredCities.length;
+  const cityPageRows = useMemo(() => {
+    const start = (cityPage - 1) * cityPageSize;
+    return filteredCities.slice(start, start + cityPageSize);
+  }, [filteredCities, cityPage, cityPageSize]);
+
+  const cityListRangeLabel = useMemo(() => {
+    const totalPages = Math.max(
+      1,
+      Math.ceil(totalFilteredCities / cityPageSize),
+    );
+    const safePage = Math.min(Math.max(1, cityPage), totalPages);
+    const from =
+      totalFilteredCities === 0 ? 0 : (safePage - 1) * cityPageSize + 1;
+    const to = Math.min(safePage * cityPageSize, totalFilteredCities);
+    if (totalFilteredCities === 0) return "0–0 of 0";
+    return `${from}–${to} of ${totalFilteredCities}`;
+  }, [totalFilteredCities, cityPage, cityPageSize]);
+
+  const columns = useMemo<ColumnDef<DeliveryZoneWithCityCount>[]>(
+    () => [
+      {
+        id: "name",
+        accessorFn: (r) => r.name,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Zone" />
+        ),
+        cell: ({ row }) => (
+          <span className="font-semibold text-foreground">{row.original.name}</span>
+        ),
+      },
+      {
+        id: "driver",
+        accessorFn: (r) => r.driverDisplay,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Driver" />
+        ),
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {row.original.driverUserId ? row.original.driverDisplay : "—"}
+          </span>
+        ),
+      },
+      {
+        id: "cityCount",
+        accessorFn: (r) => r.cityCount,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Cities" />
+        ),
+        cell: ({ row }) => (
+          <span className="tabular-nums text-foreground">
+            {row.original.cityCount}
+          </span>
+        ),
+        meta: { tdClassName: "text-right", thClassName: "text-right" },
+      },
+      {
+        id: "status",
+        accessorFn: (r) => (r.isActive ? 1 : 0),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Status" />
+        ),
+        cell: ({ row }) =>
+          row.original.isActive ? (
+            <span className="inline-flex rounded-full bg-emerald-500/12 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+              Active
+            </span>
+          ) : (
+            <span className="inline-flex rounded-full bg-muted/80 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+              Inactive
+            </span>
+          ),
+      },
+    ],
+    [],
+  );
+
+  const cityColumns = useMemo<ColumnDef<DeliveryCityRow>[]>(
+    () => [
+      {
+        id: "name",
+        accessorFn: (r) => r.name,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="City" />
+        ),
+        cell: ({ row }) => (
+          <span className="font-semibold text-foreground">
+            {row.original.name}
+          </span>
+        ),
+      },
+      {
+        id: "status",
+        accessorFn: (r) => (r.isActive ? 1 : 0),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Status" />
+        ),
+        cell: ({ row }) =>
+          row.original.isActive ? (
+            <span className="inline-flex rounded-full bg-emerald-500/12 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+              Active
+            </span>
+          ) : (
+            <span className="inline-flex rounded-full bg-muted/80 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+              Inactive
+            </span>
+          ),
+      },
+    ],
+    [],
+  );
+
+  const hasActiveCityFilters = debouncedCitySearch !== "";
+
+  const hasActiveFilters = useMemo(
+    () =>
+      debouncedSearch !== "" ||
+      statusFilter !== "all" ||
+      driverFilter !== "all",
+    [debouncedSearch, statusFilter, driverFilter],
+  );
 
   async function handleCreateCity() {
     if (!cityName.trim()) return;
     try {
-      setSaving(true);
+      setSavingCity(true);
       await createDeliveryCity(cityName);
       setCityName("");
-      await reloadZoneData();
+      await loadAll();
       toast({ title: "City created" });
     } catch (e: unknown) {
-      const err = e as { message?: string };
       toast({
         title: "Could not create city",
-        description: err?.message ?? "Please try again.",
+        description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
     } finally {
-      setSaving(false);
+      setSavingCity(false);
     }
   }
 
-  async function handleCreateZone() {
-    if (!zoneName.trim()) return;
-    try {
-      setSaving(true);
-      await createDeliveryZone({
-        name: zoneName,
-        description: zoneDescription,
-        driverUserId: zoneDriverId || undefined,
-      });
-      setZoneName("");
-      setZoneDescription("");
-      setZoneDriverId("");
-      await reloadZoneData();
-      toast({ title: "Zone created" });
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      toast({
-        title: "Could not create zone",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
+  const showSkeleton =
+    companyReady !== false &&
+    zones.length === 0 &&
+    facets === null &&
+    (companyReady === null || listLoading);
 
-  async function handleAssignCityToZone() {
-    if (!selectedZoneId || !assignCityId) return;
-    try {
-      setSaving(true);
-      await assignCityToZone({
-        zoneId: selectedZoneId,
-        cityId: assignCityId,
-        sortOrder: Number(assignSortOrder || "0"),
-      });
-      setAssignCityId("");
-      setAssignSortOrder(String(zoneCities.length + 1));
-      const rows = await listZoneCities(selectedZoneId);
-      setZoneCities(rows);
-      toast({ title: "City assigned to zone" });
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      toast({
-        title: "Could not assign city",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function startEdit(row: DeliveryZoneCityRow) {
-    setEditingAssignmentId(row.id);
-    setEditingCityId(row.cityId);
-    setEditingSortOrder(String(row.sortOrder));
-  }
-
-  function cancelEdit() {
-    setEditingAssignmentId(null);
-    setEditingCityId("");
-    setEditingSortOrder("");
-  }
-
-  async function saveEdit() {
-    if (!editingAssignmentId) return;
-    try {
-      setSaving(true);
-      await updateZoneCityAssignment({
-        assignmentId: editingAssignmentId,
-        cityId: editingCityId,
-        sortOrder: Number(editingSortOrder || "0"),
-      });
-      const rows = await listZoneCities(selectedZoneId);
-      setZoneCities(rows);
-      toast({ title: "Assignment updated" });
-      cancelEdit();
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      toast({
-        title: "Could not update assignment",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleUpdateZoneDriver() {
-    if (!selectedZoneId) return;
-    try {
-      setSaving(true);
-      await updateDeliveryZoneDriver(
-        selectedZoneId,
-        !selectedZoneDriverId || selectedZoneDriverId === "__none__"
-          ? null
-          : selectedZoneDriverId
-      );
-      await reloadZoneData();
-      toast({ title: "Zone driver updated" });
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      toast({
-        title: "Could not update zone driver",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
+  const showDirectory = companyReady === true && facets !== null && !showSkeleton;
 
   return (
     <AppPageShell
-      className="max-w-7xl"
-      subtitle="Create cities, create zones, and assign city sequence for delivery routes."
-      leading={
+      fillHeight
+      compact
+      className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
+      titleBefore={
         <Button variant="ghost" size="icon" asChild aria-label="Back to delivery notes">
           <Link href="/app/delivery-notes">
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
       }
+      actions={
+        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+          <Link href="/app/delivery-notes/zone-cities/new">
+            <Plus className="h-4 w-4" />
+            Add zone
+          </Link>
+        </Button>
+      }
+      topbarTrailingBeforeTheme={
+        showDirectory && mainTab === "zones" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-9 w-9 shrink-0 text-muted-foreground",
+              filtersOpen && "bg-primary/15 text-primary",
+            )}
+            aria-label={filtersOpen ? "Hide zone filters" : "Show zone filters"}
+            aria-expanded={filtersOpen}
+            aria-controls="zones-filter-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersVertical className="h-4 w-4" aria-hidden />
+          </Button>
+        ) : null
+      }
     >
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Cities</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-              <Input
-                value={cityName}
-                onChange={(e) => setCityName(e.target.value)}
-                placeholder="New city name"
-              />
-              <Button
-                type="button"
-                onClick={() => void handleCreateCity()}
-                disabled={saving || !cityName.trim()}
-              >
-                Add city
-              </Button>
-            </div>
-            <div className="overflow-x-auto rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>City</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {cities.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={2} className="py-8 text-center text-muted-foreground">
-                        No cities yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    cities.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell>{c.name}</TableCell>
-                        <TableCell>{c.isActive ? "Active" : "Inactive"}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+      {companyReady === false && (
+        <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
+          <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
+            No active company is linked to this account yet. Link a company so
+            zones and cities can be saved.
           </CardContent>
         </Card>
+      )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Zones</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-4">
-              <Input
-                value={zoneName}
-                onChange={(e) => setZoneName(e.target.value)}
-                placeholder="Zone name"
-              />
-              <Input
-                value={zoneDescription}
-                onChange={(e) => setZoneDescription(e.target.value)}
-                placeholder="Description (optional)"
-              />
-              <Select value={zoneDriverId} onValueChange={setZoneDriverId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Assign driver (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {drivers.map((d) => (
-                    <SelectItem key={d.userId} value={d.userId}>
-                      {d.profile?.full_name?.trim() ||
-                        d.profile?.email?.trim() ||
-                        d.userId.slice(0, 8)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                onClick={() => void handleCreateZone()}
-                disabled={saving || !zoneName.trim()}
-              >
-                Add zone
-              </Button>
-            </div>
-            <div className="overflow-x-auto rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Zone</TableHead>
-                    <TableHead>Driver</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {zones.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={3} className="py-8 text-center text-muted-foreground">
-                        No zones yet.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    zones.map((z) => (
-                      <TableRow key={z.id}>
-                        <TableCell>{z.name}</TableCell>
-                        <TableCell>{z.driverDisplay}</TableCell>
-                        <TableCell>{z.isActive ? "Active" : "Inactive"}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {showSkeleton ? (
+        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Link Zone to Cities</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid gap-3 md:grid-cols-5">
-            <Select value={selectedZoneId} onValueChange={setSelectedZoneId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select zone" />
-              </SelectTrigger>
-              <SelectContent>
-                {zones.map((z) => (
-                  <SelectItem key={z.id} value={z.id}>
-                    {z.name} ({z.driverDisplay})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedZoneDriverId} onValueChange={setSelectedZoneDriverId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Assign / change driver" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">No driver</SelectItem>
-                {drivers.map((d) => (
-                  <SelectItem key={d.userId} value={d.userId}>
-                    {d.profile?.full_name?.trim() ||
-                      d.profile?.email?.trim() ||
-                      d.userId.slice(0, 8)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleUpdateZoneDriver()}
-              disabled={saving || !selectedZoneId}
+      {showDirectory ? (
+        <Tabs
+          value={mainTab}
+          onValueChange={(v) => setMainTab(v as "zones" | "cities")}
+          className="flex min-h-0 flex-1 flex-col gap-4"
+        >
+          <TabsList className="grid h-auto w-full shrink-0 grid-cols-2 gap-1 p-1 sm:inline-flex sm:w-auto sm:max-w-md">
+            <TabsTrigger value="zones" className="gap-1.5 text-xs sm:text-sm">
+              <MapPinned className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Zones
+            </TabsTrigger>
+            <TabsTrigger value="cities" className="gap-1.5 text-xs sm:text-sm">
+              <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Cities
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent
+            value="zones"
+            className="mt-0 flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          >
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
+                filtersOpen ? "gap-6" : "gap-0",
+              )}
             >
-              Update driver
-            </Button>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-5">
-            <SearchableCitySelect
-              cities={cities.filter((c) => c.isActive)}
-              value={assignCityId}
-              onChange={setAssignCityId}
-              placeholder="Select city"
-            />
-            <Input
-              type="number"
-              min="1"
-              value={assignSortOrder}
-              onChange={(e) => setAssignSortOrder(e.target.value)}
-              placeholder="Sort order"
-            />
-            <Button
-              type="button"
-              onClick={() => void handleAssignCityToZone()}
-              disabled={saving || !selectedZoneId || !assignCityId || !assignSortOrder}
-            >
-              Assign city
-            </Button>
-          </div>
-
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Zone</TableHead>
-                  <TableHead>Driver</TableHead>
-                  <TableHead>City</TableHead>
-                  <TableHead className="text-right">Order</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {zoneCities.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                      No links yet for this zone.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  zoneCities.map((zc) => (
-                    <TableRow key={zc.id}>
-                      <TableCell>{zones.find((z) => z.id === zc.zoneId)?.name ?? "—"}</TableCell>
-                      <TableCell>
-                        {zones.find((z) => z.id === zc.zoneId)?.driverDisplay ?? "—"}
-                      </TableCell>
-                      <TableCell>
-                        {editingAssignmentId === zc.id ? (
-                          <SearchableCitySelect
-                            cities={cities.filter((c) => c.isActive)}
-                            value={editingCityId}
-                            onChange={setEditingCityId}
-                            placeholder="Select city"
-                            compact
-                          />
-                        ) : (
-                          zc.cityName
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {editingAssignmentId === zc.id ? (
-                          <Input
-                            type="number"
-                            min="1"
-                            value={editingSortOrder}
-                            onChange={(e) => setEditingSortOrder(e.target.value)}
-                            className="h-8 w-24 ml-auto"
-                          />
-                        ) : (
-                          zc.sortOrder
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {editingAssignmentId === zc.id ? (
-                          <div className="inline-flex gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => void saveEdit()}
-                              disabled={saving || !editingCityId || !editingSortOrder}
-                            >
-                              Save
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={cancelEdit}
-                              disabled={saving}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => startEdit(zc)}
-                          >
-                            Edit
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
+              <div
+                id="zones-filter-panel"
+                className={cn(
+                  "shrink-0 overflow-hidden",
+                  "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+                  "motion-reduce:transition-none motion-reduce:duration-0",
+                  filtersOpen
+                    ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
+                    : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
                 )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                aria-hidden={!filtersOpen}
+              >
+                <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
+                  <ZonesFilterSidebar
+                    facets={facets}
+                    statusFilter={statusFilter}
+                    onStatusChange={(v) => {
+                      setPage(1);
+                      setStatusFilter(v);
+                    }}
+                    driverFilter={driverFilter}
+                    onDriverChange={(v) => {
+                      setPage(1);
+                      setDriverFilter(v);
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex min-h-[280px] min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50 sm:min-h-[320px] lg:min-h-[360px]">
+                <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
+                  <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                      aria-hidden
+                    />
+                    <Input
+                      type="search"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search zones or drivers…"
+                      className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                      aria-label="Search zones"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
+                    {listRangeLabel}
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
+                    listLoading &&
+                      "pointer-events-none opacity-[0.58] motion-reduce:transition-none",
+                  )}
+                  aria-busy={listLoading}
+                >
+                  <DataTable
+                    className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-0 bg-transparent shadow-none"
+                    tableContainerClassName="min-h-0 flex-1 overflow-auto"
+                    variant="minimal"
+                    columns={columns}
+                    data={pageRows}
+                    manualFiltering
+                    hideSearch
+                    onRowClick={(r) =>
+                      router.push(`/app/delivery-notes/zone-cities/${r.id}`)
+                    }
+                    getRowId={(r) => r.id}
+                    emptyMessage={
+                      hasActiveFilters ? (
+                        <FeatureEmptyState
+                          title="No zones match your filters"
+                          description="Try clearing search or adjusting filters."
+                          action={
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setPage(1);
+                                setSearchQuery("");
+                                setStatusFilter("all");
+                                setDriverFilter("all");
+                              }}
+                            >
+                              Clear filters
+                            </Button>
+                          }
+                          className="border-0 bg-transparent py-8"
+                        />
+                      ) : facets.companyTotal === 0 ? (
+                        <FeatureEmptyState
+                          icon={MapPinned}
+                          title="No zones yet"
+                          description="Create a zone, assign a driver, then open it to add cities in route order."
+                          action={
+                            <Button className="gap-2" asChild>
+                              <Link href="/app/delivery-notes/zone-cities/new">
+                                <Plus className="h-4 w-4" />
+                                Add zone
+                              </Link>
+                            </Button>
+                          }
+                          className="border-0 bg-transparent py-8"
+                        />
+                      ) : (
+                        <FeatureEmptyState
+                          title="No zones on this page"
+                          description="Try another page."
+                          className="border-0 bg-transparent py-8"
+                        />
+                      )
+                    }
+                    footer={
+                      <DataTablePaginationFooter
+                        variant="minimal"
+                        total={totalFiltered}
+                        page={page}
+                        pageSize={pageSize}
+                        onPageChange={setPage}
+                        onPageSizeChange={setPageSize}
+                        pageSizeOptions={[10, 25, 50]}
+                      />
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent
+            value="cities"
+            className="mt-0 flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          >
+            <div className="flex min-h-[280px] min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50 sm:min-h-[320px] lg:min-h-[360px]">
+              <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:px-5 dark:bg-muted/25">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Cities are shared across zones. Assign them to a zone from
+                  the zone detail page.
+                </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                  <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                      aria-hidden
+                    />
+                    <Input
+                      type="search"
+                      value={citySearchQuery}
+                      onChange={(e) => setCitySearchQuery(e.target.value)}
+                      placeholder="Search cities…"
+                      className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                      aria-label="Search cities"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
+                    {cityListRangeLabel}
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                  <Input
+                    value={cityName}
+                    onChange={(e) => setCityName(e.target.value)}
+                    placeholder="New city name"
+                    disabled={savingCity}
+                    className="h-10"
+                  />
+                  <Button
+                    type="button"
+                    className="shrink-0 sm:justify-self-end"
+                    onClick={() => void handleCreateCity()}
+                    disabled={savingCity || !cityName.trim()}
+                  >
+                    Add city
+                  </Button>
+                </div>
+              </div>
+              <div
+                className={cn(
+                  "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
+                  listLoading &&
+                    "pointer-events-none opacity-[0.58] motion-reduce:transition-none",
+                )}
+                aria-busy={listLoading}
+              >
+                <DataTable
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-0 bg-transparent shadow-none"
+                  tableContainerClassName="min-h-0 flex-1 overflow-auto"
+                  variant="minimal"
+                  columns={cityColumns}
+                  data={cityPageRows}
+                  manualFiltering
+                  hideSearch
+                  getRowId={(r) => r.id}
+                  emptyMessage={
+                    hasActiveCityFilters ? (
+                      <FeatureEmptyState
+                        title="No cities match your search"
+                        description="Try a different search term."
+                        action={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setCityPage(1);
+                              setCitySearchQuery("");
+                            }}
+                          >
+                            Clear search
+                          </Button>
+                        }
+                        className="border-0 bg-transparent py-8"
+                      />
+                    ) : cities.length === 0 ? (
+                      <FeatureEmptyState
+                        icon={Building2}
+                        title="No cities yet"
+                        description="Add a city name below. You can assign it to zones from each zone’s detail page."
+                        className="border-0 bg-transparent py-8"
+                      />
+                    ) : (
+                      <FeatureEmptyState
+                        title="No cities on this page"
+                        description="Try another page."
+                        className="border-0 bg-transparent py-8"
+                      />
+                    )
+                  }
+                  footer={
+                    <DataTablePaginationFooter
+                      variant="minimal"
+                      total={totalFilteredCities}
+                      page={cityPage}
+                      pageSize={cityPageSize}
+                      onPageChange={setCityPage}
+                      onPageSizeChange={setCityPageSize}
+                      pageSizeOptions={[10, 25, 50]}
+                    />
+                  }
+                />
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      ) : null}
     </AppPageShell>
   );
 }

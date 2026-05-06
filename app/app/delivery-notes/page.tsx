@@ -3,10 +3,12 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Eye, Plus, PackageOpen } from "lucide-react";
+import { Eye, Plus, PackageOpen, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -24,14 +26,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { DeliveryNoteStatusBadge } from "@/components/delivery-note-status-badge";
 import {
   getDelivery,
+  getDriverStockReturnContext,
   listDeliveries,
+  returnDriverStockToWarehouse,
   setDeliveryDriverStatus,
   type DeliveryListRow,
+  type DriverStockReturnLine,
+  type DriverStockReturnPeriod,
 } from "@/lib/deliveries-service";
 import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 import { addExpense } from "@/lib/expenses-service";
@@ -65,6 +72,19 @@ function fmtMoney(n: number) {
   }
 }
 
+function fmtScheduleDay(yyyyMmDd: string | null) {
+  if (!yyyyMmDd?.trim()) return "—";
+  try {
+    return new Date(`${yyyyMmDd.trim()}T12:00:00`).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch {
+    return yyyyMmDd;
+  }
+}
+
 export default function DeliveryNotesPage() {
   const { toast } = useToast();
   const [rows, setRows] = useState<DeliveryListRow[]>([]);
@@ -80,6 +100,15 @@ export default function DeliveryNotesPage() {
   const [generatingStoreKeeperList, setGeneratingStoreKeeperList] = useState(false);
   const [driverBalanceRow, setDriverBalanceRow] = useState<DeliveryListRow | null>(null);
   const [confirmingDriverBalance, setConfirmingDriverBalance] = useState(false);
+  const [stockReturnLines, setStockReturnLines] = useState<DriverStockReturnLine[]>([]);
+  const [driverStockAvailable, setDriverStockAvailable] = useState<Record<string, number>>(
+    {}
+  );
+  const [stockLinesLoading, setStockLinesLoading] = useState(false);
+  const [returnQtys, setReturnQtys] = useState<Record<string, string>>({});
+  const [stockReturnBusy, setStockReturnBusy] = useState(false);
+  const [stockReturnPeriod, setStockReturnPeriod] =
+    useState<DriverStockReturnPeriod>("week");
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +138,51 @@ export default function DeliveryNotesPage() {
     };
   }, [toast]);
 
+  useEffect(() => {
+    if (!driverBalanceRow) {
+      setStockReturnLines([]);
+      setDriverStockAvailable({});
+      setReturnQtys({});
+      setStockReturnPeriod("week");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setStockLinesLoading(true);
+      try {
+        const ctx = await getDriverStockReturnContext(driverBalanceRow.id, {
+          period: stockReturnPeriod,
+        });
+        if (cancelled) return;
+        setStockReturnLines(ctx.lines);
+        setDriverStockAvailable(ctx.availableByProduct);
+        const init: Record<string, string> = {};
+        for (const l of ctx.lines) {
+          const avail = ctx.availableByProduct[l.productId] ?? 0;
+          init[l.productId] =
+            avail > 0 ? String(Math.min(l.deliveryQty, avail)) : "";
+        }
+        setReturnQtys(init);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const err = e as { message?: string };
+          toast({
+            title: "Could not load returnable stock",
+            description: err?.message ?? "Please try again.",
+            variant: "destructive",
+          });
+          setStockReturnLines([]);
+          setDriverStockAvailable({});
+          setReturnQtys({});
+        }
+      } finally {
+        if (!cancelled) setStockLinesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [driverBalanceRow, stockReturnPeriod, toast]);
 
   const selectedDriverBalanceMember = useMemo(
     () =>
@@ -119,6 +193,71 @@ export default function DeliveryNotesPage() {
   const selectedDriverRate = Number(selectedDriverBalanceMember?.driverRate ?? 0);
   const selectedDeliveryTotal = Number(driverBalanceRow?.totalAmount ?? 0);
   const amountToReturnOwner = selectedDeliveryTotal - selectedDriverRate;
+
+  async function submitDriverStockReturns() {
+    if (!driverBalanceRow) return;
+    const driverId = driverBalanceRow.driverUserId;
+    const entries: { productId: string; productName: string; qty: number }[] = [];
+    for (const l of stockReturnLines) {
+      const raw = returnQtys[l.productId] ?? "";
+      const qty = Number(raw);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      const avail = driverStockAvailable[l.productId] ?? 0;
+      if (qty > avail) {
+        toast({
+          title: "Quantity too high",
+          description: `For “${l.productName}”, the driver only has ${avail} on hand. Lower the return quantity.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      entries.push({ productId: l.productId, productName: l.productName, qty });
+    }
+    if (entries.length === 0) {
+      toast({
+        title: "Nothing to return",
+        description: "Enter a return quantity greater than zero for at least one product.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setStockReturnBusy(true);
+      for (const { productId, qty } of entries) {
+        await returnDriverStockToWarehouse({
+          driverUserId: driverId,
+          productId,
+          quantity: qty,
+        });
+      }
+      toast({
+        title: "Stock returned to warehouse",
+        description: `${entries.length} product line(s): transfer from driver to primary warehouse (return_driver_stock_to_warehouse).`,
+      });
+      const ctx = await getDriverStockReturnContext(driverBalanceRow.id, {
+        period: stockReturnPeriod,
+      });
+      setStockReturnLines(ctx.lines);
+      setDriverStockAvailable(ctx.availableByProduct);
+      const next: Record<string, string> = {};
+      for (const l of ctx.lines) {
+        const avail = ctx.availableByProduct[l.productId] ?? 0;
+        next[l.productId] =
+          avail > 0 ? String(Math.min(l.deliveryQty, avail)) : "";
+      }
+      setReturnQtys(next);
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      toast({
+        title: "Stock return failed",
+        description: err?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setStockReturnBusy(false);
+    }
+  }
 
   async function confirmDriverBalance() {
     if (!driverBalanceRow) return;
@@ -360,7 +499,7 @@ export default function DeliveryNotesPage() {
 
   return (
     <AppPageShell
-      subtitle="Assign drivers to sales orders that are still New on fulfillment. Eligible orders leave this list once you save a delivery."
+      subtitle="Assign drivers to sales orders still on New or Rescheduled fulfillment. Eligible orders leave this list once you save a delivery."
       actions={
         <div className="flex items-center gap-2">
           <Button
@@ -405,6 +544,7 @@ export default function DeliveryNotesPage() {
                 <TableRow>
                   <TableHead>Delivery ID</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead>Delivery date</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Driver</TableHead>
                   <TableHead className="text-right">Orders</TableHead>
@@ -415,19 +555,19 @@ export default function DeliveryNotesPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                       Loading…
                     </TableCell>
                   </TableRow>
                 ) : filteredRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="p-0">
+                    <TableCell colSpan={8} className="p-0">
                       <div className="flex flex-col items-center justify-center gap-3 py-14 px-4 text-center">
                         <PackageOpen className="h-10 w-10 text-muted-foreground" />
                         <p className="text-sm text-muted-foreground max-w-md">
                           No delivery notes yet. Each new delivery starts with status{" "}
                           <span className="font-medium text-foreground">New</span>. Create one
-                          to assign active sales orders (fulfillment New) to a driver.
+                          to assign active sales orders (fulfillment New or Rescheduled) to a driver.
                         </p>
                         <Button asChild variant="outline" size="sm">
                           <Link href="/app/delivery-notes/new">New delivery</Link>
@@ -443,6 +583,9 @@ export default function DeliveryNotesPage() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {fmtWhen(r.createdAt)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
+                        {fmtScheduleDay(r.deliveryDate)}
                       </TableCell>
                       <TableCell>
                         <DeliveryNoteStatusBadge status={r.status} />
@@ -573,11 +716,12 @@ export default function DeliveryNotesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Driver Balance Preview</DialogTitle>
             <DialogDescription>
-              Review the amount to return to owner before confirming.
+              Return unsold stock to the primary warehouse, then review cash to return to the owner
+              before confirming.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -603,20 +747,144 @@ export default function DeliveryNotesPage() {
                 <span className="font-bold">{fmtMoney(amountToReturnOwner)}</span>
               </div>
             </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Warehouse className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Return driver stock to warehouse</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Only sales orders still in{" "}
+                      <span className="font-medium text-foreground">
+                        Delivered to driver
+                      </span>
+                      , last updated within the selected window (local time). Uses{" "}
+                      <span className="font-mono text-foreground">
+                        return_driver_stock_to_warehouse
+                      </span>
+                      , which records a <span className="font-medium text-foreground">transfer</span>{" "}
+                      from the driver location to the primary warehouse (and updates stock).
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5 sm:items-end">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Order activity window
+                  </span>
+                  <ToggleGroup
+                    type="single"
+                    value={stockReturnPeriod}
+                    onValueChange={(v) => {
+                      if (v === "day" || v === "week") setStockReturnPeriod(v);
+                    }}
+                    variant="outline"
+                    size="sm"
+                    className="justify-start sm:justify-end"
+                  >
+                    <ToggleGroupItem value="day" aria-label="Today">
+                      Today
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value="week" aria-label="This week">
+                      This week
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+              </div>
+
+              {stockLinesLoading ? (
+                <p className="text-sm text-muted-foreground py-4">Loading products…</p>
+              ) : stockReturnLines.length === 0 ? (
+                <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
+                  {driverBalanceRow && driverBalanceRow.orderCount > 0
+                    ? "No matching lines: need sales orders in Delivered to driver with line items linked to products, and the order updated within this day/week window (or missing updated date — treated as included)."
+                    : "No products on this delivery."}
+                </p>
+              ) : (
+                <div className="rounded-md border overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead className="text-right whitespace-nowrap">
+                          Qty (driver SOs)
+                        </TableHead>
+                        <TableHead className="text-right whitespace-nowrap">On driver</TableHead>
+                        <TableHead className="w-[120px] text-right">Return qty</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {stockReturnLines.map((l) => {
+                        const onDriver = driverStockAvailable[l.productId] ?? 0;
+                        return (
+                          <TableRow key={l.productId}>
+                            <TableCell className="font-medium max-w-[200px]">
+                              <span className="line-clamp-2">{l.productName}</span>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {l.deliveryQty}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{onDriver}</TableCell>
+                            <TableCell className="text-right">
+                              <Label htmlFor={`ret-qty-${l.productId}`} className="sr-only">
+                                Return quantity for {l.productName}
+                              </Label>
+                              <Input
+                                id={`ret-qty-${l.productId}`}
+                                type="number"
+                                min={0}
+                                step="any"
+                                className="h-8 w-full text-right tabular-nums"
+                                value={returnQtys[l.productId] ?? ""}
+                                onChange={(e) =>
+                                  setReturnQtys((prev) => ({
+                                    ...prev,
+                                    [l.productId]: e.target.value,
+                                  }))
+                                }
+                                disabled={stockReturnBusy || confirmingDriverBalance}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="gap-2"
+                disabled={
+                  stockReturnBusy ||
+                  confirmingDriverBalance ||
+                  stockLinesLoading ||
+                  stockReturnLines.length === 0
+                }
+                onClick={() => void submitDriverStockReturns()}
+              >
+                {stockReturnBusy ? "Returning…" : "Return stock to warehouse"}
+              </Button>
+            </div>
           </div>
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
               onClick={() => setDriverBalanceRow(null)}
-              disabled={confirmingDriverBalance}
+              disabled={confirmingDriverBalance || stockReturnBusy}
             >
               Cancel
             </Button>
             <Button
               type="button"
               onClick={() => void confirmDriverBalance()}
-              disabled={confirmingDriverBalance}
+              disabled={confirmingDriverBalance || stockReturnBusy}
             >
               {confirmingDriverBalance ? "Confirming..." : "Confirm"}
             </Button>

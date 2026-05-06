@@ -117,6 +117,7 @@ function mapCompanyUsersToTeamRows(
       isOwner: Boolean(m.is_owner),
       invitedAt: (m.invited_at as string | null) ?? null,
       joinedAt: (m.joined_at as string | null) ?? null,
+      driverRate: (m.driver_rate as number | null) ?? null,
       profile: prof,
     };
   });
@@ -176,6 +177,7 @@ export async function GET(req: NextRequest) {
       is_owner,
       invited_at,
       joined_at,
+      driver_rate,
       company_roles ( name )
     `
     )

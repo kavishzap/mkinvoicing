@@ -1,15 +1,26 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowLeft,
+  Building2,
+  CalendarDays,
   ChevronDown,
   ChevronUp,
+  ListOrdered,
+  Package,
   Plus,
+  Receipt,
+  Save,
+  ScrollText,
+  Store,
   Trash2,
   UserPlus,
+  UserRound,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,8 +76,13 @@ import {
   SALES_ORDER_FULFILLMENT_STATUSES,
   SALES_ORDER_FULFILLMENT_LABELS,
   type SalesOrderItemRow,
+  type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
-import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { AppPageShell } from "@/components/app-page-shell";
+import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
+import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
+import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
+import { cn } from "@/lib/utils";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
@@ -102,6 +118,7 @@ type ClientInfo = {
 
 type FieldErrors = Partial<
   Record<
+    | "billTo"
     | "companyName"
     | "fullName"
     | "email"
@@ -114,6 +131,99 @@ type FieldErrors = Partial<
     string
   >
 >;
+
+function hasBillToDetails(ci: ClientInfo): boolean {
+  return (
+    (ci.type === "company" && ci.companyName.trim().length > 0) ||
+    (ci.type === "individual" && ci.fullName.trim().length > 0) ||
+    ci.email.trim().length > 0 ||
+    ci.phone.trim().length > 0 ||
+    ci.address_line_1.trim().length > 0
+  );
+}
+
+const fieldLabelClass =
+  "text-xs font-medium text-neutral-600 dark:text-neutral-400";
+const sectionTitleClass =
+  "text-sm font-semibold leading-snug text-neutral-700 dark:text-neutral-300";
+const sectionIconBoxClass =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
+const sectionIconClass = "h-3.5 w-3.5 text-neutral-600 dark:text-neutral-400";
+
+const twoColSectionGridClass =
+  "grid min-h-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10 [&>*]:min-w-0";
+
+function EditSectionCard({
+  icon: Icon,
+  title,
+  headerRight,
+  children,
+  className,
+}: {
+  icon: LucideIcon;
+  title: string;
+  headerRight?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card
+      className={cn(
+        "flex min-h-0 w-full max-w-full flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm self-start",
+        className,
+      )}
+    >
+      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
+        <div className={sectionIconBoxClass}>
+          <Icon className={sectionIconClass} aria-hidden />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
+          <CardTitle className={sectionTitleClass}>{title}</CardTitle>
+          {headerRight ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {headerRight}
+            </div>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="field-controls flex min-h-0 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs [&_textarea]:text-xs">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <p className={fieldLabelClass}>{label}</p>
+      <div className="break-words text-sm font-medium text-foreground">{children}</div>
+    </div>
+  );
+}
+
+function fmtDate(d: string) {
+  try {
+    return new Date(d).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch {
+    return d;
+  }
+}
+
+function fmtMoney(n: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+    }).format(n);
+  } catch {
+    return `${currency} ${n.toFixed(2)}`;
+  }
+}
 
 function daysBetweenIssueAndValid(issue: string, valid: string) {
   const a = new Date(issue).getTime();
@@ -165,10 +275,16 @@ export default function EditSalesOrderPage() {
     new Date().toISOString().split("T")[0]
   );
   const [validForDays, setValidForDays] = useState("14");
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [lifecycleStatus, setLifecycleStatus] =
     useState<SalesOrderStatus>("active");
   const [fulfillmentStatus, setFulfillmentStatus] =
     useState<SalesOrderFulfillmentStatus>("new");
+  const [paymentStatus, setPaymentStatus] =
+    useState<SalesOrderPaymentStatus>("unpaid");
+  const [createdFromQuotationId, setCreatedFromQuotationId] = useState<
+    string | null
+  >(null);
 
   const [lineItems, setLineItems] = useState<LineItem[]>([
     {
@@ -240,8 +356,13 @@ export default function EditSalesOrderPage() {
         setValidForDays(
           String(daysBetweenIssueAndValid(q.issue_date, q.valid_until))
         );
+        setDeliveryDate(
+          q.delivery_date ? String(q.delivery_date).slice(0, 10) : "",
+        );
         setLifecycleStatus(q.status);
         setFulfillmentStatus(q.fulfillment_status);
+        setPaymentStatus(q.payment_status);
+        setCreatedFromQuotationId(q.created_from_quotation_id);
         setDiscount({
           type: q.discount_type,
           amount: q.discount_amount,
@@ -358,6 +479,61 @@ export default function EditSalesOrderPage() {
     [subtotal, taxTotal, discountAmount]
   );
 
+  const currency = preferences?.currency ?? "USD";
+
+  const billDisplayName = useMemo(() => {
+    return clientInfo.type === "company"
+      ? clientInfo.companyName.trim()
+      : clientInfo.fullName.trim();
+  }, [clientInfo]);
+
+  const productSummary = useMemo(() => {
+    type SummaryRow = {
+      key: string;
+      productId: string | null;
+      label: string;
+      sku: string | null;
+      totalQty: number;
+      lineCount: number;
+    };
+    const map = new Map<string, SummaryRow>();
+    for (const it of lineItems) {
+      const pid = it.productId?.trim() || null;
+      const itemLabel = String(it.item ?? "").trim() || "Line item";
+      const key =
+        pid ??
+        `manual:${itemLabel}:${Number(it.unitPrice ?? 0)}:${Number(it.tax ?? 0)}`;
+      const prod = pid ? products.find((p) => p.id === pid) : undefined;
+      const catalogName = prod?.name?.trim() || null;
+      const label = pid ? catalogName || itemLabel : itemLabel;
+      const sku = pid ? prod?.sku?.trim() || null : null;
+      const qty = Number(it.quantity) || 0;
+      const prev = map.get(key);
+      if (prev) {
+        prev.totalQty += qty;
+        prev.lineCount += 1;
+      } else {
+        map.set(key, {
+          key,
+          productId: pid,
+          label,
+          sku,
+          totalQty: qty,
+          lineCount: 1,
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+    );
+  }, [lineItems, products]);
+
+  const logoSrc =
+    (profile as { logoUrl?: string })?.logoUrl || "/kredence.png";
+
+  const billToIcon =
+    clientInfo.type === "company" ? Building2 : UserRound;
+
   const addLineItem = () =>
     setLineItems((prev) => [
       ...prev,
@@ -426,6 +602,16 @@ export default function EditSalesOrderPage() {
       address_line_2: c.address_line_2 ?? "",
     });
     setIsCustomerDialogOpen(false);
+    setErrors((e) => {
+      const next = { ...e };
+      delete next.billTo;
+      delete next.companyName;
+      delete next.fullName;
+      delete next.email;
+      delete next.phone;
+      delete next.address_line_1;
+      return next;
+    });
     toast({
       title: "Customer selected",
       description: `${
@@ -434,22 +620,29 @@ export default function EditSalesOrderPage() {
     });
   };
 
-  function validate(): boolean {
+  function validate(): FieldErrors {
     const next: FieldErrors = {};
 
-    const needCompany = clientInfo.type === "company";
-    if (needCompany && !clientInfo.companyName.trim())
-      next.companyName = "Company name is required";
-    if (!needCompany && !clientInfo.fullName.trim())
-      next.fullName = "Full name is required";
+    if (selectedCustomer) {
+      // Linked customer: same rule as new sales order — do not block save on sparse legacy rows.
+    } else if (!hasBillToDetails(clientInfo)) {
+      next.billTo =
+        "Choose a customer or enter bill-to details (name, email, phone, or address) before saving.";
+    } else {
+      const needCompany = clientInfo.type === "company";
+      if (needCompany && !clientInfo.companyName.trim())
+        next.companyName = "Company name is required";
+      if (!needCompany && !clientInfo.fullName.trim())
+        next.fullName = "Full name is required";
 
-    const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!clientInfo.email.trim()) next.email = "Email is required";
-    else if (!emailRx.test(clientInfo.email)) next.email = "Invalid email";
+      const emailRx = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!clientInfo.email.trim()) next.email = "Email is required";
+      else if (!emailRx.test(clientInfo.email)) next.email = "Invalid email";
 
-    if (!clientInfo.phone.trim()) next.phone = "Phone is required";
-    if (!clientInfo.address_line_1.trim())
-      next.address_line_1 = "Address line 1 is required";
+      if (!clientInfo.phone.trim()) next.phone = "Phone is required";
+      if (!clientInfo.address_line_1.trim())
+        next.address_line_1 = "Address line 1 is required";
+    }
 
     if (lineItems.length === 0) {
       next.lineItems = "At least one line item is required";
@@ -465,14 +658,19 @@ export default function EditSalesOrderPage() {
     }
 
     setErrors(next);
-    return Object.keys(next).length === 0;
+    return next;
   }
 
   async function saveSalesOrder() {
     if (!salesOrderId) return;
-    if (!validate()) {
+    const validation = validate();
+    if (Object.keys(validation).length > 0) {
+      const firstMsg = Object.values(validation).find(
+        (v): v is string => typeof v === "string" && v.length > 0
+      );
       toast({
         title: "Please fix the highlighted fields.",
+        description: firstMsg,
         variant: "destructive",
       });
       return;
@@ -530,6 +728,7 @@ export default function EditSalesOrderPage() {
         from_snapshot: fromSnap,
         bill_to_snapshot: billSnap,
         items: itemsPayload,
+        delivery_date: deliveryDate.trim() || null,
       });
 
       toast({
@@ -550,408 +749,644 @@ export default function EditSalesOrderPage() {
   }
 
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
-  const showLogo = (profile as { logoUrl?: string })?.logoUrl;
 
   if (loading) {
     return (
-      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="flex gap-2">
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+          <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
           </div>
+          <div className="h-48 animate-pulse rounded-lg bg-muted" />
         </div>
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
-        </div>
-        <div className="h-64 rounded bg-muted animate-pulse" />
-      </div>
+      </AppPageShell>
     );
   }
 
   return (
     <AppPageShell
-      className="max-w-7xl"
-      subtitle={`${salesOrderNumber} — Update customer, lines, or totals, then save.`}
-      leading={
-        <Link
-          href={
-            salesOrderId
-              ? `/app/sales-orders/${salesOrderId}`
-              : "/app/sales-orders"
-          }
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      titleBefore={
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          aria-label="Back to sales order"
         >
-          <Button variant="ghost" size="icon" aria-label="Back to sales order">
+          <Link
+            href={
+              salesOrderId
+                ? `/app/sales-orders/${salesOrderId}`
+                : "/app/sales-orders"
+            }
+          >
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       }
+      subtitle={`${salesOrderNumber}${billDisplayName ? ` · ${billDisplayName}` : ""}`}
+      subtitleClassName="w-full min-w-0 max-w-none"
       actions={
-        <Button onClick={saveSalesOrder} disabled={saving} size="sm">
-          {saving ? "Saving..." : "Save changes"}
+        <Button
+          onClick={saveSalesOrder}
+          disabled={saving}
+          className="gap-2 rounded font-semibold shadow-sm"
+        >
+          <Save className="size-3.5 shrink-0" aria-hidden />
+          {saving ? "Saving…" : "Save changes"}
         </Button>
       }
     >
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-3">From</CardTitle>
-              <Link href="/app/settings">
-                <Button variant="link" size="sm" className="h-auto p-0">
-                  Edit in Settings
-                </Button>
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/app/sales-orders/${salesOrderId}`}>
+                View sales order
               </Link>
-            </div>
-          </CardHeader>
+            </Button>
+          </div>
 
-          <CardContent className="space-y-2 text-sm">
-            {showLogo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={String(showLogo)}
-                alt="Logo"
-                className="h-50 w-50 rounded-md object-cover border"
-              />
-            ) : (
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary  font-bold">
-                {(profile?.companyName || profile?.fullName || "S")
-                  .slice(0, 1)
-                  .toUpperCase()}
+          <div className="flex min-w-0 flex-col gap-6 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+            <div className="flex min-w-0 flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
+                  Sales order {salesOrderNumber}
+                </h2>
+                <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <span>{currency}</span>
+                  <span aria-hidden>·</span>
+                  <span>Issue {fmtDate(issueDate)}</span>
+                  {billDisplayName ? (
+                    <>
+                      <span aria-hidden>·</span>
+                      <span className="font-medium text-foreground">
+                        {billDisplayName}
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <SalesOrderStatusBadge status={lifecycleStatus} />
+                  <SalesOrderFulfillmentStatusBadge
+                    status={fulfillmentStatus}
+                  />
+                  <SalesOrderPaymentStatusBadge status={paymentStatus} />
+                </div>
               </div>
-            )}
-            {profile?.accountType === "company" ? (
-              <>
-                <p className="font-semibold">{profile?.companyName}</p>
-                {profile?.registrationId && (
-                  <p className="text-muted-foreground">
-                    Reg: {profile.registrationId}
-                  </p>
+              <p className="text-xs text-muted-foreground lg:max-w-sm lg:text-right">
+                Update customer, lines, and totals, then use{" "}
+                <span className="font-medium text-foreground">
+                  Save changes
+                </span>{" "}
+                in the top bar.
+              </p>
+            </div>
+
+            <div className={twoColSectionGridClass}>
+              <EditSectionCard
+                icon={Store}
+                title="Seller"
+                headerRight={
+                  <Link href="/app/settings">
+                    <Button variant="link" size="sm" className="h-auto px-0">
+                      Edit in Settings
+                    </Button>
+                  </Link>
+                }
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                  {logoSrc ? (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
+                      <Image
+                        src={logoSrc}
+                        alt=""
+                        width={56}
+                        height={56}
+                        className="object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary text-lg font-bold text-primary-foreground">
+                      {(profile?.companyName || profile?.fullName || "S")
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <InfoRow label="Name">
+                      {profile?.accountType === "company"
+                        ? profile?.companyName || "—"
+                        : profile?.fullName || "—"}
+                    </InfoRow>
+                    {profile?.email ? (
+                      <InfoRow label="Email">{profile.email}</InfoRow>
+                    ) : null}
+                    {profile?.accountType === "company" &&
+                    profile?.registrationId ? (
+                      <InfoRow label="Registration">
+                        {profile.registrationId}
+                      </InfoRow>
+                    ) : null}
+                    {profile?.accountType === "company" && profile?.vatNumber ? (
+                      <InfoRow label="VAT">{profile.vatNumber}</InfoRow>
+                    ) : null}
+                  </div>
+                </div>
+              </EditSectionCard>
+
+              <EditSectionCard
+                icon={billToIcon}
+                title="Bill to"
+                headerRight={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsCustomerDialogOpen(true)}
+                    className="gap-2"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Select customer
+                  </Button>
+                }
+              >
+                {errors.billTo ? (
+                  <p className="text-xs text-destructive">{errors.billTo}</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <Button
+                    variant={clientInfo.type === "company" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() =>
+                      setClientInfo({ ...clientInfo, type: "company" })
+                    }
+                    className="flex-1"
+                  >
+                    Company
+                  </Button>
+                  <Button
+                    variant={
+                      clientInfo.type === "individual" ? "default" : "outline"
+                    }
+                    size="sm"
+                    onClick={() =>
+                      setClientInfo({ ...clientInfo, type: "individual" })
+                    }
+                    className="flex-1"
+                  >
+                    Individual
+                  </Button>
+                </div>
+
+                {clientInfo.type === "company" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="companyName">Company Name *</Label>
+                      <Input
+                        id="companyName"
+                        className={err("companyName")}
+                        value={clientInfo.companyName}
+                        onChange={(e) =>
+                          setClientInfo({
+                            ...clientInfo,
+                            companyName: e.target.value,
+                          })
+                        }
+                        placeholder="Acme Corp"
+                      />
+                      {errors.companyName && (
+                        <p className="text-xs text-destructive">
+                          {errors.companyName}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="contactName">
+                        Contact Name (Optional)
+                      </Label>
+                      <Input
+                        id="contactName"
+                        value={clientInfo.contactName}
+                        onChange={(e) =>
+                          setClientInfo({
+                            ...clientInfo,
+                            contactName: e.target.value,
+                          })
+                        }
+                        placeholder="John Doe"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="fullName">Full Name *</Label>
+                    <Input
+                      id="fullName"
+                      className={err("fullName")}
+                      value={clientInfo.fullName}
+                      onChange={(e) =>
+                        setClientInfo({ ...clientInfo, fullName: e.target.value })
+                      }
+                      placeholder="John Doe"
+                    />
+                    {errors.fullName && (
+                      <p className="text-xs text-destructive">
+                        {errors.fullName}
+                      </p>
+                    )}
+                  </div>
                 )}
-                {profile?.vatNumber && (
-                  <p className="text-muted-foreground">
-                    VAT: {profile.vatNumber}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="font-semibold">{profile?.fullName}</p>
-            )}
-            <p className="text-muted-foreground">{profile?.email}</p>
-            <p className="text-muted-foreground">{profile?.phone}</p>
-            {profile?.address_line_1 && (
-              <p className="text-muted-foreground">{profile.address_line_1}</p>
-            )}
-            {profile?.address_line_2 && (
-              <p className="text-muted-foreground">{profile.address_line_2}</p>
-            )}
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Bill to & dates</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsCustomerDialogOpen(true)}
-                className="gap-2"
-              >
-                <UserPlus className="h-4 w-4" />
-                Select Customer
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-nowrap items-end gap-3 md:gap-4 overflow-x-auto pb-1">
-              <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
-                <Label htmlFor="issueDate">Issue Date</Label>
-                <Input
-                  id="issueDate"
-                  type="date"
-                  className="h-9"
-                  value={issueDate}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setIssueDate(v);
-                    const base = new Date(v);
-                    const days = Number(validForDays) || 14;
-                    base.setDate(base.getDate() + days);
-                    setValidUntil(base.toISOString().split("T")[0]);
-                  }}
-                />
-              </div>
-              <div className="shrink-0 space-y-2 w-[min(100%,11rem)]">
-                <Label htmlFor="validUntil">Valid Until</Label>
-                <Input
-                  id="validUntil"
-                  type="date"
-                  className="h-9"
-                  value={validUntil}
-                  onChange={(e) => setValidUntil(e.target.value)}
-                />
-              </div>
-              <div className="shrink-0 space-y-2 w-[min(100%,9.5rem)]">
-                <Label htmlFor="validForDays">Valid for (days)</Label>
-                <Select
-                  value={validForDays}
-                  onValueChange={(v) => {
-                    setValidForDays(v);
-                    const days = Number(v) || 14;
-                    const base = new Date(
-                      issueDate || new Date().toISOString().split("T")[0]
-                    );
-                    base.setDate(base.getDate() + days);
-                    setValidUntil(base.toISOString().split("T")[0]);
-                  }}
-                >
-                  <SelectTrigger id="validForDays" className="h-9 w-full min-w-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="14">14 days</SelectItem>
-                    <SelectItem value="30">30 days</SelectItem>
-                    <SelectItem value="60">60 days</SelectItem>
-                    <SelectItem value="90">90 days</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="shrink-0 space-y-2 w-[min(100%,10.5rem)]">
-                <Label htmlFor="soFulfillment">Fulfillment status</Label>
-                <Select
-                  value={fulfillmentStatus}
-                  onValueChange={(v) =>
-                    setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
-                  }
-                >
-                  <SelectTrigger id="soFulfillment" className="h-9 w-full min-w-0">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
-                      <SelectItem key={v} value={v}>
-                        {SALES_ORDER_FULFILLMENT_LABELS[v]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <Separator />
-            <div className="flex gap-2">
-              <Button
-                variant={clientInfo.type === "company" ? "default" : "outline"}
-                size="sm"
-                onClick={() =>
-                  setClientInfo({ ...clientInfo, type: "company" })
-                }
-                className="flex-1"
-              >
-                Company
-              </Button>
-              <Button
-                variant={
-                  clientInfo.type === "individual" ? "default" : "outline"
-                }
-                size="sm"
-                onClick={() =>
-                  setClientInfo({ ...clientInfo, type: "individual" })
-                }
-                className="flex-1"
-              >
-                Individual
-              </Button>
-            </div>
-
-            {clientInfo.type === "company" ? (
-              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="clientEmail">Email *</Label>
+                    <Input
+                      id="clientEmail"
+                      className={err("email")}
+                      type="email"
+                      value={clientInfo.email}
+                      onChange={(e) =>
+                        setClientInfo({ ...clientInfo, email: e.target.value })
+                      }
+                      placeholder="client@example.com"
+                    />
+                    {errors.email && (
+                      <p className="text-xs text-destructive">{errors.email}</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="clientPhone">Phone *</Label>
+                    <Input
+                      id="clientPhone"
+                      className={err("phone")}
+                      value={clientInfo.phone}
+                      onChange={(e) =>
+                        setClientInfo({ ...clientInfo, phone: e.target.value })
+                      }
+                      placeholder="+230 5xx xx xx"
+                    />
+                    {errors.phone && (
+                      <p className="text-xs text-destructive">{errors.phone}</p>
+                    )}
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="companyName">Company Name *</Label>
+                  <Label htmlFor="clientCity">City</Label>
+                  <Select
+                    value={clientInfo.city || "__none__"}
+                    onValueChange={(v) =>
+                      setClientInfo({
+                        ...clientInfo,
+                        city: v === "__none__" ? "" : v,
+                      })
+                    }
+                  >
+                    <SelectTrigger id="clientCity">
+                      <SelectValue placeholder="Select city" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No city</SelectItem>
+                      {cities
+                        .filter((c) => c.isActive)
+                        .map((c) => (
+                          <SelectItem key={c.id} value={c.name}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="clientAddress1">Address Line 1 *</Label>
                   <Input
-                    id="companyName"
-                    className={err("companyName")}
-                    value={clientInfo.companyName}
+                    id="clientAddress1"
+                    className={err("address_line_1")}
+                    value={clientInfo.address_line_1}
                     onChange={(e) =>
                       setClientInfo({
                         ...clientInfo,
-                        companyName: e.target.value,
+                        address_line_1: e.target.value,
                       })
                     }
-                    placeholder="Acme Corp"
+                    placeholder="e.g. 123 Main St, Port Louis"
                   />
-                  {errors.companyName && (
+                  {errors.address_line_1 && (
                     <p className="text-xs text-destructive">
-                      {errors.companyName}
+                      {errors.address_line_1}
                     </p>
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="contactName">Contact Name (Optional)</Label>
+                  <Label htmlFor="clientAddress2">Address Line 2</Label>
                   <Input
-                    id="contactName"
-                    value={clientInfo.contactName}
+                    id="clientAddress2"
+                    value={clientInfo.address_line_2}
                     onChange={(e) =>
                       setClientInfo({
                         ...clientInfo,
-                        contactName: e.target.value,
+                        address_line_2: e.target.value,
                       })
                     }
-                    placeholder="John Doe"
+                    placeholder="Apartment, suite, building, etc."
                   />
                 </div>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="fullName">Full Name *</Label>
-                <Input
-                  id="fullName"
-                  className={err("fullName")}
-                  value={clientInfo.fullName}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, fullName: e.target.value })
-                  }
-                  placeholder="John Doe"
-                />
-                {errors.fullName && (
-                  <p className="text-xs text-destructive">{errors.fullName}</p>
-                )}
-              </div>
-            )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="clientEmail">Email *</Label>
-                <Input
-                  id="clientEmail"
-                  className={err("email")}
-                  type="email"
-                  value={clientInfo.email}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, email: e.target.value })
-                  }
-                  placeholder="client@example.com"
-                />
-                {errors.email && (
-                  <p className="text-xs text-destructive">{errors.email}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clientPhone">Phone *</Label>
-                <Input
-                  id="clientPhone"
-                  className={err("phone")}
-                  value={clientInfo.phone}
-                  onChange={(e) =>
-                    setClientInfo({ ...clientInfo, phone: e.target.value })
-                  }
-                  placeholder="+230 5xx xx xx"
-                />
-                {errors.phone && (
-                  <p className="text-xs text-destructive">{errors.phone}</p>
-                )}
-              </div>
+                {createdFromQuotationId ? (
+                  <InfoRow label="Created from quotation">
+                    <Link
+                      href={`/app/quotations/${createdFromQuotationId}`}
+                      className="font-medium text-primary underline underline-offset-2"
+                    >
+                      Open quotation
+                    </Link>
+                  </InfoRow>
+                ) : null}
+                {selectedCustomer?.id ? (
+                  <InfoRow label="Linked customer">
+                    <Link
+                      href={`/app/customers/${selectedCustomer.id}/edit`}
+                      className="font-medium text-primary underline underline-offset-2"
+                    >
+                      View customer record
+                    </Link>
+                  </InfoRow>
+                ) : null}
+              </EditSectionCard>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientCity">City</Label>
-              <Select
-                value={clientInfo.city || "__none__"}
-                onValueChange={(v) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    city: v === "__none__" ? "" : v,
-                  })
-                }
+
+            <div className={twoColSectionGridClass}>
+              <EditSectionCard
+                icon={CalendarDays}
+                title="Dates & fulfillment"
               >
-                <SelectTrigger id="clientCity">
-                  <SelectValue placeholder="Select city" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No city</SelectItem>
-                  {cities
-                    .filter((c) => c.isActive)
-                    .map((c) => (
-                      <SelectItem key={c.id} value={c.name}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress1">Address Line 1 *</Label>
-              <Input
-                id="clientAddress1"
-                className={err("address_line_1")}
-                value={clientInfo.address_line_1}
-                onChange={(e) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    address_line_1: e.target.value,
-                  })
-                }
-                placeholder="e.g. 123 Main St, Port Louis"
-              />
-              {errors.address_line_1 && (
-                <p className="text-xs text-destructive">
-                  {errors.address_line_1}
-                </p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress2">Address Line 2</Label>
-              <Input
-                id="clientAddress2"
-                value={clientInfo.address_line_2}
-                onChange={(e) =>
-                  setClientInfo({
-                    ...clientInfo,
-                    address_line_2: e.target.value,
-                  })
-                }
-                placeholder="Apartment, suite, building, etc."
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="issueDate" className={fieldLabelClass}>
+                      Issue date
+                    </Label>
+                    <Input
+                      id="issueDate"
+                      type="date"
+                      value={issueDate}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setIssueDate(v);
+                        const base = new Date(v);
+                        const days = Number(validForDays) || 14;
+                        base.setDate(base.getDate() + days);
+                        setValidUntil(base.toISOString().split("T")[0]);
+                      }}
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="validUntil" className={fieldLabelClass}>
+                      Valid until
+                    </Label>
+                    <Input
+                      id="validUntil"
+                      type="date"
+                      value={validUntil}
+                      onChange={(e) => setValidUntil(e.target.value)}
+                    />
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="validForDays" className={fieldLabelClass}>
+                      Valid for (days)
+                    </Label>
+                    <Select
+                      value={validForDays}
+                      onValueChange={(v) => {
+                        setValidForDays(v);
+                        const days = Number(v) || 14;
+                        const base = new Date(
+                          issueDate || new Date().toISOString().split("T")[0]
+                        );
+                        base.setDate(base.getDate() + days);
+                        setValidUntil(base.toISOString().split("T")[0]);
+                      }}
+                    >
+                      <SelectTrigger
+                        id="validForDays"
+                        className="h-8 w-full rounded-sm text-xs"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="7">7 days</SelectItem>
+                        <SelectItem value="14">14 days</SelectItem>
+                        <SelectItem value="30">30 days</SelectItem>
+                        <SelectItem value="60">60 days</SelectItem>
+                        <SelectItem value="90">90 days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="min-w-0 space-y-2">
+                    <Label htmlFor="soDeliveryDate" className={fieldLabelClass}>
+                      Delivery date
+                    </Label>
+                    <Input
+                      id="soDeliveryDate"
+                      type="date"
+                      value={deliveryDate}
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                    />
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      Optional. Read-only on the sales order view.
+                    </p>
+                  </div>
+                  <div className="min-w-0 space-y-2 sm:col-span-2">
+                    <Label htmlFor="soFulfillment" className={fieldLabelClass}>
+                      Fulfillment status
+                    </Label>
+                    <Select
+                      value={fulfillmentStatus}
+                      onValueChange={(v) =>
+                        setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
+                      }
+                    >
+                      <SelectTrigger
+                        id="soFulfillment"
+                        className="h-8 w-full max-w-md rounded-sm text-xs"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
+                          <SelectItem key={v} value={v}>
+                            {SALES_ORDER_FULFILLMENT_LABELS[v]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </EditSectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Line Items</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {errors.lineItems && (
-            <p className="mb-2 text-xs text-destructive">{errors.lineItems}</p>
-          )}
-          <div className="rounded-lg border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[72px] text-center align-middle">
-                    Order
-                  </TableHead>
-                  <TableHead className="w-[min(14rem,22vw)] align-middle">
-                    Product *
-                  </TableHead>
-                  <TableHead className="w-[200px] align-middle">Item</TableHead>
-                  <TableHead className="w-[250px] align-middle">
-                    Description
-                  </TableHead>
-                  <TableHead className="w-[100px] align-middle">Qty *</TableHead>
-                  <TableHead className="w-[120px] align-middle">
-                    Unit Price *
-                  </TableHead>
-                  <TableHead className="w-[100px] align-middle">Tax %</TableHead>
-                  <TableHead className="w-[120px] text-right align-middle">
-                    Total
-                  </TableHead>
-                  <TableHead className="w-[50px] align-middle"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+              <EditSectionCard
+                icon={Receipt}
+                title="Totals"
+              >
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Subtotal</span>
+                    <span className="tabular-nums font-medium">
+                      {fmtMoney(subtotal, currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Tax</span>
+                    <span className="tabular-nums font-medium">
+                      {fmtMoney(taxTotal, currency)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">
+                      Discount
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <DiscountTypeToggle
+                        value={discount.type}
+                        onChange={(t) => setDiscount({ ...discount, type: t })}
+                        currencyLabel={currency}
+                      />
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={discount.amount}
+                        onChange={(e) =>
+                          setDiscount({
+                            ...discount,
+                            amount: Number(e.target.value),
+                          })
+                        }
+                        className="h-8 w-[100px]"
+                      />
+                      <span className="min-w-[80px] text-right text-sm tabular-nums">
+                        −{fmtMoney(discountAmount, currency)}
+                      </span>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between text-base font-semibold">
+                    <span>Total</span>
+                    <span className="tabular-nums">
+                      {fmtMoney(total, currency)}
+                    </span>
+                  </div>
+                </div>
+              </EditSectionCard>
+            </div>
+
+            <EditSectionCard icon={Package} title="Products" className="min-w-0 max-w-full">
+              <p className="text-xs text-muted-foreground">
+                Aggregated from line items; links open the product record.
+              </p>
+              <div className="max-w-full min-w-0 overflow-x-auto rounded-md border">
+                <Table className="w-max min-w-full">
+                  <TableHeader>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableHead className="min-w-[10rem] text-xs font-semibold">
+                        Product
+                      </TableHead>
+                      <TableHead className="min-w-[6rem] text-xs font-semibold">
+                        SKU
+                      </TableHead>
+                      <TableHead className="min-w-[6rem] text-right text-xs font-semibold">
+                        Total qty
+                      </TableHead>
+                      <TableHead className="min-w-[5rem] text-right text-xs font-semibold">
+                        Lines
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productSummary.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="py-8 text-center text-muted-foreground"
+                        >
+                          No products on this order yet.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      productSummary.map((row) => (
+                        <TableRow key={row.key}>
+                          <TableCell className="font-medium">
+                            {row.productId ? (
+                              <Link
+                                href={`/app/products/${row.productId}`}
+                                className="text-primary underline-offset-2 hover:underline"
+                              >
+                                {row.label}
+                              </Link>
+                            ) : (
+                              <span>{row.label}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="tabular-nums text-muted-foreground">
+                            {row.sku ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {row.totalQty}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {row.lineCount}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </EditSectionCard>
+
+            <EditSectionCard
+              icon={ListOrdered}
+              title="Line items"
+              className="min-w-0 max-w-full"
+            >
+              {errors.lineItems ? (
+                <p className="text-xs text-destructive">{errors.lineItems}</p>
+              ) : null}
+              <div className="max-w-full min-w-0 overflow-x-auto rounded-md border">
+                <Table className="w-max min-w-full">
+                  <TableHeader>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableHead className="w-[72px] min-w-[72px] text-center text-xs font-semibold">
+                        Order
+                      </TableHead>
+                      <TableHead className="min-w-[9rem] text-xs font-semibold">
+                        Product *
+                      </TableHead>
+                      <TableHead className="min-w-[7rem] text-xs font-semibold">
+                        Item
+                      </TableHead>
+                      <TableHead className="min-w-[10rem] text-xs font-semibold">
+                        Description
+                      </TableHead>
+                      <TableHead className="min-w-[4.5rem] text-xs font-semibold">
+                        Qty *
+                      </TableHead>
+                      <TableHead className="min-w-[5.5rem] text-xs font-semibold">
+                        Unit price *
+                      </TableHead>
+                      <TableHead className="min-w-[4.5rem] text-xs font-semibold">
+                        Tax %
+                      </TableHead>
+                      <TableHead className="min-w-[5.5rem] text-right text-xs font-semibold">
+                        Total
+                      </TableHead>
+                      <TableHead className="w-10 min-w-10 text-xs font-semibold" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                 {lineItems.map((item, index) => {
                   const lineErrProduct =
                     errors[`product_${item.id}` as keyof FieldErrors];
@@ -1033,7 +1468,7 @@ export default function EditSalesOrderPage() {
                           className="h-9 bg-muted/40 pointer-events-none"
                         />
                       </TableCell>
-                      <TableCell className="align-middle py-2">
+                      <TableCell className="max-w-[18rem] whitespace-normal align-middle py-2">
                         <Input
                           value={item.description}
                           onChange={(e) =>
@@ -1111,8 +1546,8 @@ export default function EditSalesOrderPage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="text-right font-medium align-middle py-2">
-                        {preferences?.currency} {lineTotal.toFixed(2)}
+                      <TableCell className="py-2 text-right align-middle font-medium tabular-nums">
+                        {fmtMoney(lineTotal, currency)}
                       </TableCell>
                       <TableCell className="align-middle py-2">
                         <Button
@@ -1128,125 +1563,66 @@ export default function EditSalesOrderPage() {
                     </TableRow>
                   );
                 })}
-              </TableBody>
-            </Table>
-          </div>
-          <Button
-            variant="outline"
-            onClick={addLineItem}
-            className="mt-4 gap-2 bg-transparent"
-          >
-            <Plus className="h-4 w-4" />
-            Add Row
-          </Button>
-        </CardContent>
-      </Card>
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Notes & Terms</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Additional notes..."
-                rows={3}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="terms">Terms & Conditions</Label>
-              <Textarea
-                id="terms"
-                value={terms}
-                onChange={(e) => setTerms(e.target.value)}
-                placeholder="Sales order terms..."
-                rows={3}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span>
-                  {preferences?.currency} {subtotal.toFixed(2)}
-                </span>
+                  </TableBody>
+                </Table>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax</span>
-                <span>
-                  {preferences?.currency} {taxTotal.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-muted-foreground">Discount</span>
-                <div className="flex items-center gap-2">
-                  <DiscountTypeToggle
-                    value={discount.type}
-                    onChange={(t) => setDiscount({ ...discount, type: t })}
-                    currencyLabel={preferences?.currency ?? ""}
+              <Button
+                variant="outline"
+                onClick={addLineItem}
+                className="mt-4 gap-2 bg-transparent"
+              >
+                <Plus className="h-4 w-4" />
+                Add row
+              </Button>
+            </EditSectionCard>
+
+            <EditSectionCard icon={ScrollText} title="Notes & terms" className="min-w-0 max-w-full">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="notes">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Additional notes..."
+                    rows={3}
                   />
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={discount.amount}
-                    onChange={(e) =>
-                      setDiscount({
-                        ...discount,
-                        amount: Number(e.target.value),
-                      })
-                    }
-                    className="w-[100px] h-8"
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="terms">Terms & conditions</Label>
+                  <Textarea
+                    id="terms"
+                    value={terms}
+                    onChange={(e) => setTerms(e.target.value)}
+                    placeholder="Sales order terms..."
+                    rows={3}
                   />
-                  <span className="text-sm min-w-[80px] text-right">
-                    -{preferences?.currency} {discountAmount.toFixed(2)}
-                  </span>
                 </div>
               </div>
-              <Separator />
-              <div className="flex justify-between text-base font-bold">
-                <span>Total</span>
-                <span>
-                  {preferences?.currency} {total.toFixed(2)}
-                </span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </EditSectionCard>
+          </div>
+        </div>
 
-      <Dialog
-        open={isCustomerDialogOpen}
-        onOpenChange={setIsCustomerDialogOpen}
-      >
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Select Customer</DialogTitle>
-            <DialogDescription>
-              Choose a customer from your database
-            </DialogDescription>
-          </DialogHeader>
+        <Dialog
+          open={isCustomerDialogOpen}
+          onOpenChange={setIsCustomerDialogOpen}
+        >
+          <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Select Customer</DialogTitle>
+              <DialogDescription>
+                Choose a customer from your database
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-            <Input
-              placeholder="Search customers..."
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
-            />
+            <div className="flex flex-1 flex-col space-y-4 overflow-hidden">
+              <Input
+                placeholder="Search customers..."
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+              />
 
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+              <div className="flex-1 space-y-2 overflow-y-auto pr-2">
               {customers.map((c) => (
                 <button
                   key={c.id}
@@ -1271,8 +1647,8 @@ export default function EditSalesOrderPage() {
                 </button>
               ))}
 
-              {customers.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
+              {customers.length === 0 ? (
+                <div className="py-8 text-center text-muted-foreground">
                   <p>No customers found</p>
                   <Link href="/app/customers">
                     <Button variant="link" className="mt-2">
@@ -1280,11 +1656,11 @@ export default function EditSalesOrderPage() {
                     </Button>
                   </Link>
                 </div>
-              )}
+              ) : null}
+              </div>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
     </AppPageShell>
   );
 }

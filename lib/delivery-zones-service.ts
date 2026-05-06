@@ -26,6 +26,10 @@ export type DeliveryZoneCityRow = {
   sortOrder: number;
 };
 
+export type DeliveryZoneWithCityCount = DeliveryZoneRow & {
+  cityCount: number;
+};
+
 export async function listDeliveryCities(): Promise<DeliveryCityRow[]> {
   const companyId = await requireActiveCompanyId();
   const { data, error } = await supabase
@@ -53,6 +57,36 @@ export async function createDeliveryCity(name: string): Promise<void> {
     updated_at: new Date().toISOString(),
   } as never);
   if (error) throw new Error(error.message);
+}
+
+export async function listDeliveryZonesWithCityCounts(): Promise<
+  DeliveryZoneWithCityCount[]
+> {
+  const zones = await listDeliveryZones();
+  const companyId = await requireActiveCompanyId();
+  const { data, error } = await supabase
+    .from("zone_cities")
+    .select("zone_id")
+    .eq("company_id", companyId);
+  if (error) throw new Error(error.message);
+  const counts = new Map<string, number>();
+  for (const raw of data ?? []) {
+    const zid = String((raw as { zone_id: unknown }).zone_id ?? "");
+    if (!zid) continue;
+    counts.set(zid, (counts.get(zid) ?? 0) + 1);
+  }
+  return zones.map((z) => ({
+    ...z,
+    cityCount: counts.get(z.id) ?? 0,
+  }));
+}
+
+export async function getDeliveryZone(
+  zoneId: string
+): Promise<DeliveryZoneRow | null> {
+  if (!zoneId?.trim()) return null;
+  const rows = await listDeliveryZones();
+  return rows.find((z) => z.id === zoneId) ?? null;
 }
 
 export async function listDeliveryZones(): Promise<DeliveryZoneRow[]> {
@@ -93,21 +127,65 @@ export async function createDeliveryZone(input: {
   name: string;
   description?: string;
   driverUserId?: string;
-}): Promise<void> {
+}): Promise<string> {
   const companyId = await requireActiveCompanyId();
   const userId = await getCurrentUserId();
   const cleanName = input.name.trim();
   if (!cleanName) throw new Error("Zone name is required.");
-  const { error } = await supabase.from("zones").insert({
-    company_id: companyId,
-    name: cleanName,
-    description: input.description?.trim() || null,
-    driver_user_id: input.driverUserId || null,
-    is_active: true,
-    created_by: userId,
-    created_at: new Date().toISOString(),
+  const { data, error } = await supabase
+    .from("zones")
+    .insert({
+      company_id: companyId,
+      name: cleanName,
+      description: input.description?.trim() || null,
+      driver_user_id: input.driverUserId || null,
+      is_active: true,
+      created_by: userId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as never)
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return String((data as { id: unknown }).id);
+}
+
+export async function updateDeliveryZone(
+  zoneId: string,
+  input: {
+    name?: string;
+    description?: string | null;
+    driverUserId?: string | null;
+    isActive?: boolean;
+  }
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  if (!zoneId) throw new Error("Zone is required.");
+  const patch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
-  } as never);
+  };
+  if (input.name !== undefined) {
+    const n = input.name.trim();
+    if (!n) throw new Error("Zone name is required.");
+    patch.name = n;
+  }
+  if (input.description !== undefined) {
+    patch.description =
+      input.description === null || input.description === ""
+        ? null
+        : String(input.description).trim() || null;
+  }
+  if (input.driverUserId !== undefined) {
+    patch.driver_user_id = input.driverUserId;
+  }
+  if (input.isActive !== undefined) {
+    patch.is_active = input.isActive;
+  }
+  const { error } = await supabase
+    .from("zones")
+    .update(patch as never)
+    .eq("id", zoneId)
+    .eq("company_id", companyId);
   if (error) throw new Error(error.message);
 }
 
@@ -115,17 +193,7 @@ export async function updateDeliveryZoneDriver(
   zoneId: string,
   driverUserId: string | null
 ): Promise<void> {
-  const companyId = await requireActiveCompanyId();
-  if (!zoneId) throw new Error("Zone is required.");
-  const { error } = await supabase
-    .from("zones")
-    .update({
-      driver_user_id: driverUserId,
-      updated_at: new Date().toISOString(),
-    } as never)
-    .eq("id", zoneId)
-    .eq("company_id", companyId);
-  if (error) throw new Error(error.message);
+  await updateDeliveryZone(zoneId, { driverUserId });
 }
 
 export async function listZoneCities(
@@ -237,6 +305,19 @@ export async function updateZoneCityAssignment(input: {
     }
     throw new Error("Could not update assigned city order. Please try again.");
   }
+}
+
+export async function removeZoneCityAssignment(
+  assignmentId: string
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  if (!assignmentId) throw new Error("Assignment is required.");
+  const { error } = await supabase
+    .from("zone_cities")
+    .delete()
+    .eq("id", assignmentId)
+    .eq("company_id", companyId);
+  if (error) throw new Error(error.message);
 }
 
 export type DriverZoneCityFilter = {

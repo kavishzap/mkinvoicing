@@ -53,6 +53,19 @@ function fmtWhen(iso: string) {
   }
 }
 
+function fmtScheduleDay(yyyyMmDd: string | null) {
+  if (!yyyyMmDd?.trim()) return "—";
+  try {
+    return new Date(`${yyyyMmDd.trim()}T12:00:00`).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch {
+    return yyyyMmDd;
+  }
+}
+
 function fmtMoney(n: number, ccy: string | null | undefined) {
   const code = (ccy && String(ccy).trim().length === 3
     ? String(ccy).trim().toUpperCase()
@@ -190,7 +203,7 @@ export default function DeliveryDetailPage() {
                             setDelivery(updated);
                             const soMsg =
                               target === "delivered_to_driver"
-                                ? " All linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
+                                ? " Stock was transferred from the primary warehouse to the driver's location. Linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
                                 : target === "completed"
                                   ? " Linked sales orders on this delivery are set to Delivered to customer where applicable."
                                   : "";
@@ -260,6 +273,12 @@ export default function DeliveryDetailPage() {
                 <td className="border px-3 py-2">{fmtWhen(delivery.updatedAt)}</td>
                 <td className="border px-3 py-2 font-medium">Delivery ID</td>
                 <td className="border px-3 py-2 break-all">{delivery.id}</td>
+              </tr>
+              <tr>
+                <td className="border px-3 py-2 font-medium">Delivery date</td>
+                <td className="border px-3 py-2 tabular-nums" colSpan={7}>
+                  {fmtScheduleDay(delivery.deliveryDate)}
+                </td>
               </tr>
               <tr>
                 <td className="border px-3 py-2 font-medium">Notes</td>

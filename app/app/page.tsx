@@ -10,14 +10,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { useToast } from "@/hooks/use-toast";
-import {
-  Banknote,
-  Clock,
-  Receipt,
-  TrendingUp,
-  Users,
-  Truck,
-} from "lucide-react";
+import { Banknote, Receipt, TrendingUp, Users } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -53,12 +46,10 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<{
     netSales: number;
     totalPaid: number;
-    totalOverdue: number;
     totalExpense: number;
     totalPurchases: number;
     profitableIncome: number;
     customerCount: number;
-    supplierCount: number;
     currency: string;
   } | null>(null);
   const [incomeData, setIncomeData] = useState<
@@ -93,7 +84,7 @@ export default function DashboardPage() {
     return (
       <AppPageShell subtitle="See how sales, cash in, and costs look at a glance—then open any module from the sidebar.">
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+          {[1, 2, 3, 4, 5].map((i) => (
             <Card key={i}>
               <CardHeader className="pb-2">
                 <div className="h-5 w-24 bg-muted rounded animate-pulse" />
@@ -156,23 +147,6 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Money Pending
-            </CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold text-amber-600 dark:text-amber-400">
-              {formatCurrency(stats.totalOverdue, stats.currency)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Unpaid invoices
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
               Total Expense
             </CardTitle>
             <Receipt className="h-4 w-4 text-muted-foreground" />
@@ -197,23 +171,6 @@ export default function DashboardPage() {
           <CardContent>
             <div className="text-xl font-bold">
               {stats.customerCount}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Active & inactive
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Suppliers
-            </CardTitle>
-            <Truck className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {stats.supplierCount}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               Active & inactive

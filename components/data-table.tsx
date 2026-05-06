@@ -53,7 +53,7 @@ function buildRowSearchString<TData>(
 export type DataTableProps<TData> = {
   columns: ColumnDef<TData, unknown>[];
   data: TData[];
-  /** Left side of toolbar (filters, toggles). Search stays on the right. */
+  /** Left side of toolbar (filters, toggles). Placed after search when search is shown. */
   toolbarLeft?: React.ReactNode;
   searchPlaceholder?: string;
   defaultSearch?: string;
@@ -69,6 +69,13 @@ export type DataTableProps<TData> = {
   getRowId?: (originalRow: TData, index: number) => string;
   /** Opens the record (e.g. view page). Clicks on the actions column do not fire this. */
   onRowClick?: (row: TData) => void;
+  /** Hide the search field (toolbar shows only `toolbarLeft` when set). */
+  hideSearch?: boolean;
+  /**
+   * `minimal` — flat header, hairline row rules, light footer (dense list / SLA-style).
+   * `default` — card chrome with muted toolbar/header bands.
+   */
+  variant?: "default" | "minimal";
 };
 
 export function DataTable<TData>({
@@ -87,7 +94,10 @@ export function DataTable<TData>({
   tableContainerClassName,
   getRowId,
   onRowClick,
+  hideSearch = false,
+  variant = "default",
 }: DataTableProps<TData>) {
+  const isMinimal = variant === "minimal";
   const [uncontrolledSearch, setUncontrolledSearch] =
     React.useState(defaultSearch);
   const isSearchControlled = controlledSearch !== undefined;
@@ -127,48 +137,96 @@ export function DataTable<TData>({
   });
 
   const rows = table.getRowModel().rows;
+  const showToolbar = Boolean(toolbarLeft) || !hideSearch;
 
   return (
-    <div className={cn("space-y-4", className)}>
-      <div
-        className={cn(
-          "flex flex-col gap-3 sm:flex-row sm:items-center",
-          toolbarLeft ? "sm:justify-between" : "sm:justify-end",
-        )}
-      >
-        {toolbarLeft ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-            {toolbarLeft}
+    <div
+      className={cn(
+        "flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card text-card-foreground shadow-sm",
+        isMinimal && "rounded-lg border-border/50 shadow-none",
+        className,
+      )}
+    >
+      {showToolbar ? (
+        <div
+          className={cn(
+            "flex shrink-0 flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5",
+            isMinimal
+              ? "border-border/50 bg-card"
+              : "border-border/60 bg-muted/20",
+          )}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+            {!hideSearch ? (
+              <div className="relative w-full min-w-0 sm:max-w-md lg:max-w-lg">
+                <Search
+                  className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                  aria-hidden
+                />
+                <Input
+                  placeholder={searchPlaceholder}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className={cn(
+                    "h-10 w-full rounded-full border-border/70 bg-background pl-10 pr-4 text-sm shadow-none",
+                    "placeholder:text-muted-foreground/65",
+                    "focus-visible:border-border focus-visible:ring-1 focus-visible:ring-ring/40",
+                  )}
+                  aria-label="Search table"
+                />
+              </div>
+            ) : null}
+            {toolbarLeft ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">
+                {toolbarLeft}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        <div className="relative w-full shrink-0 sm:ml-auto sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder={searchPlaceholder}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-9 pl-9"
-            aria-label="Search table"
-          />
         </div>
-      </div>
+      ) : null}
 
       <div
         className={cn(
-          "overflow-x-auto rounded-md border",
+          "min-h-0 overflow-x-auto bg-card [&_[data-slot=table-container]]:overflow-visible",
           tableContainerClassName,
         )}
       >
-        <Table>
-          <TableHeader>
+        <Table className="w-full border-collapse">
+          <TableHeader
+            className={cn(
+              "[&_tr]:border-0 [&_tr]:hover:bg-transparent",
+              isMinimal
+                ? cn(
+                    "border-b border-border/50 bg-transparent",
+                    "[&_button]:-ml-2 [&_button]:h-8 [&_button]:px-2 [&_button]:text-xs [&_button]:font-semibold [&_button]:text-foreground/85",
+                    "[&_button]:hover:bg-muted/50 [&_button]:hover:text-foreground",
+                  )
+                : cn(
+                    "border-b border-border/60 bg-muted/15",
+                    "[&_button]:-ml-2 [&_button]:h-8 [&_button]:px-2 [&_button]:text-xs [&_button]:font-normal [&_button]:text-muted-foreground",
+                    "[&_button]:hover:bg-muted/60 [&_button]:hover:text-foreground",
+                  ),
+            )}
+          >
             {table.getHeaderGroups().map((hg) => (
-              <TableRow key={hg.id}>
+              <TableRow
+                key={hg.id}
+                className="border-0 hover:bg-transparent data-[state=selected]:bg-transparent"
+              >
                 {hg.headers.map((header) => {
-                  const meta = header.column.columnDef.meta as ColMeta | undefined;
+                  const meta = header.column.columnDef.meta as
+                    | ColMeta
+                    | undefined;
                   return (
                     <TableHead
                       key={header.id}
-                      className={meta?.thClassName}
+                      className={cn(
+                        "h-11 px-4 py-3 text-left align-middle text-xs leading-none",
+                        isMinimal
+                          ? "font-semibold text-foreground/85"
+                          : "font-medium text-muted-foreground",
+                        meta?.thClassName,
+                      )}
                     >
                       {header.isPlaceholder
                         ? null
@@ -184,12 +242,12 @@ export function DataTable<TData>({
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow>
+              <TableRow className="border-0 hover:bg-transparent">
                 <TableCell
                   colSpan={columns.length}
-                  className="h-auto min-h-[14rem] p-0 align-middle text-center text-muted-foreground"
+                  className="h-auto min-h-[14rem] border-0 p-0 align-middle text-center text-muted-foreground"
                 >
-                  <div className="flex justify-center py-6">
+                  <div className="flex justify-center px-4 py-10">
                     {emptyMessage}
                   </div>
                 </TableCell>
@@ -198,11 +256,13 @@ export function DataTable<TData>({
               rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  className={
-                    onRowClick
-                      ? "cursor-pointer hover:bg-muted/60"
-                      : undefined
-                  }
+                  className={cn(
+                    "border-0 border-b transition-colors",
+                    isMinimal
+                      ? "border-border/45 bg-transparent last:border-b-0 hover:bg-muted/25 data-[state=selected]:bg-muted/30"
+                      : "border-border/55 bg-card last:border-b-0 hover:bg-muted/35 data-[state=selected]:bg-muted/45",
+                    onRowClick ? "cursor-pointer" : undefined,
+                  )}
                   onClick={
                     onRowClick
                       ? () => {
@@ -212,13 +272,20 @@ export function DataTable<TData>({
                   }
                 >
                   {row.getVisibleCells().map((cell) => {
-                    const meta = cell.column.columnDef.meta as ColMeta | undefined;
+                    const meta = cell.column.columnDef.meta as
+                      | ColMeta
+                      | undefined;
                     const stopRow =
-                      Boolean(meta?.stopRowClick) || cell.column.id === "actions";
+                      Boolean(meta?.stopRowClick) ||
+                      cell.column.id === "actions";
                     return (
                       <TableCell
                         key={cell.id}
-                        className={meta?.tdClassName}
+                        className={cn(
+                          "border-0 px-4 align-middle text-sm text-foreground",
+                          isMinimal ? "py-4" : "py-3.5",
+                          meta?.tdClassName,
+                        )}
                         onClick={stopRow ? (e) => e.stopPropagation() : undefined}
                       >
                         {flexRender(
@@ -234,7 +301,19 @@ export function DataTable<TData>({
           </TableBody>
         </Table>
       </div>
-      {footer}
+
+      {footer ? (
+        <div
+          className={cn(
+            "shrink-0 border-t px-4 py-3 sm:px-5",
+            isMinimal
+              ? "border-border/50 bg-card"
+              : "border-border/60 bg-muted/15",
+          )}
+        >
+          {footer}
+        </div>
+      ) : null}
     </div>
   );
 }

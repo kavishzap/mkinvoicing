@@ -56,6 +56,43 @@ async function requireCompanyId(): Promise<string> {
   return companyId;
 }
 
+export type ProductListStatus = "all" | "active" | "inactive";
+
+export type ProductListFacets = {
+  companyTotal: number;
+  activeCount: number;
+  inactiveCount: number;
+};
+
+export async function fetchProductListFacets(): Promise<ProductListFacets> {
+  const companyId = await requireCompanyId();
+  const base = () =>
+    supabase
+      .from("products")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const [r0, r1, r2] = await Promise.all([base(), base().eq("is_active", true), base().eq("is_active", false)]);
+
+  if (r0.error) throw new Error(r0.error.message);
+  if (r1.error) throw new Error(r1.error.message);
+  if (r2.error) throw new Error(r2.error.message);
+
+  return {
+    companyTotal: r0.count ?? 0,
+    activeCount: r1.count ?? 0,
+    inactiveCount: r2.count ?? 0,
+  };
+}
+
+function resolveListStatus(opts?: {
+  status?: ProductListStatus;
+  includeInactive?: boolean;
+}): ProductListStatus {
+  if (opts?.status) return opts.status;
+  return opts?.includeInactive ? "all" : "active";
+}
+
 /** Product ids whose summed `product_location_stocks.quantity` is strictly &gt; 0. */
 async function productIdsWithPositiveTotalStock(
   companyId: string
@@ -90,7 +127,10 @@ function chunkIds<T>(arr: T[], size: number): T[][] {
 
 export async function listProducts(opts?: {
   search?: string;
+  /** @deprecated Use `status: "all"` instead. */
   includeInactive?: boolean;
+  /** Filter by catalogue activity; default matches legacy `includeInactive: false` → active only. */
+  status?: ProductListStatus;
   page?: number;
   pageSize?: number;
   /**
@@ -104,6 +144,7 @@ export async function listProducts(opts?: {
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
+  const listStatus = resolveListStatus(opts);
 
   if (opts?.onlyWithPositiveStock) {
     const allowed = await productIdsWithPositiveTotalStock(companyId);
@@ -120,8 +161,10 @@ export async function listProducts(opts?: {
         .in("id", idChunk)
         .order("created_at", { ascending: false });
 
-      if (!opts?.includeInactive) {
+      if (listStatus === "active") {
         q = q.eq("is_active", true);
+      } else if (listStatus === "inactive") {
+        q = q.eq("is_active", false);
       }
 
       const term = opts?.search?.trim();
@@ -156,8 +199,10 @@ export async function listProducts(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (!opts?.includeInactive) {
+  if (listStatus === "active") {
     q = q.eq("is_active", true);
+  } else if (listStatus === "inactive") {
+    q = q.eq("is_active", false);
   }
 
   const term = opts?.search?.trim();

@@ -4,13 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -125,51 +118,54 @@ export function CompanyRolesSettings() {
 
   if (loading) {
     return (
-      <Card>
-        <CardHeader>
-          <div className="h-6 w-40 bg-muted rounded animate-pulse" />
-          <div className="h-4 w-72 bg-muted rounded mt-2 animate-pulse" />
-        </CardHeader>
-        <CardContent>
-          <div className="h-40 bg-muted rounded animate-pulse" />
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <div className="h-5 w-48 max-w-full animate-pulse rounded bg-muted" />
+            <div className="h-4 w-72 max-w-full animate-pulse rounded bg-muted" />
+          </div>
+          <div className="h-9 w-36 shrink-0 animate-pulse rounded-md bg-muted" />
+        </div>
+        <div className="h-44 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
+      </div>
     );
   }
 
   return (
     <>
-      <Card>
-        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <CardTitle>Roles & permissions</CardTitle>
-            <CardDescription>
-              Create roles and assign features. Only features included in your
-              subscription plan are available.
-            </CardDescription>
-          </div>
-          <Button type="button" className="shrink-0" asChild>
-            <Link href="/app/settings/roles/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Create role
-            </Link>
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {planFeatures.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No plan features are available. Check your subscription or contact
-              support.
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Your plan allows {planFeatures.length} feature
-              {planFeatures.length === 1 ? "" : "s"} to be assigned to roles.
-            </p>
-          )}
+      <div className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h3 className="text-base font-semibold tracking-tight text-foreground">
+            Roles & permissions
+          </h3>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Create roles and assign features. Only features included in your
+            subscription plan are available.
+          </p>
+        </div>
+        <Button type="button" className="shrink-0 gap-2" asChild>
+          <Link href="/app/settings/roles/new">
+            <Plus className="h-4 w-4" />
+            Create role
+          </Link>
+        </Button>
+      </div>
 
-          <div className="rounded-md border">
-            <Table>
+      <div className="space-y-4">
+        {planFeatures.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No plan features are available. Check your subscription or contact
+            support.
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Your plan allows {planFeatures.length} feature
+            {planFeatures.length === 1 ? "" : "s"} to be assigned to roles.
+          </p>
+        )}
+
+        <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -253,8 +249,7 @@ export function CompanyRolesSettings() {
               </TableBody>
             </Table>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
       <AlertDialog
         open={!!deleteTarget}

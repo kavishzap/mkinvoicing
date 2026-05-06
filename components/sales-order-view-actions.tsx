@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Copy, Download, Edit, Printer } from "lucide-react";
+import { Copy, Download, Edit, PackageCheck, Printer, BadgeCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
@@ -15,10 +15,12 @@ import {
   SALES_ORDER_FULFILLMENT_LABELS,
   SALES_ORDER_PAYMENT_LABELS,
   updateSalesOrderPaymentStatus,
+  updateSalesOrderFulfillmentStatus,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 type Branding = {
   logoUrl?: string;
@@ -113,15 +115,29 @@ export function SalesOrderViewActions({
   salesOrder,
   profile,
   logoSrc,
+  onRecordUpdated,
+  showEditButton = true,
+  toolbarClassName,
 }: {
   salesOrderId: string;
   salesOrder?: SalesOrderDetail | null;
   profile?: Profile | null;
   logoSrc?: string;
+  /** Called after fulfillment or payment is updated so the page can refresh client state. */
+  onRecordUpdated?: (order: SalesOrderDetail | null) => void;
+  /** When false, hide the Edit link (e.g. when the page shell shows a primary Edit control). */
+  showEditButton?: boolean;
+  /** Merged onto the toolbar row (e.g. `justify-end` when placed in the document header). */
+  toolbarClassName?: string;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
+
+  async function refreshDetailFromServer() {
+    const fresh = await getSalesOrder(salesOrderId, { mode: "view" });
+    onRecordUpdated?.(fresh);
+  }
 
   const handleDuplicate = () => {
     if (busy) return;
@@ -139,7 +155,7 @@ export function SalesOrderViewActions({
         title: "Sales order updated",
         description: "Payment status set to Paid.",
       });
-      router.refresh();
+      await refreshDetailFromServer();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Please try again.";
       toast({
@@ -152,20 +168,51 @@ export function SalesOrderViewActions({
     }
   };
 
+  const handleMarkDeliveredToCustomer = async () => {
+    if (busy) return;
+    try {
+      setBusy(true);
+      await updateSalesOrderFulfillmentStatus(
+        salesOrderId,
+        "delivered to customer"
+      );
+      toast({
+        title: "Sales order updated",
+        description: `Fulfillment set to ${SALES_ORDER_FULFILLMENT_LABELS["delivered to customer"]}.`,
+      });
+      await refreshDetailFromServer();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Please try again.";
+      toast({
+        title: "Could not update fulfillment",
+        description: msg,
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fulfillmentNorm = salesOrder
+    ? normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status)
+    : null;
   const canEditSalesOrder =
-    salesOrder != null &&
-    normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status) ===
-      "new";
+    salesOrder != null && fulfillmentNorm === "new";
   const canMarkAsPaid =
-    salesOrder == null
-      ? true
-      : normalizeSalesOrderPaymentStatus(salesOrder.payment_status) !== "paid";
+    salesOrder != null &&
+    normalizeSalesOrderPaymentStatus(salesOrder.payment_status) !== "paid";
+  const canMarkDeliveredToCustomer =
+    salesOrder != null &&
+    fulfillmentNorm !== "delivered to customer" &&
+    fulfillmentNorm !== "completed" &&
+    fulfillmentNorm !== "cancelled";
 
   const renderPdf = async (mode: "download" | "print") => {
     if (busy) return;
     setBusy(true);
     try {
-      const so = salesOrder ?? (await getSalesOrder(salesOrderId));
+      const so =
+        salesOrder ?? (await getSalesOrder(salesOrderId, { mode: "view" }));
       const prof = profile ?? (await fetchProfile());
       if (!so) throw new Error("Sales order not found.");
 
@@ -453,7 +500,12 @@ export function SalesOrderViewActions({
   };
 
   return (
-    <div className="flex w-full max-w-full flex-wrap items-center justify-start gap-1.5 sm:gap-2">
+    <div
+      className={cn(
+        "flex w-full max-w-full flex-wrap items-center justify-start gap-1.5 sm:gap-2",
+        toolbarClassName
+      )}
+    >
       <Button
         type="button"
         variant="outline"
@@ -489,6 +541,20 @@ export function SalesOrderViewActions({
         <Copy className="h-4 w-4 shrink-0" />
         <span className="whitespace-nowrap">Duplicate</span>
       </Button>
+      {canMarkDeliveredToCustomer ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
+          onClick={() => void handleMarkDeliveredToCustomer()}
+          disabled={busy}
+          title="Set fulfillment to Delivered to customer"
+        >
+          <PackageCheck className="h-4 w-4 shrink-0" />
+          <span className="whitespace-nowrap">Delivered to customer</span>
+        </Button>
+      ) : null}
       {canMarkAsPaid ? (
         <Button
           type="button"
@@ -499,10 +565,11 @@ export function SalesOrderViewActions({
           disabled={busy}
           title="Mark as paid"
         >
+          <BadgeCheck className="h-4 w-4 shrink-0" />
           <span className="whitespace-nowrap">Mark as paid</span>
         </Button>
       ) : null}
-      {canEditSalesOrder ? (
+      {canEditSalesOrder && showEditButton ? (
         <Button
           type="button"
           variant="outline"

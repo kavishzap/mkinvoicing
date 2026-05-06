@@ -869,12 +869,13 @@ export default function InventoryStockPage() {
                       <th className="p-3 text-left">To</th>
                       <th className="p-3 text-right">Qty</th>
                       <th className="p-3 text-left">Note</th>
+                      <th className="p-3 text-left">By</th>
                     </tr>
                   </thead>
                   <tbody>
                     {movLoading ? (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                        <td colSpan={8} className="p-8 text-center text-muted-foreground">
                           Loading…
                         </td>
                       </tr>
@@ -903,12 +904,15 @@ export default function InventoryStockPage() {
                           <td className="p-3 text-muted-foreground max-w-[180px] truncate" title={m.note}>
                             {m.note || "—"}
                           </td>
+                          <td className="p-3 max-w-[120px] truncate text-muted-foreground" title={m.recorded_by_label}>
+                            {m.recorded_by_label}
+                          </td>
                         </tr>
                       ))
                     )}
                     {!movLoading && movements.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                        <td colSpan={8} className="p-8 text-center text-muted-foreground">
                           No movements yet. Transfers and refills will appear here.
                         </td>
                       </tr>

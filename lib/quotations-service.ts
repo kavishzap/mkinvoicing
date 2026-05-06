@@ -282,6 +282,8 @@ export async function createQuotation(
 export async function listQuotations(opts?: {
   search?: string;
   status?: QuotationStatus | "all";
+  /** When set, only quotations linked to this customer (`quotations.customer_id`). */
+  customerId?: string;
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: QuotationListRow[]; total: number }> {
@@ -305,6 +307,11 @@ export async function listQuotations(opts?: {
 
   if (opts?.status && opts.status !== "all") {
     q = q.eq("status", opts.status);
+  }
+
+  const cid = opts?.customerId?.trim();
+  if (cid) {
+    q = q.eq("customer_id", cid);
   }
 
   if (opts?.search?.trim()) {

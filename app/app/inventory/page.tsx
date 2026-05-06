@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Package, MapPin, Layers, Lock } from "lucide-react";
+import { Package, Layers, Lock } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -17,14 +17,7 @@ const inventoryCards = [
     title: "Products",
     description: "Catalogue items you buy, sell, or stock.",
     icon: Package,
-    href: "/app/inventory/products",
-    locked: false,
-  },
-  {
-    title: "Locations",
-    description: "Warehouses and sites where stock is held.",
-    icon: MapPin,
-    href: "/app/inventory/locations",
+    href: "/app/products",
     locked: false,
   },
   {
@@ -41,7 +34,7 @@ export default function InventoryPage() {
 
   return (
     <AppPageShell subtitle="Manage what you sell, where it sits, and how levels move between locations.">
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {inventoryCards.map((card) => {
           const Icon = card.icon;
           return (

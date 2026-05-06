@@ -9,6 +9,30 @@ const nextConfig = {
     unoptimized: true,
   },
   turbopack: {},
+  async redirects() {
+    return [
+      {
+        source: "/app/inventory/products",
+        destination: "/app/products",
+        permanent: true,
+      },
+      {
+        source: "/app/inventory/products/:path*",
+        destination: "/app/products/:path*",
+        permanent: true,
+      },
+      {
+        source: "/app/inventory/locations",
+        destination: "/app/locations",
+        permanent: true,
+      },
+      {
+        source: "/app/inventory/locations/:path*",
+        destination: "/app/locations/:path*",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 const withPWA = withPWAInit({

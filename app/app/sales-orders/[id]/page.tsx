@@ -1,27 +1,124 @@
 "use client";
 export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import {
+  ArrowLeft,
+  Building2,
+  ListOrdered,
+  Pencil,
+  Receipt,
+  ScrollText,
+  Store,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
+import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
 import { SalesOrderViewActions } from "@/components/sales-order-view-actions";
 import {
   getSalesOrder,
   computeSalesOrderTotals,
+  normalizeSalesOrderFulfillmentStatus,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { FeatureEmptyState } from "@/components/feature-empty-state";
+import { cn } from "@/lib/utils";
+
+const fieldLabelClass =
+  "text-xs font-medium text-neutral-600 dark:text-neutral-400";
+const sectionTitleClass =
+  "text-sm font-semibold leading-snug text-neutral-700 dark:text-neutral-300";
+const sectionIconBoxClass =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
+const sectionIconClass = "h-3.5 w-3.5 text-neutral-600 dark:text-neutral-400";
+
+function SectionCard({
+  icon: Icon,
+  title,
+  children,
+  className,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card
+      className={cn(
+        "flex flex-col gap-0 rounded-lg py-0 shadow-sm",
+        className
+      )}
+    >
+      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
+        <div className={sectionIconBoxClass}>
+          <Icon className={sectionIconClass} aria-hidden />
+        </div>
+        <CardTitle className={sectionTitleClass}>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 px-4 py-5 text-sm">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <p className={fieldLabelClass}>{label}</p>
+      <div className="break-words text-sm font-medium text-foreground">{children}</div>
+    </div>
+  );
+}
+
+function fmtDate(d: string) {
+  try {
+    return new Date(d).toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch {
+    return d;
+  }
+}
+
+function fmtMoney(n: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+    }).format(n);
+  } catch {
+    return `${currency} ${n.toFixed(2)}`;
+  }
+}
 
 export default function SalesOrderViewPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const id = params.id;
+
   const [loading, setLoading] = useState(true);
   const [salesOrder, setSalesOrder] = useState<SalesOrderDetail | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -29,12 +126,20 @@ export default function SalesOrderViewPage() {
 
   useEffect(() => {
     if (!id) return;
+    if (searchParams.get("edit") === "1") {
+      router.replace(`/app/sales-orders/${id}/edit`);
+    }
+  }, [id, router, searchParams]);
+
+  useEffect(() => {
+    if (!id) return;
+    setProfile(null);
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
         setError(null);
-        const [q, prof] = await Promise.all([getSalesOrder(id), fetchProfile()]);
+        const q = await getSalesOrder(id, { mode: "view" });
         if (cancelled) return;
         if (!q) {
           setSalesOrder(null);
@@ -42,7 +147,6 @@ export default function SalesOrderViewPage() {
         } else {
           setSalesOrder(q);
         }
-        setProfile(prof);
       } catch (e: unknown) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load.");
@@ -57,6 +161,22 @@ export default function SalesOrderViewPage() {
     };
   }, [id]);
 
+  useEffect(() => {
+    if (!id || !salesOrder || salesOrder.id !== id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const prof = await fetchProfile();
+        if (!cancelled) setProfile(prof);
+      } catch {
+        if (!cancelled) setProfile(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, salesOrder?.id]);
+
   const orderedItems = useMemo(
     () =>
       salesOrder
@@ -67,42 +187,52 @@ export default function SalesOrderViewPage() {
     [salesOrder]
   );
 
-  const fmtDate = (d: string) =>
-    new Date(d).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
+  const canEditSalesOrder = useMemo(
+    () =>
+      salesOrder != null &&
+      normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status) === "new",
+    [salesOrder]
+  );
 
   if (!loading && !salesOrder) {
     return (
-      <AppPageShell>
-        <Card>
-          <CardContent className="py-16 text-center">
-            <h2 className="text-xl font-semibold mb-2">Sales order not found</h2>
-            <p className="text-muted-foreground mb-6">
-              {error ?? "The sales order you're looking for doesn't exist."}
-            </p>
-            <Link href="/app/sales-orders">
-              <Button>Back to Sales Orders</Button>
-            </Link>
-          </CardContent>
-        </Card>
+      <AppPageShell fillHeight className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <FeatureEmptyState
+            title="Sales order not found"
+            description={
+              error ?? "The sales order you're looking for doesn't exist."
+            }
+            action={
+              <Button asChild>
+                <Link href="/app/sales-orders">Back to sales orders</Link>
+              </Button>
+            }
+            className="border-0 bg-transparent py-12"
+          />
+        </div>
       </AppPageShell>
     );
   }
 
   if (loading || !salesOrder) {
     return (
-      <AppPageShell className="max-w-7xl">
-        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-        <div className="mt-4 h-96 animate-pulse rounded bg-muted" />
+      <AppPageShell fillHeight className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+          </div>
+          <div className="h-48 animate-pulse rounded-lg bg-muted" />
+        </div>
       </AppPageShell>
     );
   }
 
   const { subtotal, taxTotal, discount, shipping, total } =
     computeSalesOrderTotals(salesOrder);
+  const ccy = salesOrder.currency;
 
   const from = salesOrder.from_snapshot as {
     type?: string;
@@ -148,298 +278,316 @@ export default function SalesOrderViewPage() {
   const logoSrc =
     from.logoUrl || safeProfile.logoUrl || "/kredence.png";
 
+  const billToIcon = bill.type === "company" ? Building2 : UserRound;
+
   return (
     <AppPageShell
-      className="max-w-7xl"
-      leading={
-        <Link href="/app/sales-orders">
-          <Button variant="ghost" size="icon" aria-label="Back to sales orders">
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      titleBefore={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to sales orders">
+          <Link href="/app/sales-orders">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       }
-      subtitle={`${salesOrder.number}${billName ? ` · ${billName}` : ""} — Review lines and totals below.`}
-      belowSubtitle={
-        <SalesOrderViewActions
-          salesOrderId={salesOrder.id}
-          salesOrder={salesOrder}
-          profile={profile}
-          logoSrc={logoSrc}
-        />
+      subtitle={`${salesOrder.number}${billName ? ` · ${billName}` : ""}`}
+      subtitleClassName="w-full min-w-0 max-w-none"
+      actions={
+        canEditSalesOrder ? (
+          <Button asChild className="gap-2 rounded-md font-semibold shadow-sm">
+            <Link href={`/app/sales-orders/${salesOrder.id}/edit`}>
+              <Pencil className="size-3.5 shrink-0" aria-hidden />
+              Edit
+            </Link>
+          </Button>
+        ) : undefined
       }
     >
-      <div className="lg:col-span-2 space-y-6">
-        <Card className="shadow-lg">
-          <CardContent className="p-8 space-y-8">
-            <div className="flex items-start justify-between">
-              <div>
+      <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SalesOrderViewActions
+            salesOrderId={salesOrder.id}
+            salesOrder={salesOrder}
+            profile={profile}
+            logoSrc={logoSrc}
+            showEditButton={false}
+            toolbarClassName="justify-end"
+            onRecordUpdated={(order) => {
+              if (order) setSalesOrder(order);
+            }}
+          />
+        </div>
+
+        <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-6 overflow-y-auto overscroll-y-contain rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="flex min-w-0 flex-col gap-3 border-b border-border/60 pb-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
+                Sales order {salesOrder.number}
+              </h2>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <span>{ccy}</span>
+                <span aria-hidden>·</span>
+                <span>Issue {fmtDate(salesOrder.issue_date)}</span>
+                {billName ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="font-medium text-foreground">{billName}</span>
+                  </>
+                ) : null}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <SalesOrderStatusBadge status={salesOrder.status} />
+                <SalesOrderFulfillmentStatusBadge
+                  status={salesOrder.fulfillment_status}
+                />
+                <SalesOrderPaymentStatusBadge status={salesOrder.payment_status} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground lg:max-w-sm lg:text-right">
+              {canEditSalesOrder ? (
+                <>
+                  Use{" "}
+                  <span className="font-medium text-foreground">Edit</span> in the
+                  top bar to change lines and amounts while fulfillment is{" "}
+                  <span className="font-medium text-foreground">New</span>.
+                </>
+              ) : (
+                <>View-only summary.</>
+              )}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10">
+            <SectionCard icon={Store} title="Seller">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                 {logoSrc ? (
-                  <div className="h-12 w-12 rounded-xl overflow-hidden bg-muted flex items-center justify-center mb-3">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
                     <Image
                       src={logoSrc}
-                      alt="Sender logo"
-                      width={48}
-                      height={48}
+                      alt=""
+                      width={56}
+                      height={56}
                       className="object-contain"
                       priority
                     />
                   </div>
                 ) : (
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg mb-3">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary text-lg font-bold text-primary-foreground">
                     S
                   </div>
                 )}
+                <div className="min-w-0 flex-1 space-y-3">
+                  <InfoRow label="Name">{fromName || "—"}</InfoRow>
+                  {fromEmail ? <InfoRow label="Email">{fromEmail}</InfoRow> : null}
+                  {from?.type === "company" && from?.registration_id ? (
+                    <InfoRow label="Registration">
+                      {String(from.registration_id)}
+                    </InfoRow>
+                  ) : null}
+                  {from?.type === "company" && from?.vat_number ? (
+                    <InfoRow label="VAT">{String(from.vat_number)}</InfoRow>
+                  ) : null}
+                </div>
+              </div>
+            </SectionCard>
 
-                <h2 className="text-xl font-bold">{fromName}</h2>
-                {fromEmail && (
-                  <p className="text-sm text-muted-foreground mt-1">{fromEmail}</p>
-                )}
-                {from?.type === "company" && from?.registration_id && (
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Reg: {String(from.registration_id)}
-                  </p>
-                )}
-                {from?.type === "company" && from?.vat_number && (
-                  <p className="text-sm text-muted-foreground">
-                    VAT: {String(from.vat_number)}
-                  </p>
-                )}
-              </div>
-              <div className="text-right">
-                <h3 className="text-2xl font-bold text-muted-foreground">
-                  SALES ORDER
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {salesOrder.number}
-                </p>
-              </div>
+          <SectionCard icon={billToIcon} title="Bill to">
+            <div className="space-y-3">
+              <InfoRow label="Customer">{billName || "—"}</InfoRow>
+              {bill?.email ? <InfoRow label="Email">{bill.email}</InfoRow> : null}
+              {bill?.phone ? <InfoRow label="Phone">{bill.phone}</InfoRow> : null}
+              {(bill?.street ||
+                bill?.city ||
+                bill?.postal ||
+                bill?.country) && (
+                <InfoRow label="Address">
+                  <span className="block font-normal leading-relaxed">
+                    {bill?.street ? <>{bill.street}</> : null}
+                    {bill?.street && (bill?.city || bill?.postal) ? <br /> : null}
+                    {[bill?.city, bill?.postal].filter(Boolean).join(", ")}
+                    {bill?.country ? (
+                      <>
+                        {(bill?.city || bill?.postal) ? <br /> : null}
+                        {bill.country}
+                      </>
+                    ) : null}
+                  </span>
+                </InfoRow>
+              )}
             </div>
 
-            <Separator />
+            <Separator className="my-4" />
 
-            <div className="grid sm:grid-cols-2 gap-8">
-              <div>
-                <h4 className="text-sm font-semibold text-muted-foreground mb-2">
-                  BILL TO
-                </h4>
-                <p className="font-semibold">{billName}</p>
-                {bill?.email && (
-                  <p className="text-sm text-muted-foreground mt-1">{bill.email}</p>
-                )}
-                {bill?.phone && (
-                  <p className="text-sm text-muted-foreground">{bill.phone}</p>
-                )}
-                {(bill?.street || bill?.city || bill?.postal) && (
-                  <>
-                    {bill?.street && (
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {bill.street}
-                      </p>
-                    )}
-                    <p className="text-sm text-muted-foreground">
-                      {[bill?.city, bill?.postal].filter(Boolean).join(", ")}
-                    </p>
-                    {bill?.country && (
-                      <p className="text-sm text-muted-foreground">{bill.country}</p>
-                    )}
-                  </>
-                )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <InfoRow label="Issue date">{fmtDate(salesOrder.issue_date)}</InfoRow>
+              <InfoRow label="Valid until">{fmtDate(salesOrder.valid_until)}</InfoRow>
+              <InfoRow label="Delivery date">
+                {salesOrder.delivery_date
+                  ? fmtDate(salesOrder.delivery_date)
+                  : "—"}
+              </InfoRow>
+            </div>
+            {salesOrder.created_from_quotation_id ? (
+              <InfoRow label="Created from quotation">
+                <Link
+                  href={`/app/quotations/${salesOrder.created_from_quotation_id}`}
+                  className="font-medium text-primary underline underline-offset-2"
+                >
+                  Open quotation
+                </Link>
+              </InfoRow>
+            ) : null}
+            {salesOrder.customer_id ? (
+              <InfoRow label="Linked customer">
+                <Link
+                  href={`/app/customers/${salesOrder.customer_id}/edit`}
+                  className="font-medium text-primary underline underline-offset-2"
+                >
+                  View customer record
+                </Link>
+              </InfoRow>
+            ) : null}
+          </SectionCard>
+        </div>
+
+        <div className="flex justify-stretch lg:justify-end">
+          <SectionCard
+            icon={Receipt}
+            title="Totals"
+            className="w-full lg:max-w-md"
+          >
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span className="tabular-nums font-medium">
+                  {fmtMoney(subtotal, ccy)}
+                </span>
               </div>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground">
-                    Issue Date
-                  </p>
-                  <p className="font-medium">{fmtDate(salesOrder.issue_date)}</p>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Tax</span>
+                <span className="tabular-nums font-medium">
+                  {fmtMoney(taxTotal, ccy)}
+                </span>
+              </div>
+              {discount > 0 ? (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Discount</span>
+                  <span className="tabular-nums font-medium text-emerald-700 dark:text-emerald-400">
+                    −{fmtMoney(discount, ccy)}
+                  </span>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground">
-                    Valid Until
-                  </p>
-                  <p className="font-medium">{fmtDate(salesOrder.valid_until)}</p>
+              ) : null}
+              {shipping > 0 ? (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Shipping</span>
+                  <span className="tabular-nums font-medium">
+                    {fmtMoney(shipping, ccy)}
+                  </span>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground">
-                    Fulfillment
-                  </p>
-                  <div className="mt-1">
-                    <SalesOrderFulfillmentStatusBadge
-                      status={salesOrder.fulfillment_status}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-muted-foreground">
-                    Payment
-                  </p>
-                  <div className="mt-1">
-                    <SalesOrderPaymentStatusBadge
-                      status={salesOrder.payment_status}
-                    />
-                  </div>
-                </div>
-                {salesOrder.created_from_quotation_id && (
-                  <div>
-                    <p className="text-sm font-semibold text-muted-foreground">
-                      Created from quotation
-                    </p>
-                    <Link
-                      href={`/app/quotations/${salesOrder.created_from_quotation_id}`}
-                      className="text-sm text-primary underline font-medium"
-                    >
-                      Open quotation
-                    </Link>
-                  </div>
-                )}
+              ) : null}
+              <Separator />
+              <div className="flex justify-between text-base font-semibold">
+                <span>Total</span>
+                <span className="tabular-nums">{fmtMoney(total, ccy)}</span>
               </div>
             </div>
+          </SectionCard>
+        </div>
 
-            <Separator />
+        <SectionCard icon={ListOrdered} title="Line items">
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="text-xs font-semibold">Catalog</TableHead>
+                  <TableHead className="text-xs font-semibold">SKU</TableHead>
+                  <TableHead className="text-xs font-semibold">Item</TableHead>
+                  <TableHead className="text-xs font-semibold">Description</TableHead>
+                  <TableHead className="text-right text-xs font-semibold">Qty</TableHead>
+                  <TableHead className="text-right text-xs font-semibold">Price</TableHead>
+                  <TableHead className="text-right text-xs font-semibold">Tax</TableHead>
+                  <TableHead className="text-right text-xs font-semibold">Line total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {orderedItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      No line items.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  orderedItems.map((it, idx) => {
+                    const line = Number(it.quantity) * Number(it.unit_price);
+                    const taxAmt = line * (Number(it.tax_percent) / 100);
+                    const lineTotal = line + taxAmt;
+                    const pid = it.product_id?.trim();
+                    return (
+                      <TableRow key={`${it.item}-${idx}`}>
+                        <TableCell className="max-w-[160px]">
+                          {pid ? (
+                            <Link
+                              href={`/app/products/${pid}`}
+                              className="font-medium text-primary underline-offset-2 hover:underline line-clamp-2"
+                            >
+                              {it.product_name?.trim() || it.item}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="tabular-nums text-muted-foreground">
+                          {it.product_sku?.trim() || "—"}
+                        </TableCell>
+                        <TableCell className="font-medium">{it.item}</TableCell>
+                        <TableCell className="max-w-[220px] text-muted-foreground">
+                          {it.description || "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {it.quantity}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {fmtMoney(Number(it.unit_price), ccy)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {it.tax_percent}%
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-medium">
+                          {fmtMoney(lineTotal, ccy)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </SectionCard>
 
-            <div>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-3 text-sm font-semibold text-muted-foreground">
-                        Item
-                      </th>
-                      <th className="text-left py-3 text-sm font-semibold text-muted-foreground">
-                        Description
-                      </th>
-                      <th className="text-right py-3 text-sm font-semibold text-muted-foreground">
-                        Qty
-                      </th>
-                      <th className="text-right py-3 text-sm font-semibold text-muted-foreground">
-                        Price
-                      </th>
-                      <th className="text-right py-3 text-sm font-semibold text-muted-foreground">
-                        Tax
-                      </th>
-                      <th className="text-right py-3 text-sm font-semibold text-muted-foreground">
-                        Total
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orderedItems.map((it, idx) => {
-                      const line = Number(it.quantity) * Number(it.unit_price);
-                      const taxAmt = line * (Number(it.tax_percent) / 100);
-                      const lineTotal = line + taxAmt;
-                      return (
-                        <tr key={idx} className="border-b">
-                          <td className="py-4 font-medium">{it.item}</td>
-                          <td className="py-4 text-sm text-muted-foreground">
-                            {it.description || ""}
-                          </td>
-                          <td className="py-4 text-right">{it.quantity}</td>
-                          <td className="py-4 text-right">
-                            {new Intl.NumberFormat("en-US", {
-                              style: "currency",
-                              currency: salesOrder.currency,
-                            }).format(Number(it.unit_price))}
-                          </td>
-                          <td className="py-4 text-right">{it.tax_percent}%</td>
-                          <td className="py-4 text-right font-medium">
-                            {new Intl.NumberFormat("en-US", {
-                              style: "currency",
-                              currency: salesOrder.currency,
-                            }).format(lineTotal)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex justify-end mt-6">
-                <div className="w-full max-w-xs space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span>
-                      {new Intl.NumberFormat("en-US", {
-                        style: "currency",
-                        currency: salesOrder.currency,
-                      }).format(subtotal)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax</span>
-                    <span>
-                      {new Intl.NumberFormat("en-US", {
-                        style: "currency",
-                        currency: salesOrder.currency,
-                      }).format(taxTotal)}
-                    </span>
-                  </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Discount</span>
-                      <span>
-                        -
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: salesOrder.currency,
-                        }).format(discount)}
-                      </span>
-                    </div>
-                  )}
-                  {shipping > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Shipping</span>
-                      <span>
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: salesOrder.currency,
-                        }).format(shipping)}
-                      </span>
-                    </div>
-                  )}
-                  <Separator />
-                  <div className="flex justify-between text-base font-bold">
-                    <span>Total</span>
-                    <span>
-                      {new Intl.NumberFormat("en-US", {
-                        style: "currency",
-                        currency: salesOrder.currency,
-                      }).format(total)}
-                    </span>
-                  </div>
+        {(salesOrder.notes || salesOrder.terms) && (
+          <SectionCard icon={ScrollText} title="Notes & terms">
+            <div className="space-y-4">
+              {salesOrder.notes ? (
+                <div>
+                  <p className={fieldLabelClass}>Notes</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
+                    {salesOrder.notes}
+                  </p>
                 </div>
-              </div>
+              ) : null}
+              {salesOrder.terms ? (
+                <div>
+                  <p className={fieldLabelClass}>Terms &amp; conditions</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                    {salesOrder.terms}
+                  </p>
+                </div>
+              ) : null}
             </div>
-
-            <Separator />
-
-            {(salesOrder.notes || salesOrder.terms) && (
-              <div className="space-y-4">
-                {salesOrder.notes && (
-                  <div>
-                    <h4 className="text-sm font-semibold text-muted-foreground mb-2">
-                      NOTES
-                    </h4>
-                    <p className="text-sm">{salesOrder.notes}</p>
-                  </div>
-                )}
-                {salesOrder.terms && (
-                  <div>
-                    <h4 className="text-sm font-semibold text-muted-foreground mb-2">
-                      TERMS & CONDITIONS
-                    </h4>
-                    <p className="text-sm text-muted-foreground">{salesOrder.terms}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="text-center pt-6">
-              <p className="text-sm text-muted-foreground">
-                Thank you for your business.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+          </SectionCard>
+        )}
+        </div>
       </div>
     </AppPageShell>
   );

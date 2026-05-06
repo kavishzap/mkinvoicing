@@ -48,6 +48,8 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
     companyRoleLabel,
     accountAnchor,
     setAccountAnchor,
+    companyLogoUrl,
+    companyName,
   } = useAppAccount();
   const { status, has, featureName } = useAppFeatures();
 
@@ -87,35 +89,39 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
     >
       <div
         className={cn(
-          "flex h-14 shrink-0 items-center border-b border-border bg-card",
+          "flex h-16 shrink-0 items-center border-b border-border bg-card",
           narrow && "justify-center px-2",
           onNavigate && "justify-center px-4",
           !narrow && !onNavigate && "justify-between px-3"
         )}
       >
-        <Link
-          href="/app"
-          className={cn(
-            "flex min-w-0 items-center justify-center",
-            !narrow && !onNavigate && "flex-1 justify-start"
-          )}
-          onClick={onNavigate}
-        >
-          <Image
-            src={NAVBAR_LOGO}
-            alt="MoLedger"
-            width={480}
-            height={120}
+        {!narrow ? (
+          <Link
+            href="/app"
             className={cn(
-              "object-contain dark:invert",
-              narrow
-                ? "h-6 w-8 object-cover object-left"
-                : "h-6 w-auto max-w-[7.5rem] sm:max-w-[8rem]"
+              "flex min-w-0 flex-1 items-center justify-start",
+              onNavigate && "justify-center"
             )}
-            priority
-            sizes={narrow ? "32px" : "(max-width: 768px) 128px, 136px"}
-          />
-        </Link>
+            onClick={onNavigate}
+          >
+            <Image
+              src={companyLogoUrl ?? NAVBAR_LOGO}
+              alt={
+                companyLogoUrl
+                  ? companyName?.trim() || "Company logo"
+                  : "MoLedger"
+              }
+              width={480}
+              height={120}
+              className={cn(
+                "h-6 w-auto max-w-[7.5rem] object-contain sm:max-w-[8rem]",
+                !companyLogoUrl && "dark:invert",
+              )}
+              priority
+              sizes="(max-width: 768px) 128px, 136px"
+            />
+          </Link>
+        ) : null}
         {!onNavigate ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -197,8 +203,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                       ? pathname === "/app"
                       : item.href === "/app/inventory"
                         ? pathname === "/app/inventory" ||
-                          (pathname?.startsWith("/app/inventory/") &&
-                            !pathname?.startsWith("/app/inventory/products"))
+                          pathname?.startsWith("/app/inventory/stock")
                         : item.href === "/app/delivery-notes"
                           ? pathname === "/app/delivery-notes" ||
                             (pathname?.startsWith("/app/delivery-notes/") &&

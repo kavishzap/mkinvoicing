@@ -279,6 +279,8 @@ export async function listInvoices(opts?: {
   search?: string;
   status?: InvoiceStatus | "all";
   period?: "all" | "month" | "quarter" | "year";
+  /** When set, only invoices linked to this customer (`invoices.customer_id`). */
+  customerId?: string;
   page?: number; // 1-based
   pageSize?: number;
   sortBy?: SortByKey;
@@ -317,6 +319,11 @@ export async function listInvoices(opts?: {
   // Filters
   if (opts?.status && opts.status !== "all") {
     q = q.eq("status", opts.status);
+  }
+
+  const cid = opts?.customerId?.trim();
+  if (cid) {
+    q = q.eq("customer_id", cid);
   }
 
   const today = new Date();

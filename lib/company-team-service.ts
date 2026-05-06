@@ -100,6 +100,18 @@ export async function listTeamMembers(): Promise<TeamMemberRow[]> {
   });
 }
 
+/**
+ * Active member eligible for driver workflows: company role name contains “driver”
+ * (case-insensitive), membership active, profile not inactive.
+ */
+export function isDriverRoleTeamMember(m: TeamMemberRow): boolean {
+  return (
+    m.isActive &&
+    m.profile?.is_active !== false &&
+    m.roleName.toLowerCase().includes("driver")
+  );
+}
+
 export async function getTeamMember(
   membershipId: string
 ): Promise<TeamMemberRow | null> {
@@ -186,6 +198,8 @@ export type UpdateTeamMemberPayload = {
   full_name?: string;
   email?: string | null;
   phone?: string | null;
+  /** When set, updates `company_users.driver_rate` (owners cannot be updated). */
+  driverRate?: number | null;
 };
 
 export async function updateTeamMember(
@@ -209,6 +223,16 @@ export async function updateTeamMember(
   if (payload.roleId !== undefined) cuUpdate.role_id = payload.roleId;
   if (payload.membershipActive !== undefined)
     cuUpdate.is_active = payload.membershipActive;
+  if (payload.driverRate !== undefined) {
+    if (row.is_owner) {
+      throw new Error("Cannot update driver rate for the company owner.");
+    }
+    const r = payload.driverRate;
+    if (r !== null && (!Number.isFinite(r) || r < 0)) {
+      throw new Error("Rate must be a valid number greater than or equal to 0.");
+    }
+    cuUpdate.driver_rate = r;
+  }
 
   if (Object.keys(cuUpdate).length > 0) {
     if (row.is_owner && payload.membershipActive === false) {

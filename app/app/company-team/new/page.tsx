@@ -3,8 +3,8 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Loader2, Plus } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ArrowLeft, Loader2, Plus, UserRound, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,11 +15,61 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { listCompanyRoles, type CompanyRole } from "@/lib/company-roles-service";
 import { createTeamMember } from "@/lib/company-team-service";
+
+const fieldLabelClass =
+  "text-xs font-medium text-neutral-600 dark:text-neutral-400";
+const sectionTitleClass =
+  "text-sm font-semibold leading-snug text-neutral-700 dark:text-neutral-300";
+const sectionIconBoxClass =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
+const sectionIconClass = "h-3.5 w-3.5 text-neutral-600 dark:text-neutral-400";
+
+function SectionCard({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
+      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
+        <div className={sectionIconBoxClass}>
+          <Icon className={sectionIconClass} aria-hidden />
+        </div>
+        <CardTitle className={sectionTitleClass}>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="field-controls flex min-h-0 flex-1 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReqLabel({
+  htmlFor,
+  children,
+}: {
+  htmlFor: string;
+  children: ReactNode;
+}) {
+  return (
+    <Label htmlFor={htmlFor} className={fieldLabelClass}>
+      {children}
+      <span className="text-destructive" aria-hidden>
+        {" "}
+        *
+      </span>
+    </Label>
+  );
+}
 
 export default function CompanyTeamInvitePage() {
   const router = useRouter();
@@ -94,43 +144,61 @@ export default function CompanyTeamInvitePage() {
 
   return (
     <AppPageShell
-      compact
-      className="max-w-lg"
-      leading={
-        <Link href="/app/company-team">
-          <Button variant="ghost" size="icon" aria-label="Back to team">
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      titleBefore={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to team">
+          <Link href="/app/company-team">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       }
-      subtitle="Invite a colleague by email—they choose their own password."
-    >
-      <Card>
-        <CardHeader>
-          <CardTitle>Invite team member</CardTitle>
-          <CardDescription>
-            Supabase sends an email with a link to set their password (same flow as your invite
-            page).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loadingRoles ? (
-            <div className="flex items-center gap-2 py-8 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              Loading roles…
-            </div>
-          ) : roles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Add at least one company role under{" "}
-              <Link href="/app/settings" className="text-primary underline underline-offset-2">
-                Company Settings
-              </Link>{" "}
-              (Roles), then invite team members here.
-            </p>
+      actions={
+        <Button
+          type="submit"
+          form="company-team-invite-form"
+          disabled={
+            saving ||
+            loadingRoles ||
+            roles.length === 0
+          }
+          className="gap-2 rounded-md font-semibold shadow-sm"
+        >
+          {saving ? (
+            <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
           ) : (
-            <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+            <Plus className="size-3.5 shrink-0" aria-hidden />
+          )}
+          {saving ? "Sending…" : "Send invite"}
+        </Button>
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        {loadingRoles ? (
+          <div className="flex items-center gap-2 py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading roles…
+          </div>
+        ) : roles.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Add at least one company role under{" "}
+            <Link
+              href="/app/settings"
+              className="text-primary underline underline-offset-2"
+            >
+              Company Settings
+            </Link>{" "}
+            (Roles), then invite team members here.
+          </p>
+        ) : (
+          <form
+            id="company-team-invite-form"
+            onSubmit={(e) => void handleSubmit(e)}
+            className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:max-w-2xl"
+          >
+            <SectionCard icon={UserRound} title="Invitee">
               <div className="space-y-2">
-                <Label htmlFor="invite-name">Full name</Label>
+                <ReqLabel htmlFor="invite-name">Full name</ReqLabel>
                 <Input
                   id="invite-name"
                   value={fullName}
@@ -139,7 +207,7 @@ export default function CompanyTeamInvitePage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="invite-email">Email</Label>
+                <ReqLabel htmlFor="invite-email">Email</ReqLabel>
                 <Input
                   id="invite-email"
                   type="email"
@@ -149,20 +217,22 @@ export default function CompanyTeamInvitePage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="invite-phone">Phone</Label>
+                <Label htmlFor="invite-phone" className={fieldLabelClass}>
+                  Phone
+                </Label>
                 <Input
                   id="invite-phone"
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  placeholder="E.164 e.g. +2301234567"
+                  placeholder="E.g. +230 5xx xx xx"
                   autoComplete="tel"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Company role</Label>
+                <ReqLabel htmlFor="invite-role">Company role</ReqLabel>
                 <Select value={roleId} onValueChange={setRoleId}>
-                  <SelectTrigger>
+                  <SelectTrigger id="invite-role" className="h-8 w-full rounded-sm text-xs">
                     <SelectValue placeholder="Select role" />
                   </SelectTrigger>
                   <SelectContent>
@@ -174,28 +244,10 @@ export default function CompanyTeamInvitePage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button type="button" variant="outline" asChild>
-                  <Link href="/app/company-team">Cancel</Link>
-                </Button>
-                <Button type="submit" disabled={saving}>
-                  {saving ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Sending…
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Send invite
-                    </>
-                  )}
-                </Button>
-              </div>
-            </form>
-          )}
-        </CardContent>
-      </Card>
+            </SectionCard>
+          </form>
+        )}
+      </div>
     </AppPageShell>
   );
 }

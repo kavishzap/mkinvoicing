@@ -126,30 +126,41 @@ export default function NewCompanyRolePage() {
 
   if (waitingOnPermissions) {
     return (
-      <AppPageShell compact>
-        <div className="h-6 w-48 max-w-full bg-muted rounded animate-pulse" />
-        <div className="h-64 bg-muted rounded animate-pulse mt-4" />
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      >
+        <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="h-9 w-48 max-w-full animate-pulse rounded-lg bg-muted" />
+          <div className="h-64 animate-pulse rounded-lg bg-muted" />
+        </div>
       </AppPageShell>
     );
   }
 
   if (appFeatStatus === "error" || appFeatStatus === "no-company") {
     return (
-      <AppPageShell compact>
-        <p className="text-sm text-muted-foreground">
-          {appFeatStatus === "no-company"
-            ? "Select a company before creating roles."
-            : "Could not load your permissions. Refresh the page or try again."}
-        </p>
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      >
+        <div className="rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <p className="text-sm text-muted-foreground">
+            {appFeatStatus === "no-company"
+              ? "Select a company before creating roles."
+              : "Could not load your permissions. Refresh the page or try again."}
+          </p>
+        </div>
       </AppPageShell>
     );
   }
 
   return (
     <AppPageShell
-      compact
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       subtitle="Define the role name, optional description, and which plan features it includes."
-      leading={
+      titleBefore={
         <Button variant="ghost" size="icon" asChild aria-label="Back to roles">
           <Link href="/app/settings?tab=roles">
             <ArrowLeft className="h-4 w-4" />
@@ -157,17 +168,23 @@ export default function NewCompanyRolePage() {
         </Button>
       }
       actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" className="rounded-md" asChild>
             <Link href="/app/settings?tab=roles">Cancel</Link>
           </Button>
-          <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
+          <Button
+            size="sm"
+            className="gap-2 rounded-md font-semibold shadow-sm"
+            onClick={() => void handleSave()}
+            disabled={saving}
+          >
             {saving ? "Saving…" : "Save role"}
           </Button>
         </div>
       }
     >
-      <Card>
+      <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        <Card className="gap-0 border-0 py-0 shadow-none">
         <CardHeader>
           <CardTitle>Role details</CardTitle>
           <CardDescription>
@@ -200,6 +217,7 @@ export default function NewCompanyRolePage() {
           )}
         </CardContent>
       </Card>
+      </div>
     </AppPageShell>
   );
 }

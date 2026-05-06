@@ -35,7 +35,7 @@ export function SalesOrderLineProductSelect({
   return (
     <Select value={selectValue} onValueChange={onValueChange}>
       <SelectTrigger
-        className={`h-9 w-full min-w-[11rem] max-w-[18rem] ${invalid ? "border-destructive" : ""} ${className ?? ""}`}
+        className={`h-9 w-full min-w-[8rem] max-w-[16rem] ${invalid ? "border-destructive" : ""} ${className ?? ""}`}
       >
         <SelectValue placeholder="Select product" />
       </SelectTrigger>
