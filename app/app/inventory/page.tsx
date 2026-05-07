@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Layers,
   RefreshCw,
@@ -580,11 +581,19 @@ export default function InventoryPage() {
                     ) : (
                       balances.map((b) => (
                         <tr key={`${b.location_id}-${b.product_id}`} className="border-t">
-                          <td className="p-3 font-medium">
-                            {b.location_name}
-                            {b.location_code ? (
-                              <span className="text-muted-foreground"> ({b.location_code})</span>
-                            ) : null}
+                          <td className="p-3">
+                            <Link
+                              href={`/app/locations/${b.location_id}?tab=products-line`}
+                              className="inline-flex font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                            >
+                              {b.location_name}
+                              {b.location_code ? (
+                                <span className="text-muted-foreground font-normal">
+                                  {" "}
+                                  ({b.location_code})
+                                </span>
+                              ) : null}
+                            </Link>
                           </td>
                           <td className="p-3">{b.product_name}</td>
                           <td className="p-3 text-muted-foreground">{b.product_sku || "—"}</td>

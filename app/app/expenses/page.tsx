@@ -1,19 +1,26 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
+import type { LucideIcon } from "lucide-react";
 import {
-  Plus,
-  Search,
+  CalendarDays,
+  CalendarRange,
+  CircleDollarSign,
   MoreVertical,
-  Eye,
-  Trash2,
+  Plus,
   Receipt,
+  Search,
+  SlidersVertical,
+  Trash2,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,61 +35,376 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DataTable } from "@/components/data-table";
+import { DataTableColumnHeader } from "@/components/data-table-column-header";
+import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
+import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { useToast } from "@/hooks/use-toast";
 import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
+import { AppPageShell } from "@/components/app-page-shell";
+import {
   deleteExpense,
+  fetchExpenseListFacets,
   listExpenses,
+  type ExpenseListFacets,
+  type ExpensePeriodFilter,
   type ExpenseRow,
 } from "@/lib/expenses-service";
-import { AppPageShell } from "@/components/app-page-shell";
+import { cn } from "@/lib/utils";
+
+function ExpensesFilterSidebar({
+  facets,
+  periodFilter,
+  onPeriodChange,
+  currencyFilter,
+  onCurrencyChange,
+}: {
+  facets: ExpenseListFacets;
+  periodFilter: ExpensePeriodFilter;
+  onPeriodChange: (v: ExpensePeriodFilter) => void;
+  currencyFilter: string;
+  onCurrencyChange: (v: string) => void;
+}) {
+  const periodRows: {
+    id: ExpensePeriodFilter;
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All expenses",
+      icon: Receipt,
+      count: facets.companyTotal,
+    },
+    {
+      id: "month",
+      label: "This month",
+      icon: CalendarDays,
+      count: facets.thisMonthCount,
+    },
+    {
+      id: "year",
+      label: "This year",
+      icon: CalendarRange,
+      count: facets.thisYearCount,
+    },
+  ];
+
+  const currencyRows: { id: string; label: string; icon: LucideIcon; count: number }[] =
+    [
+      {
+        id: "all",
+        label: "All currencies",
+        icon: CircleDollarSign,
+        count: facets.companyTotal,
+      },
+      ...facets.currencyCounts.map((c) => ({
+        id: c.currency,
+        label: c.currency,
+        icon: CircleDollarSign,
+        count: c.count,
+      })),
+    ];
+
+  const rowBtn =
+    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors leading-snug";
+
+  return (
+    <aside className="w-full shrink-0 lg:self-stretch">
+      <div className="space-y-7 py-1">
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By period
+          </h3>
+          <nav className="flex flex-col gap-px" aria-label="Filter by period">
+            {periodRows.map((item) => {
+              const Icon = item.icon;
+              const selected = periodFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onPeriodChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By currency
+          </h3>
+          <nav className="flex flex-col gap-px" aria-label="Filter by currency">
+            {currencyRows.map((item) => {
+              const Icon = item.icon;
+              const selected = currencyFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onCurrencyChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+    </aside>
+  );
+}
 
 export default function ExpensesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const [companyReady, setCompanyReady] = useState<boolean | null>(null);
 
-  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [rows, setRows] = useState<ExpenseRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [searchInput, setSearchInput] = useState("");
+  const [facets, setFacets] = useState<ExpenseListFacets | null>(null);
+
+  const [periodFilter, setPeriodFilter] = useState<ExpensePeriodFilter>("all");
+  const [currencyFilter, setCurrencyFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [facetsLoading, setFacetsLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
+
+  const listRequestGen = useRef(0);
+  const prevListDepsRef = useRef({
+    debouncedSearch: "",
+    periodFilter: "all" as ExpensePeriodFilter,
+    currencyFilter: "all",
+    pageSize: 10,
+    activeCompanyScope: 0,
+  });
+
+  const [activeCompanyScope, setActiveCompanyScope] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(true);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  async function load() {
-    try {
-      setLoading(true);
-      const result = await listExpenses({
-        search: searchQuery,
-        page,
-        pageSize,
-      });
-      setExpenses(result.rows);
-      setTotal(result.total);
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      toast({
-        title: "Failed to load expenses",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
-    load();
-  }, [searchQuery, page, pageSize]);
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 220);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
 
-  // Debounce search input for smoother filtering
   useEffect(() => {
-    const handle = setTimeout(() => {
+    const bump = () => setActiveCompanyScope((n) => n + 1);
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setFacetsLoading(true);
+      const id = await getActiveCompanyId();
+      if (cancelled) return;
+
+      setCompanyReady(!!id);
+      if (!id) {
+        setRows([]);
+        setTotal(0);
+        setFacets(null);
+        setFacetsLoading(false);
+        return;
+      }
+
+      try {
+        const facetData = await fetchExpenseListFacets();
+        if (!cancelled) setFacets(facetData);
+      } catch (e: unknown) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : "Please try again.";
+          toast({
+            title: "Failed to load filters",
+            description: msg,
+            variant: "destructive",
+          });
+          setFacets(null);
+        }
+      } finally {
+        if (!cancelled) setFacetsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
+  }, [activeCompanyScope]);
+
+  useEffect(() => {
+    if (companyReady !== true) return;
+
+    const prev = prevListDepsRef.current;
+    const depsChanged =
+      prev.debouncedSearch !== debouncedSearch ||
+      prev.periodFilter !== periodFilter ||
+      prev.currencyFilter !== currencyFilter ||
+      prev.pageSize !== pageSize ||
+      prev.activeCompanyScope !== activeCompanyScope;
+
+    if (depsChanged && page !== 1) {
       setPage(1);
-      setSearchQuery(searchInput.trim());
-    }, 400);
-    return () => clearTimeout(handle);
-  }, [searchInput, pageSize]);
+      return;
+    }
+
+    prevListDepsRef.current = {
+      debouncedSearch,
+      periodFilter,
+      currencyFilter,
+      pageSize,
+      activeCompanyScope,
+    };
+
+    const gen = ++listRequestGen.current;
+    let cancelled = false;
+
+    (async () => {
+      setListLoading(true);
+      try {
+        const listRes = await listExpenses({
+          search: debouncedSearch || undefined,
+          period: periodFilter,
+          currency: currencyFilter === "all" ? undefined : currencyFilter,
+          page,
+          pageSize,
+        });
+        if (cancelled || gen !== listRequestGen.current) return;
+        setRows(listRes.rows);
+        setTotal(listRes.total);
+      } catch (e: unknown) {
+        if (cancelled || gen !== listRequestGen.current) return;
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Failed to load expenses",
+          description: msg,
+          variant: "destructive",
+        });
+      } finally {
+        if (!cancelled && gen === listRequestGen.current) {
+          setListLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
+  }, [
+    companyReady,
+    debouncedSearch,
+    periodFilter,
+    currencyFilter,
+    page,
+    pageSize,
+    activeCompanyScope,
+  ]);
+
+  const reload = useCallback(async () => {
+    if (companyReady !== true) return;
+    listRequestGen.current += 1;
+    const gen = listRequestGen.current;
+    setListLoading(true);
+    try {
+      const [facetData, listRes] = await Promise.all([
+        fetchExpenseListFacets(),
+        listExpenses({
+          search: debouncedSearch || undefined,
+          period: periodFilter,
+          currency: currencyFilter === "all" ? undefined : currencyFilter,
+          page,
+          pageSize,
+        }),
+      ]);
+      if (gen !== listRequestGen.current) return;
+      setFacets(facetData);
+      setRows(listRes.rows);
+      setTotal(listRes.total);
+      prevListDepsRef.current = {
+        debouncedSearch,
+        periodFilter,
+        currencyFilter,
+        pageSize,
+        activeCompanyScope,
+      };
+    } catch (e: unknown) {
+      if (gen === listRequestGen.current) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Failed to refresh expenses",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    } finally {
+      if (gen === listRequestGen.current) setListLoading(false);
+    }
+  }, [
+    companyReady,
+    periodFilter,
+    currencyFilter,
+    debouncedSearch,
+    page,
+    pageSize,
+    activeCompanyScope,
+  ]);
 
   async function handleDelete(id: string) {
     try {
@@ -91,8 +413,8 @@ export default function ExpensesPage() {
         title: "Expense deleted",
         description: "Expense has been removed successfully.",
       });
-      if (expenses.length === 1 && page > 1) setPage((p) => p - 1);
-      else await load();
+      if (rows.length === 1 && page > 1) setPage((p) => p - 1);
+      else await reload();
     } catch (e: unknown) {
       const err = e as { message?: string };
       toast({
@@ -105,219 +427,340 @@ export default function ExpensesPage() {
     }
   }
 
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const end = Math.min(total, page * pageSize);
-
-  const totalExpenseAmount = useMemo(
-    () => expenses.reduce((acc, e) => acc + Number(e.amount || 0), 0),
-    [expenses]
-  );
-  const currencyForSummary = expenses[0]?.currency ?? "MUR";
-
-  return (
-    <AppPageShell
-      subtitle="Record money going out—search and review spending whenever you reconcile."
-      actions={
-        <Button onClick={() => router.push("/app/expenses/new")} className="gap-2">
-          <Plus className="h-4 w-4" />
-          Add Expense
-        </Button>
-      }
-    >
-      {!loading && (
-        <Card className="p-5">
-          <div className="text-sm text-muted-foreground">Total Expenses</div>
-          <div className="mt-1 text-xl font-bold">
-            {currencyForSummary}{" "}
-            {totalExpenseAmount.toLocaleString("en-US", {
+  const columns = useMemo<ColumnDef<ExpenseRow>[]>(
+    () => [
+      {
+        id: "expense_date",
+        accessorFn: (r) => r.expense_date ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Date" />
+        ),
+        cell: ({ row }) =>
+          row.original.expense_date
+            ? new Date(row.original.expense_date).toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })
+            : "—",
+        meta: { tdClassName: "text-muted-foreground tabular-nums" },
+      },
+      {
+        id: "description",
+        accessorFn: (r) => r.description ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Description" />
+        ),
+        cell: ({ row }) => (
+          <span className="font-semibold text-foreground line-clamp-2">
+            {row.original.description || "—"}
+          </span>
+        ),
+      },
+      {
+        id: "currency",
+        accessorFn: (r) => r.currency ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Currency" />
+        ),
+        cell: ({ row }) => (
+          <span className="inline-flex rounded-md border border-border/70 bg-muted/40 px-2 py-0.5 text-xs font-medium tabular-nums">
+            {row.original.currency || "MUR"}
+          </span>
+        ),
+      },
+      {
+        id: "amount",
+        accessorFn: (r) => Number(r.amount ?? 0),
+        header: ({ column }) => (
+          <div className="flex w-full justify-end">
+            <DataTableColumnHeader column={column} title="Amount" />
+          </div>
+        ),
+        cell: ({ row }) => (
+          <span className="tabular-nums font-medium">
+            {row.original.currency ?? "MUR"}{" "}
+            {Number(row.original.amount ?? 0).toLocaleString("en-US", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
-          </div>
+          </span>
+        ),
+        meta: { thClassName: "text-right", tdClassName: "text-right" },
+      },
+      {
+        id: "actions",
+        header: () => <span className="sr-only">Actions</span>,
+        cell: ({ row }) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Open actions"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => router.push(`/app/expenses/${row.original.id}`)}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                View
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => setConfirmDeleteId(row.original.id)}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ),
+        meta: { thClassName: "w-12 text-right", tdClassName: "text-right w-12" },
+        enableSorting: false,
+      },
+    ],
+    [router],
+  );
+
+  const hasActiveFilters = useMemo(
+    () =>
+      debouncedSearch !== "" ||
+      periodFilter !== "all" ||
+      currencyFilter !== "all",
+    [debouncedSearch, periodFilter, currencyFilter],
+  );
+
+  const listRangeLabel = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const from = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+    const to = Math.min(safePage * pageSize, total);
+    if (total === 0) return "0–0 of 0";
+    return `${from}–${to} of ${total}`;
+  }, [total, page, pageSize]);
+
+  const pageAmountSum = useMemo(
+    () => rows.reduce((s, r) => s + Number(r.amount ?? 0), 0),
+    [rows],
+  );
+  const pageCurrencyLabel = rows[0]?.currency ?? "—";
+
+  const showSkeleton =
+    companyReady !== false &&
+    rows.length === 0 &&
+    facets === null &&
+    (companyReady === null || facetsLoading);
+
+  const showDirectory = companyReady === true && facets !== null && !showSkeleton;
+
+  return (
+    <AppPageShell
+      fillHeight
+      compact
+      className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
+      actions={
+        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+          <Link href="/app/expenses/new">
+            <Plus className="h-4 w-4" />
+            Add expense
+          </Link>
+        </Button>
+      }
+      topbarTrailingBeforeTheme={
+        showDirectory ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-9 w-9 shrink-0 text-muted-foreground",
+              filtersOpen && "bg-primary/15 text-primary",
+            )}
+            aria-label={filtersOpen ? "Hide expense filters" : "Show expense filters"}
+            aria-expanded={filtersOpen}
+            aria-controls="expenses-filter-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersVertical className="h-4 w-4" aria-hidden />
+          </Button>
+        ) : null
+      }
+    >
+      {companyReady === false && (
+        <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
+          <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
+            No active company is linked to this account yet. Link a company so expenses
+            can be saved against{" "}
+            <code className="rounded bg-amber-100/80 px-1 py-0.5 text-xs dark:bg-amber-900/60">
+              company_id
+            </code>
+            .
+          </CardContent>
         </Card>
       )}
 
-      {loading ? (
-        <Card>
-          <CardContent className="pt-6 space-y-3">
-            <div className="flex gap-3">
-              <div className="h-9 flex-1 bg-muted rounded animate-pulse" />
-              <div className="h-9 w-32 bg-muted rounded animate-pulse" />
+      {showSkeleton ? (
+        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+      ) : null}
+
+      {showDirectory ? (
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
+            filtersOpen ? "gap-6" : "gap-0",
+          )}
+        >
+          <div
+            id="expenses-filter-panel"
+            className={cn(
+              "shrink-0 overflow-hidden",
+              "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+              "motion-reduce:transition-none motion-reduce:duration-0",
+              filtersOpen
+                ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
+                : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
+            )}
+            aria-hidden={!filtersOpen}
+          >
+            <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
+              <ExpensesFilterSidebar
+                facets={facets}
+                periodFilter={periodFilter}
+                onPeriodChange={(v) => {
+                  setPage(1);
+                  setPeriodFilter(v);
+                }}
+                currencyFilter={currencyFilter}
+                onCurrencyChange={(v) => {
+                  setPage(1);
+                  setCurrencyFilter(v);
+                }}
+              />
             </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="pt-6 space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50">
+            <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
+              <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                  aria-hidden
+                />
                 <Input
-                  placeholder="Search by description..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="pl-9"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search description or notes…"
+                  className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                  aria-label="Search expenses"
+                  autoComplete="off"
                 />
               </div>
-              <select
-                className="h-9 rounded-md border bg-background px-2 text-sm"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-              >
-                <option value={5}>5 / page</option>
-                <option value={10}>10 / page</option>
-                <option value={20}>20 / page</option>
-                <option value={50}>50 / page</option>
-              </select>
+              <div className="flex shrink-0 flex-col items-end gap-0.5 text-sm sm:text-right">
+                <p className="tabular-nums text-muted-foreground">{listRangeLabel}</p>
+                {rows.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Page total:{" "}
+                    <span className="font-medium text-foreground tabular-nums">
+                      {pageCurrencyLabel}{" "}
+                      {pageAmountSum.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {loading ? (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-muted-foreground">
-              <tr>
-                <th className="text-left p-3">Date</th>
-                <th className="text-left p-3">Description</th>
-                <th className="text-right p-3">Amount</th>
-                <th className="text-right p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 6 }).map((_, i) => (
-                <tr key={i} className="border-t">
-                  <td className="p-3">
-                    <div className="h-5 w-24 bg-muted rounded animate-pulse" />
-                  </td>
-                  <td className="p-3">
-                    <div className="h-5 w-40 bg-muted rounded animate-pulse" />
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="h-5 w-20 bg-muted rounded animate-pulse ml-auto" />
-                  </td>
-                  <td className="p-3 text-right">
-                    <div className="h-8 w-8 bg-muted rounded ml-auto animate-pulse" />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-muted-foreground">
-              <tr>
-                <th className="text-left p-3">Date</th>
-                <th className="text-left p-3">Description</th>
-                <th className="text-right p-3">Amount</th>
-                <th className="text-right p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {expenses.map((e) => (
-                <tr key={e.id} className="border-t">
-                  <td className="p-3">
-                    {e.expense_date
-                      ? new Date(e.expense_date).toLocaleDateString()
-                      : "—"}
-                  </td>
-                  <td className="p-3 font-medium">{e.description}</td>
-                  <td className="p-3 text-right font-medium">
-                    {e.currency} {Number(e.amount).toFixed(2)}
-                  </td>
-                  <td className="p-3 text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => router.push(`/app/expenses/${e.id}`)}
-                        >
-                          <Eye className="h-4 w-4 mr-2" />
-                          View
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => setConfirmDeleteId(e.id)}
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-              ))}
-              {expenses.length === 0 && !loading && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="p-8 text-center text-muted-foreground"
-                  >
-                    <div className="flex flex-col items-center gap-2">
-                      <Receipt className="h-10 w-10" />
-                      {searchQuery
-                        ? "No matching expenses. Try a different search."
-                        : "No expenses yet. Add your first one!"}
-                    </div>
-                  </td>
-                </tr>
+            <div
+              className={cn(
+                "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
+                listLoading &&
+                  "pointer-events-none opacity-[0.58] motion-reduce:transition-none",
               )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {!loading && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <div>
-            Showing <span className="font-medium text-foreground">{start}</span>–
-            <span className="font-medium text-foreground">{end}</span> of{" "}
-            <span className="font-medium text-foreground">{total}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1}
+              aria-busy={listLoading}
             >
-              Previous
-            </Button>
-            <span>
-              Page <span className="font-medium text-foreground">{page}</span> /{" "}
-              {pages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.min(pages, p + 1))}
-              disabled={page >= pages}
-            >
-              Next
-            </Button>
+              <DataTable
+                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-0 bg-transparent shadow-none"
+                tableContainerClassName="min-h-0 flex-1 overflow-auto"
+                variant="minimal"
+                columns={columns}
+                data={rows}
+                manualFiltering
+                hideSearch
+                onRowClick={(r) => router.push(`/app/expenses/${r.id}`)}
+                getRowId={(r) => r.id}
+                emptyMessage={
+                  hasActiveFilters ? (
+                    <FeatureEmptyState
+                      title="No expenses match your filters"
+                      description="Try clearing search or adjusting filters."
+                      action={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setPage(1);
+                            setSearchQuery("");
+                            setPeriodFilter("all");
+                            setCurrencyFilter("all");
+                          }}
+                        >
+                          Clear filters
+                        </Button>
+                      }
+                      className="border-0 bg-transparent py-8"
+                    />
+                  ) : facets.companyTotal === 0 ? (
+                    <FeatureEmptyState
+                      icon={Receipt}
+                      title="No expenses yet"
+                      description="Record spending with line items and download PDFs when you need them."
+                      action={
+                        <Button className="gap-2" asChild>
+                          <Link href="/app/expenses/new">
+                            <Plus className="h-4 w-4" />
+                            Add expense
+                          </Link>
+                        </Button>
+                      }
+                      className="border-0 bg-transparent py-8"
+                    />
+                  ) : (
+                    <FeatureEmptyState
+                      title="No expenses on this page"
+                      description="Try another page."
+                      className="border-0 bg-transparent py-8"
+                    />
+                  )
+                }
+                footer={
+                  <DataTablePaginationFooter
+                    variant="minimal"
+                    total={total}
+                    page={page}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    pageSizeOptions={[10, 25, 50]}
+                  />
+                }
+              />
+            </div>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Delete Confirmation */}
-      <Dialog
-        open={!!confirmDeleteId}
-        onOpenChange={() => setConfirmDeleteId(null)}
-      >
+      <Dialog open={!!confirmDeleteId} onOpenChange={() => setConfirmDeleteId(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Expense</DialogTitle>
+            <DialogTitle>Delete expense</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this expense? This cannot be
-              undone.
+              Are you sure you want to delete this expense? This cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -326,9 +769,7 @@ export default function ExpensesPage() {
             </Button>
             <Button
               variant="destructive"
-              onClick={() =>
-                confirmDeleteId && handleDelete(confirmDeleteId)
-              }
+              onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
             >
               Delete
             </Button>

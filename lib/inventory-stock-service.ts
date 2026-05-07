@@ -131,6 +131,28 @@ export async function listStockBalancesForProduct(
   return (data ?? []).map((r) => mapBalance(r as Record<string, unknown>));
 }
 
+/** All balances rows for one location (sorted by product name). */
+export async function listStockBalancesForLocation(
+  locationId: string,
+  opts?: { includeZero?: boolean }
+): Promise<StockBalanceRow[]> {
+  const companyId = await requireCompanyId();
+  let q = supabase
+    .from("inventory_stock_by_location")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("location_id", locationId)
+    .order("product_name", { ascending: true });
+
+  if (!opts?.includeZero) {
+    q = q.gt("quantity", 0);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []).map((r) => mapBalance(r as Record<string, unknown>));
+}
+
 async function fetchProductNames(
   companyId: string,
   ids: string[]
@@ -206,6 +228,8 @@ export async function listInventoryMovements(opts?: {
   pageSize?: number;
   /** When set, only movements for this product are returned. */
   productId?: string;
+  /** Movements where stock left or entered this location (transfer / refill / stock out). */
+  locationId?: string;
 }): Promise<{ rows: InventoryMovementRow[]; total: number }> {
   const companyId = await requireCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
@@ -225,6 +249,13 @@ export async function listInventoryMovements(opts?: {
 
   if (opts?.productId) {
     query = query.eq("product_id", opts.productId);
+  }
+
+  if (opts?.locationId) {
+    const lid = opts.locationId;
+    query = query.or(
+      `from_location_id.eq.${lid},to_location_id.eq.${lid}`
+    );
   }
 
   const { data, error, count } = await query;

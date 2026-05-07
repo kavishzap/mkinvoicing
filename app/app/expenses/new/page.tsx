@@ -1,4 +1,4 @@
- "use client";
+"use client";
  export const dynamic = "force-dynamic";
 
  import { useState } from "react";
@@ -191,33 +191,36 @@
    }, 0);
 
   return (
-     <AppPageShell
-       className="max-w-7xl"
-       subtitle="Enter date, description, and line items—totals include tax per line."
-       leading={
-         <Link href="/app/expenses">
-           <Button variant="ghost" size="icon" aria-label="Back to expenses">
-             <ArrowLeft className="h-4 w-4" />
-           </Button>
-         </Link>
-       }
-       actions={
-         <div className="flex flex-wrap items-center gap-2">
-           <Button
-             variant="outline"
-             type="button"
-             onClick={() => router.push("/app/expenses")}
-             disabled={saving}
-           >
-             Cancel
-           </Button>
-           <Button type="button" onClick={handleSave} disabled={saving}>
-             {saving ? "Saving..." : "Save Expense"}
-           </Button>
-         </div>
-       }
-     >
-       <Card>
+    <AppPageShell
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      titleBefore={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to expenses">
+          <Link href="/app/expenses">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+      }
+      subtitle="Enter date, description, and line items—totals include tax per line."
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            type="button"
+            onClick={() => router.push("/app/expenses")}
+            disabled={saving}
+            className="rounded-md font-semibold"
+          >
+            Cancel
+          </Button>
+          <Button type="button" onClick={handleSave} disabled={saving} className="rounded-md font-semibold shadow-sm">
+            {saving ? "Saving..." : "Save expense"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+       <Card className="border-0 shadow-none bg-transparent">
          <CardHeader>
            <CardTitle>Expense Details</CardTitle>
          </CardHeader>
@@ -406,6 +409,7 @@
            </div>
          </CardContent>
        </Card>
+      </div>
      </AppPageShell>
    );
  }

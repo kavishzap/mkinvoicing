@@ -28,6 +28,27 @@ export type ExpenseRow = Omit<ExpensePayload, "line_items"> & {
   updated_at: string;
 };
 
+/** Matches list filter sidebar — calendar month/year in local time. */
+export type ExpensePeriodFilter = "all" | "month" | "year";
+
+export type ExpenseListFacets = {
+  companyTotal: number;
+  thisMonthCount: number;
+  thisYearCount: number;
+  currencyCounts: { currency: string; count: number }[];
+};
+
+function localStartOfMonthISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
+
+function localStartOfYearISO(): string {
+  return `${new Date().getFullYear()}-01-01`;
+}
+
 async function getUserId() {
   const { data, error } = await supabase.auth.getUser();
   if (error || !data?.user) throw new Error("Not authenticated");
@@ -52,12 +73,73 @@ export async function getExpense(id: string): Promise<ExpenseRow> {
   return mapRow(data as any);
 }
 
+/** Facet counts for filters (company-wide; independent of list filters). */
+export async function fetchExpenseListFacets(): Promise<ExpenseListFacets> {
+  const companyId = await requireActiveCompanyId();
+
+  const head = () =>
+    supabase
+      .from("expenses")
+      .select("*", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const countOf = async (
+    builder: ReturnType<typeof head>,
+  ): Promise<number> => {
+    const { count, error } = await builder;
+    if (error) throw error;
+    return count ?? 0;
+  };
+
+  const { count: companyTotalRaw, error: totalErr } = await head();
+  if (totalErr) throw totalErr;
+  const companyTotal = companyTotalRaw ?? 0;
+
+  const som = localStartOfMonthISO();
+  const soy = localStartOfYearISO();
+
+  const [thisMonthCount, thisYearCount] = await Promise.all([
+    countOf(head().gte("expense_date", som)),
+    countOf(head().gte("expense_date", soy)),
+  ]);
+
+  const { data: curRows, error: curErr } = await supabase
+    .from("expenses")
+    .select("currency")
+    .eq("company_id", companyId);
+
+  if (curErr) throw curErr;
+
+  const map = new Map<string, number>();
+  for (const r of curRows ?? []) {
+    const row = r as { currency?: string | null };
+    const c =
+      String(row.currency ?? "").trim() || "MUR";
+    map.set(c, (map.get(c) ?? 0) + 1);
+  }
+  const currencyCounts = [...map.entries()]
+    .map(([currency, count]) => ({ currency, count }))
+    .sort(
+      (a, b) =>
+        b.count - a.count || a.currency.localeCompare(b.currency),
+    );
+
+  return {
+    companyTotal,
+    thisMonthCount,
+    thisYearCount,
+    currencyCounts,
+  };
+}
+
 /**
- * Paged list with optional search (searches description and line item names).
+ * Paged list with optional search (description and notes), currency, and period.
  * Returns { rows, total }.
  */
 export async function listExpenses(opts?: {
   search?: string;
+  currency?: string | null;
+  period?: ExpensePeriodFilter;
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: ExpenseRow[]; total: number }> {
@@ -75,9 +157,22 @@ export async function listExpenses(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
+  const cur = opts?.currency?.trim();
+  if (cur && cur !== "all") {
+    q = q.eq("currency", cur);
+  }
+
+  const period = opts?.period ?? "all";
+  if (period === "month") {
+    q = q.gte("expense_date", localStartOfMonthISO());
+  } else if (period === "year") {
+    q = q.gte("expense_date", localStartOfYearISO());
+  }
+
   const term = opts?.search?.trim();
   if (term) {
-    q = q.ilike("description", `%${term}%`);
+    const s = `%${term}%`;
+    q = q.or(`description.ilike.${s},notes.ilike.${s}`);
   }
 
   const { data, error, count } = await q;

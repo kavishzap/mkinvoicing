@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Building2,
   MapPinned,
+  Package,
   Pencil,
   Save,
   type LucideIcon,
@@ -39,6 +40,7 @@ import {
 import { AppPageShell } from "@/components/app-page-shell";
 import { cn } from "@/lib/utils";
 import { LocationRoutingTab } from "./location-routing-tab";
+import { LocationProductsLineTab } from "./location-products-line-tab";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -129,7 +131,12 @@ export default function LocationDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [nameError, setNameError] = useState("");
-  const [tab, setTab] = useState("details");
+  const [tab, setTab] = useState(() => {
+    const t = searchParams.get("tab");
+    if (t === "products-line") return "products-line";
+    if (t === "routing") return "routing";
+    return "details";
+  });
   const [isEditing, setIsEditing] = useState(false);
 
   const [isActive, setIsActive] = useState(true);
@@ -158,11 +165,39 @@ export default function LocationDetailPage() {
   const isDriverLocation =
     (form.location_type || loc?.locationType) === "driver_location";
 
+  const isProductsLineTab = tab === "products-line";
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "products-line") {
+      setTab("products-line");
+      setIsEditing(false);
+    } else if (t === "routing") {
+      if (isDriverLocation) setTab("routing");
+      else setTab("details");
+    } else if (!t) {
+      setTab("details");
+    }
+  }, [searchParams, isDriverLocation]);
+
+  function handleTabChange(next: string) {
+    if (!id) return;
+    setTab(next);
+    if (next === "products-line") {
+      setIsEditing(false);
+      router.replace(`/app/locations/${id}?tab=products-line`, { scroll: false });
+    } else if (next === "routing") {
+      router.replace(`/app/locations/${id}?tab=routing`, { scroll: false });
+    } else {
+      router.replace(`/app/locations/${id}`, { scroll: false });
+    }
+  }
+
+  const editFromUrl = searchParams.get("edit") === "1";
+
   useEffect(() => {
     if (!isDriverLocation && tab === "routing") setTab("details");
   }, [isDriverLocation, tab]);
-
-  const editFromUrl = searchParams.get("edit") === "1";
 
   useEffect(() => {
     setIsEditing(editFromUrl);
@@ -326,6 +361,7 @@ export default function LocationDetailPage() {
         </Button>
       }
       actions={
+        isProductsLineTab ? null : (
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {isEditing ? (
             <>
@@ -363,6 +399,7 @@ export default function LocationDetailPage() {
             </Button>
           )}
         </div>
+        )
       }
     >
       <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
@@ -383,6 +420,12 @@ export default function LocationDetailPage() {
               ) : null}
             </p>
           </div>
+          {isProductsLineTab ? (
+            <p className="max-w-md pt-2 text-xs text-muted-foreground sm:pt-0 sm:text-right">
+              Read-only inventory for this location. To change stock, use{" "}
+              <span className="font-medium text-foreground">Inventory</span> in the sidebar.
+            </p>
+          ) : (
           <div className="flex flex-wrap items-center gap-4 pt-2 sm:pt-0">
             <div className="flex items-center gap-2">
               <Switch
@@ -423,15 +466,20 @@ export default function LocationDetailPage() {
               </div>
             ) : null}
           </div>
+          )}
         </div>
 
         <Tabs
           value={tab}
-          onValueChange={setTab}
+          onValueChange={handleTabChange}
           className="flex min-h-0 flex-1 flex-col gap-4"
         >
           <TabsList className={cn("w-full justify-start sm:w-auto")}>
             <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="products-line" className="gap-1.5">
+              <Package className="h-4 w-4 shrink-0" aria-hidden />
+              Products line
+            </TabsTrigger>
             {isDriverLocation ? (
               <TabsTrigger value="routing">Zones &amp; drivers</TabsTrigger>
             ) : null}
@@ -638,6 +686,18 @@ export default function LocationDetailPage() {
               />
             </TabsContent>
           ) : null}
+
+          <TabsContent
+            value="products-line"
+            className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+          >
+            <LocationProductsLineTab
+              locationId={id}
+              locationName={loc.name}
+              locationCode={loc.code ?? ""}
+              enabled={tab === "products-line"}
+            />
+          </TabsContent>
         </Tabs>
       </div>
     </AppPageShell>
