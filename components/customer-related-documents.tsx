@@ -2,8 +2,19 @@
 
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { ClipboardList, FileText, Receipt, type LucideIcon } from "lucide-react";
+import {
+  ChevronDown,
+  ClipboardList,
+  FileText,
+  Receipt,
+  type LucideIcon,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
 import { QuotationStatusBadge } from "@/components/quotation-status-badge";
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
@@ -71,20 +82,37 @@ function DocSectionCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="flex min-h-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
-      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
-        <div className={sectionIconBoxClass}>
-          <Icon className={sectionIconClass} aria-hidden />
-        </div>
-        <CardTitle className={cn(sectionTitleClass, "flex flex-wrap items-center gap-2")}>
-          {title}
-          <span className="rounded-full bg-muted/90 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground dark:bg-muted/70">
-            {count}
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="min-h-0 px-0 pb-4 pt-0">{children}</CardContent>
-    </Card>
+    <Collapsible defaultOpen>
+      <Card className="flex min-h-0 min-w-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer rounded-none border-b bg-muted/40 px-4 py-3 transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+            <div className="flex w-full min-w-0 flex-row items-center gap-2.5">
+              <ChevronDown
+                className="h-4 w-4 shrink-0 text-muted-foreground transition-transform collapsible-open:rotate-180"
+                aria-hidden
+              />
+              <div className={sectionIconBoxClass}>
+                <Icon className={sectionIconClass} aria-hidden />
+              </div>
+              <CardTitle
+                className={cn(
+                  sectionTitleClass,
+                  "flex min-w-0 flex-1 flex-wrap items-center gap-2 text-left leading-snug",
+                )}
+              >
+                <span className="min-w-0">{title}</span>
+                <span className="rounded-full bg-muted/90 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground dark:bg-muted/70">
+                  {count}
+                </span>
+              </CardTitle>
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="min-h-0 px-0 pb-4 pt-0">{children}</CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   );
 }
 
@@ -187,7 +215,7 @@ export function CustomerRelatedDocuments({
 
   if (loading) {
     return (
-      <div className="grid gap-6 lg:grid-cols-1">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-1">
         <div className="h-36 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
         <div className="h-36 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
         <div className="h-36 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
@@ -196,13 +224,13 @@ export function CustomerRelatedDocuments({
   }
 
   return (
-    <div className="flex flex-col gap-6 border-t border-border/60 pt-6">
+    <div className="flex min-w-0 flex-col gap-6 border-t border-border/60 pt-6">
       <DocSectionCard
         icon={ClipboardList}
         title="Sales orders"
         count={salesOrderTotal}
       >
-        <div className="max-h-[min(22rem,50vh)] overflow-auto">
+        <div className="max-h-[min(26rem,50dvh)] min-h-0 overflow-y-auto overscroll-y-contain">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -227,13 +255,28 @@ export function CustomerRelatedDocuments({
               ) : (
                 salesOrders.map((r) => (
                   <TableRow key={r.id} className="hover:bg-muted/30">
-                    <TableCell className="ps-4 font-medium">
+                    <TableCell className="max-w-[min(100%,14rem)] ps-4 font-medium sm:max-w-none">
                       <Link
                         href={`/app/sales-orders/${r.id}`}
                         className="text-primary underline-offset-4 hover:underline"
                       >
                         {r.number}
                       </Link>
+                      <div className="mt-1.5 space-y-1.5 sm:hidden">
+                        <p className="text-[11px] leading-snug text-muted-foreground">
+                          Issued {fmtDate(r.issueDate)}
+                          {r.deliveryDate ? (
+                            <>
+                              {" "}
+                              · Delivery {fmtDate(r.deliveryDate)}
+                            </>
+                          ) : null}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <SalesOrderFulfillmentStatusBadge status={r.fulfillmentStatus} />
+                          <SalesOrderPaymentStatusBadge status={r.paymentStatus} />
+                        </div>
+                      </div>
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground sm:table-cell">
                       <Link
@@ -280,7 +323,7 @@ export function CustomerRelatedDocuments({
       </DocSectionCard>
 
       <DocSectionCard icon={Receipt} title="Invoices" count={invoiceTotal}>
-        <div className="max-h-[min(22rem,50vh)] overflow-auto">
+        <div className="max-h-[min(26rem,50dvh)] min-h-0 overflow-y-auto overscroll-y-contain">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -303,13 +346,17 @@ export function CustomerRelatedDocuments({
               ) : (
                 invoices.map((r) => (
                   <TableRow key={r.id} className="hover:bg-muted/30">
-                    <TableCell className="ps-4 font-medium">
+                    <TableCell className="max-w-[min(100%,14rem)] ps-4 font-medium sm:max-w-none">
                       <Link
                         href={`/app/invoices/${r.id}`}
                         className="text-primary underline-offset-4 hover:underline"
                       >
                         {r.number}
                       </Link>
+                      <div className="mt-1.5 space-y-1 sm:hidden">
+                        <p className="text-[11px] text-muted-foreground">{fmtDate(r.issueDate)}</p>
+                        <InvoiceStatusBadge status={r.status} dueDate={r.dueDate} />
+                      </div>
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground sm:table-cell">
                       <Link
@@ -345,7 +392,7 @@ export function CustomerRelatedDocuments({
       </DocSectionCard>
 
       <DocSectionCard icon={FileText} title="Quotations" count={quotationTotal}>
-        <div className="max-h-[min(22rem,50vh)] overflow-auto">
+        <div className="max-h-[min(26rem,50dvh)] min-h-0 overflow-y-auto overscroll-y-contain">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -368,13 +415,17 @@ export function CustomerRelatedDocuments({
               ) : (
                 quotations.map((r) => (
                   <TableRow key={r.id} className="hover:bg-muted/30">
-                    <TableCell className="ps-4 font-medium">
+                    <TableCell className="max-w-[min(100%,14rem)] ps-4 font-medium sm:max-w-none">
                       <Link
                         href={`/app/quotations/${r.id}`}
                         className="text-primary underline-offset-4 hover:underline"
                       >
                         {r.number}
                       </Link>
+                      <div className="mt-1.5 space-y-1 sm:hidden">
+                        <p className="text-[11px] text-muted-foreground">{fmtDate(r.issueDate)}</p>
+                        <QuotationStatusBadge status={r.status} />
+                      </div>
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground sm:table-cell">
                       <Link

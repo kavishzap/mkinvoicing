@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   getCustomer,
   updateCustomer,
+  type CustomerRow,
 } from "@/lib/customers-service";
 import {
   CustomerDirectoryFormFields,
@@ -25,6 +26,10 @@ import {
   type DeliveryCityRow,
 } from "@/lib/delivery-zones-service";
 import { CustomerRelatedDocuments } from "@/components/customer-related-documents";
+
+/** Bordered page shell; height follows inner content (no flex-1 / viewport min-height). */
+const primaryCardShellClass =
+  "mb-6 flex w-full min-w-0 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:mb-8 sm:p-5 lg:p-6";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -182,10 +187,10 @@ export default function EditCustomerPage() {
 
   if (loading) {
     return (
-      <AppPageShell fillHeight className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
-        <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm">
+      <AppPageShell className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
+        <div className={primaryCardShellClass}>
           <div className="h-10 w-56 animate-pulse rounded bg-muted" />
-          <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <div className="h-64 animate-pulse rounded-lg bg-muted" />
             <div className="h-64 animate-pulse rounded-lg bg-muted" />
           </div>
@@ -196,7 +201,6 @@ export default function EditCustomerPage() {
 
   return (
     <AppPageShell
-      fillHeight
       className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       titleBefore={
         <Button variant="ghost" size="icon" asChild aria-label="Back to customers">
@@ -217,10 +221,10 @@ export default function EditCustomerPage() {
         </Button>
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+      <div className={primaryCardShellClass}>
         <div className="flex min-w-0 flex-col gap-1 border-b border-border/60 pb-4">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
+            <h2 className="break-words text-lg font-semibold tracking-tight text-foreground sm:truncate">
               {displayName}
             </h2>
             <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -234,7 +238,7 @@ export default function EditCustomerPage() {
         <form
           id="customer-edit-form"
           onSubmit={handleSubmit}
-          className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10"
+          className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10"
         >
           <SectionCard icon={Building2} title="Customer details">
             <CustomerDirectoryFormFields
