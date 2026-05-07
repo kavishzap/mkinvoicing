@@ -12,6 +12,7 @@ import {
   getSalesOrder,
   normalizeSalesOrderFulfillmentStatus,
   normalizeSalesOrderPaymentStatus,
+  salesOrderFulfillmentAllowsEditing,
   SALES_ORDER_FULFILLMENT_LABELS,
   SALES_ORDER_PAYMENT_LABELS,
   updateSalesOrderPaymentStatus,
@@ -197,7 +198,10 @@ export function SalesOrderViewActions({
     ? normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status)
     : null;
   const canEditSalesOrder =
-    salesOrder != null && fulfillmentNorm === "new";
+    salesOrder != null &&
+    salesOrderFulfillmentAllowsEditing(
+      normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status)
+    );
   const canMarkAsPaid =
     salesOrder != null &&
     normalizeSalesOrderPaymentStatus(salesOrder.payment_status) !== "paid";

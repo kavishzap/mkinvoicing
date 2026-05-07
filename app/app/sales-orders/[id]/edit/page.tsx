@@ -69,7 +69,9 @@ import {
   buildFromSnapshotForSalesOrder,
   buildBillToSnapshot,
   clientInfoFromBillSnapshot,
+  cityIdFromDeliveryCityName,
   normalizeSalesOrderFulfillmentStatus,
+  salesOrderFulfillmentAllowsEditing,
   type SalesOrderLinePayload,
   type SalesOrderStatus,
   type SalesOrderFulfillmentStatus,
@@ -312,7 +314,14 @@ export default function EditSalesOrderPage() {
     (async () => {
       try {
         setLoading(true);
-        const [p, prefs, q, prodRes] = await Promise.all([
+        const [
+          p,
+          prefs,
+          q,
+          prodRes,
+          cityRows,
+          customerList,
+        ] = await Promise.all([
           fetchProfile(),
           fetchPreferences(),
           getSalesOrder(salesOrderId),
@@ -322,6 +331,13 @@ export default function EditSalesOrderPage() {
             page: 1,
             pageSize: 400,
             onlyWithPositiveStock: true,
+          }),
+          listDeliveryCities(),
+          listCustomers({
+            search: "",
+            includeInactive: false,
+            page: 1,
+            pageSize: 100,
           }),
         ]);
         if (cancelled) return;
@@ -334,11 +350,15 @@ export default function EditSalesOrderPage() {
           return;
         }
 
-        if (normalizeSalesOrderFulfillmentStatus(q.fulfillment_status) !== "new") {
+        if (
+          !salesOrderFulfillmentAllowsEditing(
+            normalizeSalesOrderFulfillmentStatus(q.fulfillment_status)
+          )
+        ) {
           toast({
             title: "Editing not available",
             description:
-              "Sales orders can only be edited when fulfillment status is New.",
+              "Sales orders can only be edited when fulfillment status is New or Pending.",
             variant: "destructive",
           });
           router.replace(`/app/sales-orders/${salesOrderId}`);
@@ -348,7 +368,6 @@ export default function EditSalesOrderPage() {
         setProfile(p);
         setPreferences(prefs);
         setProducts(prodRes.rows);
-        const cityRows = await listDeliveryCities();
         setCities(cityRows);
         setSalesOrderNumber(q.number);
         setIssueDate(q.issue_date);
@@ -371,6 +390,10 @@ export default function EditSalesOrderPage() {
         setTerms(q.terms ?? "");
 
         const ci = clientInfoFromBillSnapshot(q.bill_to_snapshot);
+        const cityFromCatalog =
+          q.city_id && cityRows.length > 0
+            ? cityRows.find((c) => c.id === q.city_id)?.name
+            : undefined;
         setClientInfo({
           type: ci.type,
           companyName: ci.companyName,
@@ -379,7 +402,7 @@ export default function EditSalesOrderPage() {
           email: ci.email,
           phone: ci.phone,
           street: ci.street,
-          city: ci.city,
+          city: cityFromCatalog ?? ci.city,
           postal: ci.postal,
           country: ci.country,
           address_line_1: ci.address_line_1,
@@ -403,18 +426,10 @@ export default function EditSalesOrderPage() {
             }))
         );
 
-        const { rows } = await listCustomers({
-          search: "",
-          includeInactive: false,
-          page: 1,
-          pageSize: 100,
-        });
-        if (!cancelled) {
-          setCustomers(rows);
-          if (q.customer_id) {
-            const match = rows.find((c) => c.id === q.customer_id);
-            if (match) setSelectedCustomer(match);
-          }
+        setCustomers(customerList.rows);
+        if (q.customer_id) {
+          const match = customerList.rows.find((c) => c.id === q.customer_id);
+          if (match) setSelectedCustomer(match);
         }
       } catch (e: unknown) {
         if (!cancelled) {
@@ -723,7 +738,7 @@ export default function EditSalesOrderPage() {
         notes,
         terms,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
-        city_id: selectedCustomer?.cityId ?? null,
+        city_id: cityIdFromDeliveryCityName(clientInfo.city, cities),
         client_snapshot: clientSnapshot,
         from_snapshot: fromSnap,
         bill_to_snapshot: billSnap,
@@ -1039,12 +1054,29 @@ export default function EditSalesOrderPage() {
                   <Label htmlFor="clientCity">City</Label>
                   <Select
                     value={clientInfo.city || "__none__"}
-                    onValueChange={(v) =>
+                    onValueChange={(v) => {
+                      const nextCity = v === "__none__" ? "" : v;
                       setClientInfo({
                         ...clientInfo,
-                        city: v === "__none__" ? "" : v,
-                      })
-                    }
+                        city: nextCity,
+                      });
+                      if (selectedCustomer) {
+                        setSelectedCustomer((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                city: nextCity,
+                                cityName:
+                                  cities.find((c) => c.name === nextCity)?.name ??
+                                  prev.cityName,
+                                cityId:
+                                  cities.find((c) => c.name === nextCity)?.id ??
+                                  null,
+                              }
+                            : prev
+                        );
+                      }
+                    }}
                   >
                     <SelectTrigger id="clientCity">
                       <SelectValue placeholder="Select city" />

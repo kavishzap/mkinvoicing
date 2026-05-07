@@ -193,7 +193,10 @@ export type DeliveryListRow = {
   deliveryDate: string | null;
   createdAt: string;
   orderCount: number;
+  /** Sum of `sales_orders.total` for all orders linked to this delivery. */
   totalAmount: number;
+  /** Sum of totals for sales orders with **payment status paid** (cash collected; fulfillment may already be completed). */
+  totalAmountDeliveredToCustomer: number;
 };
 
 export type DeliveryDetailSalesOrder = {
@@ -345,7 +348,7 @@ export async function listDriverTeamMembers(): Promise<TeamMemberRow[]> {
   return all.filter(isDriverRoleTeamMember);
 }
 
-/** Active sales orders with fulfillment **New** or **Rescheduled**, including line items for the picker. */
+/** Active sales orders with fulfillment **New**, **Pending**, or **Rescheduled**, including line items for the picker. */
 export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]> {
   const companyId = await requireActiveCompanyId();
 
@@ -365,7 +368,7 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
     `
     )
     .eq("company_id", companyId)
-    .in("fulfillment_status", ["new", "rescheduled"])
+    .in("fulfillment_status", ["new", "pending", "rescheduled"])
     .eq("status", "active")
     .order("issue_date", { ascending: false })
     .limit(300);
@@ -420,6 +423,91 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
   });
 }
 
+/** Nested shape aligned with `getDelivery` / pinned-order fetch. */
+const SALES_ORDER_ROWS_FOR_DELIVERY_DETAIL = `
+  id,
+  number,
+  currency,
+  total,
+  bill_to_snapshot,
+  fulfillment_status,
+  updated_at,
+  sales_order_items (
+    product_id,
+    item,
+    description,
+    quantity,
+    unit_price,
+    tax_percent,
+    sort_order
+  )
+`;
+
+function deliveryDetailSalesOrderFromSoRecord(
+  so: Record<string, unknown>,
+  linkId: string,
+  salesOrderIdFallback?: string
+): DeliveryDetailSalesOrder {
+  const bill = (so.bill_to_snapshot ?? {}) as Record<string, unknown>;
+  const { clientName, phone, email, addressLines } = billSnapshotToContact(bill);
+  const rawItems = (so.sales_order_items ?? []) as Record<string, unknown>[];
+  const items: DeliveryLineItem[] = [...rawItems]
+    .sort(
+      (a, b) =>
+        Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+    )
+    .map((it) => ({
+      product_id: it.product_id != null ? String(it.product_id) : null,
+      item: String(it.item ?? ""),
+      description: (it.description as string | null) ?? null,
+      quantity: Number(it.quantity ?? 0),
+      unit_price: Number(it.unit_price ?? 0),
+      tax_percent: Number(it.tax_percent ?? 0),
+    }));
+
+  return {
+    linkId,
+    salesOrderId: String(so.id ?? salesOrderIdFallback ?? ""),
+    number: String(so.number ?? ""),
+    currency: String(so.currency ?? "MUR"),
+    total: Number(so.total ?? 0),
+    clientName,
+    phone,
+    email,
+    addressLines,
+    fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
+      so.fulfillment_status as string | null
+    ),
+    updatedAt: so.updated_at != null ? String(so.updated_at) : null,
+    items,
+  };
+}
+
+/** Orders still attributed to this delivery for driver/stock UX when junction rows are gone (e.g. Rescheduled). */
+async function fetchSalesOrdersPinnedToDriverDelivery(
+  companyId: string,
+  deliveryId: string,
+  excludeSalesOrderIds: Set<string>
+): Promise<DeliveryDetailSalesOrder[]> {
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select(SALES_ORDER_ROWS_FOR_DELIVERY_DETAIL)
+    .eq("company_id", companyId)
+    .eq("active_driver_delivery_id", deliveryId)
+    .neq("fulfillment_status", "cancelled");
+
+  if (error) throw new Error(error.message);
+
+  const out: DeliveryDetailSalesOrder[] = [];
+  for (const row of data ?? []) {
+    const rec = row as Record<string, unknown>;
+    const sid = String(rec.id ?? "").trim();
+    if (!sid || excludeSalesOrderIds.has(sid)) continue;
+    out.push(deliveryDetailSalesOrderFromSoRecord(rec, `pinned:${sid}`, sid));
+  }
+  return out.sort((a, b) => a.number.localeCompare(b.number));
+}
+
 export async function listDeliveries(): Promise<DeliveryListRow[]> {
   const companyId = await requireActiveCompanyId();
 
@@ -438,7 +526,7 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       updated_at,
       delivery_sales_orders (
         id,
-        sales_orders ( total )
+        sales_orders ( id, total, fulfillment_status, payment_status )
       )
     `
     )
@@ -455,33 +543,115 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
   ]);
   const names = await profileDisplayMap(userIds);
 
-  return rows.map((r: Record<string, unknown>) => {
+  const partials = rows.map((r: Record<string, unknown>) => {
     const lines = (r.delivery_sales_orders ?? []) as Record<string, unknown>[];
-    const totalAmount = lines.reduce((sum, line) => {
+    const linkedIds = new Set<string>();
+    let totalAmount = 0;
+    let totalAmountDeliveredToCustomer = 0;
+    for (const line of lines) {
       const nested = line.sales_orders;
       const so = (Array.isArray(nested) ? nested[0] : nested) as
         | Record<string, unknown>
         | undefined;
-      return sum + Number(so?.total ?? 0);
-    }, 0);
+      const sid = String(so?.id ?? "").trim();
+      if (sid) linkedIds.add(sid);
+      totalAmount += Number(so?.total ?? 0);
+      if (
+        normalizeSalesOrderPaymentStatus(
+          so?.payment_status as string | null | undefined
+        ) === "paid"
+      ) {
+        totalAmountDeliveredToCustomer += Number(so?.total ?? 0);
+      }
+    }
     const driverId = r.driver_user_id as string;
     const createdId = r.created_by as string;
     return {
-      id: r.id as string,
-      status: normalizeDeliveryNoteStatus(r.status as string | null | undefined),
-      driverStatus: Boolean(r.driver_status),
-      driverUserId: driverId,
-      driverDisplay: names.get(driverId) ?? driverId.slice(0, 8),
-      createdByUserId: createdId,
-      createdByDisplay: names.get(createdId) ?? createdId.slice(0, 8),
-      notes: (r.notes as string | null) ?? null,
-      deliveryDate:
-        r.delivery_date != null && String(r.delivery_date).trim()
-          ? String(r.delivery_date).slice(0, 10)
-          : null,
-      createdAt: String(r.created_at ?? ""),
-      orderCount: lines.length,
+      r,
+      linkedIds,
+      lineCount: lines.length,
       totalAmount,
+      totalAmountDeliveredToCustomer,
+      driverId,
+      createdId,
+    };
+  });
+
+  const deliveryIds = partials.map((p) => p.r.id as string);
+  const pinnedByDelivery = new Map<
+    string,
+    {
+      id: string;
+      total: number;
+      fulfillment_status: string | null;
+      payment_status: string | null;
+    }[]
+  >();
+
+  if (deliveryIds.length > 0) {
+    const { data: pinnedRows, error: pinErr } = await supabase
+      .from("sales_orders")
+      .select(
+        "id, total, fulfillment_status, payment_status, active_driver_delivery_id"
+      )
+      .eq("company_id", companyId)
+      .in("active_driver_delivery_id", deliveryIds)
+      .neq("fulfillment_status", "cancelled");
+
+    if (pinErr) throw new Error(pinErr.message);
+
+    for (const row of pinnedRows ?? []) {
+      const pr = row as {
+        id: string;
+        total: unknown;
+        fulfillment_status: string | null;
+        payment_status: string | null;
+        active_driver_delivery_id: string | null;
+      };
+      const did = pr.active_driver_delivery_id;
+      if (!did) continue;
+      const arr = pinnedByDelivery.get(did) ?? [];
+      arr.push({
+        id: pr.id,
+        total: Number(pr.total ?? 0),
+        fulfillment_status: pr.fulfillment_status,
+        payment_status: pr.payment_status,
+      });
+      pinnedByDelivery.set(did, arr);
+    }
+  }
+
+  return partials.map((p) => {
+    const extras = (pinnedByDelivery.get(p.r.id as string) ?? []).filter(
+      (x) => !p.linkedIds.has(x.id)
+    );
+    let addTotal = 0;
+    let addDelCust = 0;
+    for (const x of extras) {
+      addTotal += x.total;
+      if (normalizeSalesOrderPaymentStatus(x.payment_status) === "paid") {
+        addDelCust += x.total;
+      }
+    }
+
+    return {
+      id: p.r.id as string,
+      status: normalizeDeliveryNoteStatus(p.r.status as string | null | undefined),
+      driverStatus: Boolean(p.r.driver_status),
+      driverUserId: p.driverId,
+      driverDisplay: names.get(p.driverId) ?? p.driverId.slice(0, 8),
+      createdByUserId: p.createdId,
+      createdByDisplay: names.get(p.createdId) ?? p.createdId.slice(0, 8),
+      notes: (p.r.notes as string | null) ?? null,
+      deliveryDate:
+        p.r.delivery_date != null && String(p.r.delivery_date).trim()
+          ? String(p.r.delivery_date).slice(0, 10)
+          : null,
+      createdAt: String(p.r.created_at ?? ""),
+      orderCount: p.lineCount + extras.length,
+      totalAmount: p.totalAmount + addTotal,
+      totalAmountDeliveredToCustomer:
+        p.totalAmountDeliveredToCustomer + addDelCust,
     };
   });
 }
@@ -560,42 +730,21 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
     const so = (
       soRaw && typeof soRaw === "object" ? soRaw : {}
     ) as Record<string, unknown>;
-
-    const bill = (so.bill_to_snapshot ?? {}) as Record<string, unknown>;
-    const { clientName, phone, email, addressLines } = billSnapshotToContact(bill);
-    const rawItems = (so.sales_order_items ?? []) as Record<string, unknown>[];
-    const items: DeliveryLineItem[] = [...rawItems]
-      .sort(
-        (a, b) =>
-          Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-      )
-      .map((it) => ({
-        product_id: it.product_id != null ? String(it.product_id) : null,
-        item: String(it.item ?? ""),
-        description: (it.description as string | null) ?? null,
-        quantity: Number(it.quantity ?? 0),
-        unit_price: Number(it.unit_price ?? 0),
-        tax_percent: Number(it.tax_percent ?? 0),
-      }));
-
-    return {
-      linkId: link.id as string,
-      salesOrderId: String(so.id ?? link.sales_order_id),
-      number: String(so.number ?? ""),
-      currency: String(so.currency ?? "MUR"),
-      total: Number(so.total ?? 0),
-      clientName,
-      phone,
-      email,
-      addressLines,
-      fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
-        so.fulfillment_status as string | null
-      ),
-      updatedAt:
-        so.updated_at != null ? String(so.updated_at) : null,
-      items,
-    };
+    return deliveryDetailSalesOrderFromSoRecord(
+      so,
+      String(link.id ?? ""),
+      String(link.sales_order_id ?? "")
+    );
   });
+
+  const linkedIds = new Set(salesOrders.map((s) => s.salesOrderId));
+  const pinned = await fetchSalesOrdersPinnedToDriverDelivery(
+    companyId,
+    id,
+    linkedIds
+  );
+  salesOrders.push(...pinned);
+  salesOrders.sort((a, b) => a.number.localeCompare(b.number));
 
   return {
     id: d.id as string,
@@ -615,20 +764,38 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
   };
 }
 
+/** Per sales order contribution to a return line (same product may appear on several orders). */
+export type DriverStockReturnLineSalesOrder = {
+  salesOrderId: string;
+  salesOrderNumber: string;
+  salesOrderTotal: number;
+  currency: string;
+  qty: number;
+  fulfillmentStatus: SalesOrderFulfillmentStatus;
+};
+
 export type DriverStockReturnLine = {
   productId: string;
   productName: string;
+  /** Sum of matching line quantities for this product on eligible orders. */
   deliveryQty: number;
+  salesOrders: DriverStockReturnLineSalesOrder[];
 };
-
-export type DriverStockReturnPeriod = "day" | "week";
 
 export type DriverStockReturnContext = {
   lines: DriverStockReturnLine[];
   /** Current quantity at the driver's active stock location per product. */
   availableByProduct: Record<string, number>;
-  period: DriverStockReturnPeriod;
+  /** Inclusive calendar-day lookback from local start of today (`p_days` = 1 is today only). */
+  p_days: number;
 };
+
+/** Fulfillment states whose lines count toward driver stock return preview for this delivery. */
+const DRIVER_STOCK_RETURN_FULFILLMENT = new Set<SalesOrderFulfillmentStatus>([
+  "delivered to driver",
+  "rescheduled",
+  "pending",
+]);
 
 function startOfLocalDay(d = new Date()): Date {
   const x = new Date(d);
@@ -636,21 +803,18 @@ function startOfLocalDay(d = new Date()): Date {
   return x;
 }
 
-/** Monday 00:00:00 local time for the calendar week containing `d`. */
-function startOfLocalWeekMonday(d = new Date()): Date {
-  const x = startOfLocalDay(d);
-  const day = x.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  x.setDate(x.getDate() + diff);
-  return x;
-}
-
-function salesOrderInDriverReturnPeriod(
+/**
+ * Inclusive calendar-day window ending today (local midnight boundary).
+ * `p_days === 1` → orders updated today; `p_days === 7` → today and the prior 6 days.
+ */
+function salesOrderInReturnWindow(
   updatedAtIso: string | null,
-  period: DriverStockReturnPeriod
+  pDays: number
 ): boolean {
-  const start =
-    period === "day" ? startOfLocalDay() : startOfLocalWeekMonday();
+  const days = Math.max(1, Math.min(366, Math.floor(Number(pDays)) || 1));
+  const end = startOfLocalDay();
+  const start = new Date(end);
+  start.setDate(start.getDate() - (days - 1));
   const startMs = start.getTime();
   if (updatedAtIso == null || !String(updatedAtIso).trim()) {
     return true;
@@ -664,30 +828,64 @@ function salesOrderInDriverReturnPeriod(
 
 function aggregateDeliveryProductLines(
   d: DeliveryDetail,
-  opts: { period: DriverStockReturnPeriod }
+  opts: { p_days: number }
 ): DriverStockReturnLine[] {
-  const map = new Map<string, { name: string; qty: number }>();
+  type Agg = {
+    name: string;
+    qty: number;
+    bySo: Map<string, DriverStockReturnLineSalesOrder>;
+  };
+  const map = new Map<string, Agg>();
+  const pDays = opts.p_days;
+
   for (const so of d.salesOrders) {
-    if (so.fulfillmentStatus !== "delivered to driver") continue;
-    if (!salesOrderInDriverReturnPeriod(so.updatedAt, opts.period)) continue;
+    if (!DRIVER_STOCK_RETURN_FULFILLMENT.has(so.fulfillmentStatus)) continue;
+    if (!salesOrderInReturnWindow(so.updatedAt, pDays)) continue;
+
+    const soId = so.salesOrderId;
+    const soNum = so.number;
+    const soTotal = Number(so.total ?? 0);
+    const soCcy = String(so.currency ?? "MUR").trim() || "MUR";
+
     for (const line of so.items) {
       const pid = line.product_id?.trim();
       if (!pid) continue;
       const q = Number(line.quantity ?? 0);
       if (!Number.isFinite(q) || q <= 0) continue;
       const name = String(line.item ?? "").trim() || "Product";
-      const prev = map.get(pid);
-      map.set(pid, {
-        name: prev?.name ?? name,
-        qty: (prev?.qty ?? 0) + q,
-      });
+
+      let agg = map.get(pid);
+      if (!agg) {
+        agg = { name, qty: 0, bySo: new Map() };
+        map.set(pid, agg);
+      }
+      agg.name = agg.name || name;
+      agg.qty += q;
+
+      const prevSeg = agg.bySo.get(soId);
+      if (prevSeg) {
+        prevSeg.qty += q;
+      } else {
+        agg.bySo.set(soId, {
+          salesOrderId: soId,
+          salesOrderNumber: soNum,
+          salesOrderTotal: soTotal,
+          currency: soCcy,
+          qty: q,
+          fulfillmentStatus: so.fulfillmentStatus,
+        });
+      }
     }
   }
+
   return [...map.entries()]
     .map(([productId, v]) => ({
       productId,
       productName: v.name,
       deliveryQty: v.qty,
+      salesOrders: [...v.bySo.values()].sort((a, b) =>
+        a.salesOrderNumber.localeCompare(b.salesOrderNumber)
+      ),
     }))
     .sort((a, b) => a.productName.localeCompare(b.productName));
 }
@@ -722,26 +920,30 @@ async function getDriverLocationStockForProducts(
 }
 
 /**
- * Catalog-linked lines for sales orders still in **Delivered to driver** on this delivery,
- * scoped by calendar **day** or **week** (order `updated_at` vs local start of day / Monday).
+ * Catalog-linked lines for sales orders on this delivery whose fulfillment is
+ * **Delivered to driver**, **Rescheduled**, or **Pending**, scoped by `p_days`
+ * (inclusive calendar days from local start of today backward).
  */
 export async function getDriverStockReturnContext(
   deliveryId: string,
-  opts?: { period?: DriverStockReturnPeriod }
+  opts?: { p_days?: number }
 ): Promise<DriverStockReturnContext> {
-  const period = opts?.period ?? "week";
+  const p_days = Math.max(
+    1,
+    Math.min(366, Math.floor(Number(opts?.p_days ?? 7)) || 7)
+  );
   const d = await getDelivery(deliveryId);
   if (!d) {
-    return { lines: [], availableByProduct: {}, period };
+    return { lines: [], availableByProduct: {}, p_days };
   }
-  const lines = aggregateDeliveryProductLines(d, { period });
+  const lines = aggregateDeliveryProductLines(d, { p_days });
   const companyId = await requireActiveCompanyId();
   const availableByProduct = await getDriverLocationStockForProducts(
     companyId,
     d.driverUserId,
     lines.map((l) => l.productId)
   );
-  return { lines, availableByProduct, period };
+  return { lines, availableByProduct, p_days };
 }
 
 /**
@@ -842,6 +1044,7 @@ export async function advanceDeliveryNoteStatus(
         .update({
           fulfillment_status: "delivered to driver",
           updated_at: now,
+          active_driver_delivery_id: deliveryId,
         })
         .in("id", salesOrderIds)
         .eq("company_id", companyId)
@@ -875,19 +1078,29 @@ export async function advanceDeliveryNoteStatus(
     );
   }
 
-  if (salesOrderIds.length > 0) {
+  const idsForCustomerUpdate = new Set(salesOrderIds);
+  const { data: pinnedForCompletion } = await supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("active_driver_delivery_id", deliveryId)
+    .in("fulfillment_status", ["delivered to driver", "delivery note created"]);
+
+  for (const row of pinnedForCompletion ?? []) {
+    idsForCustomerUpdate.add(String((row as { id: string }).id));
+  }
+
+  if (idsForCustomerUpdate.size > 0) {
     const { error: soErr } = await supabase
       .from("sales_orders")
       .update({
         fulfillment_status: "delivered to customer",
         updated_at: now,
+        active_driver_delivery_id: null,
       })
-      .in("id", salesOrderIds)
+      .in("id", [...idsForCustomerUpdate])
       .eq("company_id", companyId)
-      .in("fulfillment_status", [
-        "delivered to driver",
-        "delivery note created",
-      ]);
+      .in("fulfillment_status", ["delivered to driver", "delivery note created"]);
 
     if (soErr) {
       await supabase
@@ -974,9 +1187,9 @@ export async function createDelivery(
     const fs = normalizeSalesOrderFulfillmentStatus(
       (row as { fulfillment_status?: string | null }).fulfillment_status
     );
-    if (fs !== "new" && fs !== "rescheduled") {
+    if (fs !== "new" && fs !== "pending" && fs !== "rescheduled") {
       throw new Error(
-        "Each sales order must have fulfillment New or Rescheduled.",
+        "Each sales order must have fulfillment New, Pending, or Rescheduled.",
       );
     }
     previousFulfillmentById.set(id, fs);
@@ -1027,7 +1240,7 @@ export async function createDelivery(
     })
     .in("id", ids)
     .eq("company_id", companyId)
-    .in("fulfillment_status", ["new", "rescheduled"])
+    .in("fulfillment_status", ["new", "pending", "rescheduled"])
     .select("id");
 
   if (upErr) {
@@ -1055,7 +1268,7 @@ export async function createDelivery(
     await supabase.from("delivery_sales_orders").delete().eq("delivery_id", deliveryId);
     await supabase.from("deliveries").delete().eq("id", deliveryId);
     throw new Error(
-      "Some sales orders are no longer eligible. They must be active with fulfillment New or Rescheduled."
+      "Some sales orders are no longer eligible. They must be active with fulfillment New, Pending, or Rescheduled."
     );
   }
 

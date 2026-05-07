@@ -35,8 +35,10 @@ import {
   getSalesOrder,
   computeSalesOrderTotals,
   normalizeSalesOrderFulfillmentStatus,
+  salesOrderFulfillmentAllowsEditing,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
+import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { AppPageShell } from "@/components/app-page-shell";
 import { FeatureEmptyState } from "@/components/feature-empty-state";
@@ -123,6 +125,7 @@ export default function SalesOrderViewPage() {
   const [salesOrder, setSalesOrder] = useState<SalesOrderDetail | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deliveryCities, setDeliveryCities] = useState<DeliveryCityRow[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -133,14 +136,21 @@ export default function SalesOrderViewPage() {
 
   useEffect(() => {
     if (!id) return;
-    setProfile(null);
     let cancelled = false;
     (async () => {
+      setLoading(true);
+      setError(null);
+      setSalesOrder(null);
+      setProfile(null);
       try {
-        setLoading(true);
-        setError(null);
-        const q = await getSalesOrder(id, { mode: "view" });
+        const [q, cityRows, prof] = await Promise.all([
+          getSalesOrder(id, { mode: "view" }),
+          listDeliveryCities().catch(() => [] as DeliveryCityRow[]),
+          fetchProfile().catch(() => null),
+        ]);
         if (cancelled) return;
+        setDeliveryCities(cityRows);
+        if (prof) setProfile(prof);
         if (!q) {
           setSalesOrder(null);
           setError("Sales order not found.");
@@ -161,22 +171,6 @@ export default function SalesOrderViewPage() {
     };
   }, [id]);
 
-  useEffect(() => {
-    if (!id || !salesOrder || salesOrder.id !== id) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const prof = await fetchProfile();
-        if (!cancelled) setProfile(prof);
-      } catch {
-        if (!cancelled) setProfile(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [id, salesOrder?.id]);
-
   const orderedItems = useMemo(
     () =>
       salesOrder
@@ -190,9 +184,24 @@ export default function SalesOrderViewPage() {
   const canEditSalesOrder = useMemo(
     () =>
       salesOrder != null &&
-      normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status) === "new",
+      salesOrderFulfillmentAllowsEditing(
+        normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status)
+      ),
     [salesOrder]
   );
+
+  /** Must run before any early return — same hook order every render. */
+  const billCityDisplay = useMemo(() => {
+    if (!salesOrder) return "";
+    const cid = salesOrder.city_id;
+    if (cid && deliveryCities.length > 0) {
+      const n = deliveryCities.find((c) => c.id === cid)?.name;
+      if (n) return n;
+    }
+    const snap = salesOrder.bill_to_snapshot as { city?: string } | undefined;
+    const raw = snap?.city;
+    return raw ? String(raw) : "";
+  }, [salesOrder, deliveryCities]);
 
   if (!loading && !salesOrder) {
     return (
@@ -350,7 +359,8 @@ export default function SalesOrderViewPage() {
                   Use{" "}
                   <span className="font-medium text-foreground">Edit</span> in the
                   top bar to change lines and amounts while fulfillment is{" "}
-                  <span className="font-medium text-foreground">New</span>.
+                  <span className="font-medium text-foreground">New</span> or{" "}
+                  <span className="font-medium text-foreground">Pending</span>.
                 </>
               ) : (
                 <>View-only summary.</>
@@ -398,17 +408,17 @@ export default function SalesOrderViewPage() {
               {bill?.email ? <InfoRow label="Email">{bill.email}</InfoRow> : null}
               {bill?.phone ? <InfoRow label="Phone">{bill.phone}</InfoRow> : null}
               {(bill?.street ||
-                bill?.city ||
+                billCityDisplay ||
                 bill?.postal ||
                 bill?.country) && (
                 <InfoRow label="Address">
                   <span className="block font-normal leading-relaxed">
                     {bill?.street ? <>{bill.street}</> : null}
-                    {bill?.street && (bill?.city || bill?.postal) ? <br /> : null}
-                    {[bill?.city, bill?.postal].filter(Boolean).join(", ")}
+                    {bill?.street && (billCityDisplay || bill?.postal) ? <br /> : null}
+                    {[billCityDisplay, bill?.postal].filter(Boolean).join(", ")}
                     {bill?.country ? (
                       <>
-                        {(bill?.city || bill?.postal) ? <br /> : null}
+                        {(billCityDisplay || bill?.postal) ? <br /> : null}
                         {bill.country}
                       </>
                     ) : null}

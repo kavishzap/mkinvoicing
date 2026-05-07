@@ -53,6 +53,7 @@ import {
   expireStaleSalesOrders,
   getSalesOrderKpiCounts,
   updateSalesOrderPaymentStatus,
+  salesOrderFulfillmentAllowsEditing,
   SALES_ORDER_FULFILLMENT_LABELS,
   type SalesOrderListRow,
   type SalesOrderStatus,
@@ -230,15 +231,16 @@ export default function SalesOrdersPage() {
       }
 
       try {
-        await expireStaleSalesOrders();
-        const kpis = await getSalesOrderKpiCounts();
-        if (!cancelled) {
-          setFacets({
-            companyTotal: kpis.total,
-            activeCount: kpis.active,
-            expiredCount: kpis.expired,
-          });
-        }
+        const [, kpis] = await Promise.all([
+          expireStaleSalesOrders(),
+          getSalesOrderKpiCounts(),
+        ]);
+        if (cancelled) return;
+        setFacets({
+          companyTotal: kpis.total,
+          activeCount: kpis.active,
+          expiredCount: kpis.expired,
+        });
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
@@ -332,8 +334,8 @@ export default function SalesOrdersPage() {
     const gen = listRequestGen.current;
     setListLoading(true);
     try {
-      await expireStaleSalesOrders();
-      const [kpis, listRes] = await Promise.all([
+      const [, kpis, listRes] = await Promise.all([
+        expireStaleSalesOrders(),
         getSalesOrderKpiCounts(),
         listSalesOrders({
           search: debouncedSearch || undefined,
@@ -447,6 +449,28 @@ export default function SalesOrdersPage() {
         meta: { tdClassName: "text-muted-foreground" },
       },
       {
+        id: "city",
+        accessorFn: (r) => r.cityName ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="City" />
+        ),
+        cell: ({ row }) => row.original.cityName || "—",
+        meta: { tdClassName: "text-muted-foreground" },
+      },
+      {
+        id: "createdAt",
+        accessorFn: (r) =>
+          r.createdAt ? new Date(r.createdAt).getTime() : 0,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Created" />
+        ),
+        cell: ({ row }) =>
+          row.original.createdAt
+            ? formatDate(row.original.createdAt)
+            : "—",
+        meta: { tdClassName: "text-muted-foreground" },
+      },
+      {
         id: "issueDate",
         accessorFn: (r) => new Date(r.issueDate).getTime(),
         header: ({ column }) => (
@@ -551,7 +575,7 @@ export default function SalesOrdersPage() {
                   <Eye className="mr-2 h-4 w-4" />
                   View
                 </DropdownMenuItem>
-                {so.fulfillmentStatus === "new" ? (
+                {salesOrderFulfillmentAllowsEditing(so.fulfillmentStatus) ? (
                   <DropdownMenuItem
                     onClick={() =>
                       router.push(`/app/sales-orders/${so.id}/edit`)

@@ -1,18 +1,29 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState } from "react";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Plus, Eye, MoreHorizontal, Copy, FileText } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import type { LucideIcon } from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Ban,
+  Calendar,
+  CalendarClock,
+  CalendarDays,
+  CalendarRange,
+  Check,
+  Copy,
+  Eye,
+  FileText,
+  MoreHorizontal,
+  Plus,
+  Search,
+  SlidersVertical,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,131 +32,354 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
+import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
+import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
-import { InvoiceTableSkeleton } from "@/components/invoice-table-skeleton";
 import { useToast } from "@/hooks/use-toast";
-
 import {
   listInvoices,
+  fetchInvoiceListFacets,
   type InvoiceListRow,
+  type InvoiceListFacets,
   type InvoiceStatus,
 } from "@/lib/invoices-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
+import { cn } from "@/lib/utils";
+
+type PeriodFilter = "all" | "month" | "quarter" | "year";
+
+function InvoicesFilterSidebar({
+  id,
+  facets,
+  statusFilter,
+  onStatusChange,
+  periodFilter,
+  onPeriodChange,
+}: {
+  id?: string;
+  facets: InvoiceListFacets;
+  statusFilter: InvoiceStatus | "all";
+  onStatusChange: (v: InvoiceStatus | "all") => void;
+  periodFilter: PeriodFilter;
+  onPeriodChange: (v: PeriodFilter) => void;
+}) {
+  const statusRows: {
+    id: InvoiceStatus | "all";
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All invoices",
+      icon: FileText,
+      count: facets.companyTotal,
+    },
+    {
+      id: "unpaid",
+      label: "Unpaid",
+      icon: CalendarDays,
+      count: facets.unpaidCount,
+    },
+    {
+      id: "paid",
+      label: "Paid",
+      icon: Check,
+      count: facets.paidCount,
+    },
+    {
+      id: "cancelled",
+      label: "Cancelled",
+      icon: Ban,
+      count: facets.cancelledCount,
+    },
+  ];
+
+  const periodRows: {
+    id: PeriodFilter;
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All time",
+      icon: Calendar,
+      count: facets.companyTotal,
+    },
+    {
+      id: "month",
+      label: "This month",
+      icon: CalendarDays,
+      count: facets.thisMonthCount,
+    },
+    {
+      id: "quarter",
+      label: "This quarter",
+      icon: CalendarRange,
+      count: facets.thisQuarterCount,
+    },
+    {
+      id: "year",
+      label: "This year",
+      icon: CalendarClock,
+      count: facets.thisYearCount,
+    },
+  ];
+
+  const rowBtn =
+    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors leading-snug";
+
+  return (
+    <aside id={id} className="w-full shrink-0 lg:self-stretch">
+      <div className="space-y-7 py-1">
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By status
+          </h3>
+          <nav className="flex flex-col gap-px" aria-label="Filter by status">
+            {statusRows.map((item) => {
+              const Icon = item.icon;
+              const selected = statusFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onStatusChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By issue period
+          </h3>
+          <nav className="flex flex-col gap-px" aria-label="Filter by issue period">
+            {periodRows.map((item) => {
+              const Icon = item.icon;
+              const selected = periodFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onPeriodChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+      </div>
+    </aside>
+  );
+}
 
 export default function InvoicesPage() {
   const router = useRouter();
   const { toast } = useToast();
 
-  // table data
+  const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [rows, setRows] = useState<InvoiceListRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [facets, setFacets] = useState<InvoiceListFacets | null>(null);
 
-  // ui state
-  const [isLoading, setIsLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("all");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">(
-    "all"
-  );
-  const [periodFilter, setPeriodFilter] = useState<
-    "all" | "month" | "quarter" | "year"
-  >("all");
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  // ✅ detect if any filters/search are active
-  const hasActiveFilters = useMemo(
-    () =>
-      searchQuery.trim() !== "" ||
-      statusFilter !== "all" ||
-      periodFilter !== "all",
-    [searchQuery, statusFilter, periodFilter]
-  );
-  const currencyForSummary = useMemo(() => rows[0]?.currency ?? "USD", [rows]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-  const totalPaidAmount = useMemo(() => {
-    return rows
-      .filter((r) => r.status === "paid")
-      .reduce((acc, r) => acc + Number(r.total || 0), 0);
-  }, [rows]);
+  const [facetsLoading, setFacetsLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
 
-  const totalOverdueAmount = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return rows
-      .filter((r) => r.status !== "paid" && r.status !== "cancelled")
-      .reduce((acc, r) => acc + Number(r.total || 0), 0);
-  }, [rows]);
-  async function load() {
-    setIsLoading(true);
-    const { rows, total } = await listInvoices({
-      search: searchQuery,
-      status: statusFilter,
-      period: periodFilter,
-      page: currentPage,
-      pageSize: itemsPerPage,
-      sortBy: "issueDate",
-      sort: "desc",
-    });
-    setRows(rows);
-    setTotal(total);
-    setIsLoading(false);
-  }
+  const listRequestGen = useRef(0);
+  const prevListDepsRef = useRef({
+    debouncedSearch: "",
+    statusFilter: "all" as InvoiceStatus | "all",
+    periodFilter: "all" as PeriodFilter,
+    pageSize: 10,
+    activeCompanyScope: 0,
+  });
 
-  // load data
+  const [activeCompanyScope, setActiveCompanyScope] = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 220);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const bump = () => setActiveCompanyScope((n) => n + 1);
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
+      setFacetsLoading(true);
+      const id = await getActiveCompanyId();
+      if (cancelled) return;
+
+      setCompanyReady(!!id);
+      if (!id) {
+        setRows([]);
+        setTotal(0);
+        setFacets(null);
+        setFacetsLoading(false);
+        return;
+      }
+
       try {
-        setIsLoading(true);
-        const { rows, total } = await listInvoices({
-          search: searchQuery,
-          status: statusFilter,
-          period: periodFilter,
-          page: currentPage,
-          pageSize: itemsPerPage,
-        });
+        const facetData = await fetchInvoiceListFacets();
+        if (!cancelled) setFacets(facetData);
+      } catch (e: unknown) {
         if (!cancelled) {
-          setRows(rows);
-          setTotal(total);
-        }
-      } catch (e: any) {
-        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : "Please try again.";
           toast({
-            title: "Failed to load invoices",
-            description: e?.message ?? "Please try again.",
+            title: "Failed to load filters",
+            description: msg,
             variant: "destructive",
           });
+          setFacets(null);
         }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) setFacetsLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
+  }, [activeCompanyScope]);
+
+  useEffect(() => {
+    if (companyReady !== true) return;
+
+    const prev = prevListDepsRef.current;
+    const depsChanged =
+      prev.debouncedSearch !== debouncedSearch ||
+      prev.statusFilter !== statusFilter ||
+      prev.periodFilter !== periodFilter ||
+      prev.pageSize !== pageSize ||
+      prev.activeCompanyScope !== activeCompanyScope;
+
+    if (depsChanged && page !== 1) {
+      setPage(1);
+      return;
+    }
+
+    prevListDepsRef.current = {
+      debouncedSearch,
+      statusFilter,
+      periodFilter,
+      pageSize,
+      activeCompanyScope,
+    };
+
+    const gen = ++listRequestGen.current;
+    let cancelled = false;
+
+    (async () => {
+      setListLoading(true);
+      try {
+        const listRes = await listInvoices({
+          search: debouncedSearch || undefined,
+          status: statusFilter,
+          period: periodFilter,
+          page,
+          pageSize,
+          sortBy: "issueDate",
+          sort: "desc",
+        });
+        if (cancelled || gen !== listRequestGen.current) return;
+        setRows(listRes.rows);
+        setTotal(listRes.total);
+      } catch (e: unknown) {
+        if (cancelled || gen !== listRequestGen.current) return;
+        toast({
+          title: "Failed to load invoices",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        if (!cancelled && gen === listRequestGen.current) {
+          setListLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
   }, [
-    searchQuery,
+    companyReady,
+    debouncedSearch,
     statusFilter,
     periodFilter,
-    currentPage,
-    itemsPerPage,
-    toast,
+    page,
+    pageSize,
+    activeCompanyScope,
   ]);
 
-  // reset to page 1 when filters/search/page-size change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, periodFilter, itemsPerPage]);
-
-  const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(total / itemsPerPage)),
-    [total, itemsPerPage]
-  );
-
   const formatCurrency = (amount: number, currency: string) =>
-    new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
-      amount
-    );
+    new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
 
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString("en-GB", {
@@ -167,7 +401,7 @@ export default function InvoicesPage() {
             [row.number, row.clientName].join(" "),
         },
         cell: ({ row }) => (
-          <span className="font-medium">{row.original.number}</span>
+          <span className="font-semibold text-foreground">{row.original.number}</span>
         ),
       },
       {
@@ -178,17 +412,19 @@ export default function InvoicesPage() {
         ),
         meta: {
           searchValue: (row: InvoiceListRow) => row.clientName,
+          tdClassName: "text-muted-foreground",
         },
-        cell: ({ row }) => row.original.clientName,
+        cell: ({ row }) => row.original.clientName || "—",
       },
       {
         id: "issueDate",
         accessorFn: (r) => new Date(r.issueDate).getTime(),
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Issue Date" />
+          <DataTableColumnHeader column={column} title="Issue date" />
         ),
         meta: {
           searchValue: (row: InvoiceListRow) => row.issueDate,
+          tdClassName: "text-muted-foreground",
         },
         cell: ({ row }) => formatDate(row.original.issueDate),
       },
@@ -196,10 +432,11 @@ export default function InvoicesPage() {
         id: "dueDate",
         accessorFn: (r) => new Date(r.dueDate).getTime(),
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Due Date" />
+          <DataTableColumnHeader column={column} title="Due date" />
         ),
         meta: {
           searchValue: (row: InvoiceListRow) => row.dueDate,
+          tdClassName: "text-muted-foreground",
         },
         cell: ({ row }) => formatDate(row.original.dueDate),
       },
@@ -229,7 +466,7 @@ export default function InvoicesPage() {
         ),
         meta: {
           thClassName: "text-right",
-          tdClassName: "text-right font-medium",
+          tdClassName: "text-right font-medium tabular-nums",
           searchValue: (row: InvoiceListRow) =>
             String(row.total) + " " + row.currency,
         },
@@ -239,27 +476,29 @@ export default function InvoicesPage() {
       {
         id: "actions",
         enableSorting: false,
-        header: () => (
-          <span className="sr-only">Actions</span>
-        ),
+        header: () => <span className="sr-only">Actions</span>,
         meta: {
           searchable: false,
-          thClassName: "w-[120px] text-right",
+          stopRowClick: true,
+          thClassName: "w-[52px] text-right",
           tdClassName: "text-right",
         },
         cell: ({ row }) => (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Open menu"
+              >
                 <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">Open menu</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
               <DropdownMenuItem
-                onClick={() =>
-                  router.push(`/app/invoices/${row.original.id}`)
-                }
+                onClick={() => router.push(`/app/invoices/${row.original.id}`)}
               >
                 <Eye className="mr-2 h-4 w-4" />
                 View
@@ -267,7 +506,7 @@ export default function InvoicesPage() {
               <DropdownMenuItem
                 onClick={() =>
                   router.push(
-                    `/app/invoices/new?duplicateFrom=${encodeURIComponent(row.original.id)}`
+                    `/app/invoices/new?duplicateFrom=${encodeURIComponent(row.original.id)}`,
                   )
                 }
               >
@@ -282,183 +521,215 @@ export default function InvoicesPage() {
     [router],
   );
 
-  const invoiceSubtitle =
-    "Bill customers and stay on top of what’s paid, pending, or overdue.";
+  const hasActiveFilters = useMemo(
+    () =>
+      debouncedSearch !== "" ||
+      statusFilter !== "all" ||
+      periodFilter !== "all",
+    [debouncedSearch, statusFilter, periodFilter],
+  );
 
-  // UI skeletons/empty
-  if (isLoading && rows.length === 0) {
-    return (
-      <AppPageShell
-        subtitle={invoiceSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/invoices/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Invoice
-          </Button>
-        }
-      >
-        <Card className="p-6">
-          <InvoiceTableSkeleton />
-        </Card>
-      </AppPageShell>
-    );
-  }
+  const listRangeLabel = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const from = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+    const to = Math.min(safePage * pageSize, total);
+    if (total === 0) return "0–0 of 0";
+    return `${from}–${to} of ${total}`;
+  }, [total, page, pageSize]);
+
+  const showSkeleton =
+    companyReady !== false &&
+    rows.length === 0 &&
+    facets === null &&
+    (companyReady === null || facetsLoading);
+
+  const showDirectory = companyReady === true && facets !== null && !showSkeleton;
 
   return (
     <AppPageShell
-      subtitle={invoiceSubtitle}
+      fillHeight
+      compact
+      className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button
-          onClick={() => router.push("/app/invoices/new")}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Create Invoice
+        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+          <Link href="/app/invoices/new">
+            <Plus className="h-4 w-4" />
+            Create invoice
+          </Link>
         </Button>
       }
+      topbarTrailingBeforeTheme={
+        showDirectory ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-9 w-9 shrink-0 text-muted-foreground",
+              filtersOpen && "bg-primary/15 text-primary",
+            )}
+            aria-label={filtersOpen ? "Hide invoice filters" : "Show invoice filters"}
+            aria-expanded={filtersOpen}
+            aria-controls="invoices-filter-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersVertical className="h-4 w-4" aria-hidden />
+          </Button>
+        ) : null
+      }
     >
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card className="p-5">
-          <div className="text-sm text-muted-foreground">Total Paid</div>
-          <div className="mt-1 text-xl font-bold">
-            {formatCurrency(totalPaidAmount, currencyForSummary)}
-          </div>
+      {companyReady === false && (
+        <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
+          <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
+            No active company is linked to this account yet. Create or join a company in
+            Supabase (company_users / companies) so invoices can be saved against{" "}
+            <code className="rounded bg-amber-100/80 px-1 py-0.5 text-xs dark:bg-amber-900/60">
+              company_id
+            </code>
+            .
+          </CardContent>
         </Card>
+      )}
 
-        <Card className="p-5">
-          <div className="text-sm text-muted-foreground">Total Overdue</div>
-          <div className="mt-1 text-xl font-bold">
-            {formatCurrency(totalOverdueAmount, currencyForSummary)}
-          </div>
-        </Card>
-      </div>
+      {showSkeleton ? (
+        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+      ) : null}
 
-      <Card className="p-6">
-        <DataTable
-          columns={columns}
-          data={rows}
-          manualFiltering
-          onRowClick={(r) => router.push(`/app/invoices/${r.id}`)}
-          searchPlaceholder="Search by invoice # or client…"
-          searchValue={searchQuery}
-          onSearchChange={setSearchQuery}
-          toolbarLeft={
-            <Select
-              value={statusFilter}
-              onValueChange={(v) =>
-                setStatusFilter(v as InvoiceStatus | "all")
-              }
-            >
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="unpaid">Unpaid</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-          }
-          getRowId={(r) => r.id}
-          emptyMessage={
-            hasActiveFilters ? (
-              <div className="flex flex-col items-center gap-3 py-4">
-                <div>No invoices match your current filters.</div>
-                <div className="text-xs text-muted-foreground">
-                  Try adjusting search or status.
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearchQuery("");
-                    setStatusFilter("all");
-                    setPeriodFilter("all");
-                  }}
-                >
-                  Clear filters
-                </Button>
-              </div>
-            ) : total === 0 ? (
-              <div className="flex max-w-md flex-col items-center gap-4 py-8 text-center">
-                <div className="rounded-full bg-muted p-4">
-                  <FileText className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <div>
-                  <p className="font-semibold text-foreground">No invoices yet</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Create your first invoice to get started with managing your billing.
-                  </p>
-                </div>
-                <Button
-                  onClick={() => router.push("/app/invoices/new")}
-                  className="gap-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  Create your first invoice
-                </Button>
-              </div>
-            ) : (
-              <div className="py-6 text-sm text-muted-foreground">
-                No invoices on this page.
-              </div>
-            )
-          }
-          footer={
-            <div className="flex flex-col gap-4 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
-                  Rows per page:
-                </span>
-                <Select
-                  value={String(itemsPerPage)}
-                  onValueChange={(v) => setItemsPerPage(Number(v))}
-                >
-                  <SelectTrigger className="w-[70px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="25">25</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <div className="flex gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setCurrentPage((p) => Math.min(totalPages, p + 1))
-                    }
-                    disabled={currentPage >= totalPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
+      {showDirectory ? (
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
+            filtersOpen ? "gap-6" : "gap-0",
+          )}
+        >
+          <div
+            id="invoices-filter-panel"
+            className={cn(
+              "shrink-0 overflow-hidden",
+              "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+              "motion-reduce:transition-none motion-reduce:duration-0",
+              filtersOpen
+                ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
+                : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
+            )}
+            aria-hidden={!filtersOpen}
+          >
+            <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
+              <InvoicesFilterSidebar
+                facets={facets}
+                statusFilter={statusFilter}
+                onStatusChange={(v) => {
+                  setPage(1);
+                  setStatusFilter(v);
+                }}
+                periodFilter={periodFilter}
+                onPeriodChange={(v) => {
+                  setPage(1);
+                  setPeriodFilter(v);
+                }}
+              />
             </div>
-          }
-        />
-      </Card>
+          </div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50">
+            <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
+              <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                  aria-hidden
+                />
+                <Input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by invoice # or client…"
+                  className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                  aria-label="Search invoices"
+                  autoComplete="off"
+                />
+              </div>
+              <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
+                {listRangeLabel}
+              </p>
+            </div>
+            <div
+              className={cn(
+                "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
+                listLoading &&
+                  "pointer-events-none opacity-[0.58] motion-reduce:transition-none",
+              )}
+              aria-busy={listLoading}
+            >
+              <DataTable
+                className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-0 bg-transparent shadow-none"
+                tableContainerClassName="min-h-0 flex-1 overflow-auto"
+                variant="minimal"
+                columns={columns}
+                data={rows}
+                manualFiltering
+                hideSearch
+                onRowClick={(r) => router.push(`/app/invoices/${r.id}`)}
+                getRowId={(r) => r.id}
+                emptyMessage={
+                  hasActiveFilters ? (
+                    <FeatureEmptyState
+                      title="No invoices match your filters"
+                      description="Try clearing search or adjusting filters."
+                      action={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setPage(1);
+                            setSearchQuery("");
+                            setStatusFilter("all");
+                            setPeriodFilter("all");
+                          }}
+                        >
+                          Clear filters
+                        </Button>
+                      }
+                      className="border-0 bg-transparent py-8"
+                    />
+                  ) : facets.companyTotal === 0 ? (
+                    <FeatureEmptyState
+                      icon={FileText}
+                      title="No invoices yet"
+                      description="Create your first invoice to start billing customers."
+                      action={
+                        <Button className="gap-2" asChild>
+                          <Link href="/app/invoices/new">
+                            <Plus className="h-4 w-4" />
+                            Create invoice
+                          </Link>
+                        </Button>
+                      }
+                      className="border-0 bg-transparent py-8"
+                    />
+                  ) : (
+                    <FeatureEmptyState
+                      title="No invoices on this page"
+                      description="Try another page."
+                      className="border-0 bg-transparent py-8"
+                    />
+                  )
+                }
+                footer={
+                  <DataTablePaginationFooter
+                    variant="minimal"
+                    total={total}
+                    page={page}
+                    pageSize={pageSize}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                    pageSizeOptions={[10, 25, 50]}
+                  />
+                }
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppPageShell>
   );
 }

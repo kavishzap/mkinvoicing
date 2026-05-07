@@ -89,18 +89,31 @@ export default function InvoiceViewPage() {
 
   if (!loading && !invoice) {
     return (
-      <AppPageShell>
-        <Card>
-          <CardContent className="py-16 text-center">
-            <h2 className="text-xl font-semibold mb-2">Invoice not found</h2>
-            <p className="text-muted-foreground mb-6">
-              {error ?? "The invoice you're looking for doesn't exist."}
-            </p>
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+        titleBefore={
+          <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
             <Link href="/app/invoices">
-              <Button>Back to Invoices</Button>
+              <ArrowLeft className="h-4 w-4" />
             </Link>
-          </CardContent>
-        </Card>
+          </Button>
+        }
+        subtitle="We couldn’t find that invoice."
+      >
+        <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
+            <h2 className="text-xl font-semibold">Invoice not found</h2>
+            {error ? (
+              <p className="mt-2 max-w-md text-sm text-muted-foreground">
+                {error}
+              </p>
+            ) : null}
+            <Button asChild className="mt-6">
+              <Link href="/app/invoices">Back to invoices</Link>
+            </Button>
+          </div>
+        </div>
       </AppPageShell>
     );
   }
@@ -108,9 +121,22 @@ export default function InvoiceViewPage() {
   // Skeleton depends only on invoice, not profile (prevents deadlock)
   if (loading || !invoice) {
     return (
-      <AppPageShell className="max-w-7xl">
-        <div className="h-8 w-64 rounded bg-muted animate-pulse" />
-        <div className="mt-4 h-96 rounded bg-muted animate-pulse" />
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+        titleBefore={
+          <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
+            <Link href="/app/invoices">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+        }
+        subtitle="Loading invoice…"
+      >
+        <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+          <div className="mt-6 h-96 flex-1 animate-pulse rounded-lg bg-muted" />
+        </div>
       </AppPageShell>
     );
   }
@@ -151,13 +177,14 @@ export default function InvoiceViewPage() {
 
   return (
     <AppPageShell
-      className="max-w-7xl"
-      leading={
-        <Link href="/app/invoices">
-          <Button variant="ghost" size="icon" aria-label="Back to invoices">
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      titleBefore={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
+          <Link href="/app/invoices">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       }
       subtitle={`${invoice.number}${billName ? ` · ${billName}` : ""} — Review lines and totals below.`}
       belowSubtitle={
@@ -184,11 +211,10 @@ export default function InvoiceViewPage() {
         />
       }
     >
-      <div>
-        {/* Invoice Content */}
-        <div className="lg:col-span-2 space-y-6">
-          <Card className="shadow-lg">
-            <CardContent className="space-y-6 p-6 sm:p-7 sm:space-y-8">
+      <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        <div className="min-h-0 flex-1 space-y-6 sm:space-y-8">
+          <Card className="border-0 shadow-none">
+            <CardContent className="space-y-6 p-0 sm:space-y-8">
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div>

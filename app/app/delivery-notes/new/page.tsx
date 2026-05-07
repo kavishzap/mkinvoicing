@@ -263,7 +263,8 @@ export default function NewDeliveryPage() {
     if (selected.size === 0) {
       toast({
         title: "Select sales orders",
-        description: "Pick at least one order with fulfillment New or Rescheduled.",
+        description:
+          "Pick at least one order with fulfillment New, Pending, or Rescheduled.",
         variant: "destructive",
       });
       return;
@@ -305,7 +306,7 @@ export default function NewDeliveryPage() {
 
   return (
     <AppPageShell
-      subtitle="Pick active sales orders with fulfillment New or Rescheduled and assign a driver from your team."
+      subtitle="Pick active sales orders with fulfillment New, Pending, or Rescheduled and assign a driver from your team."
       leading={
         <Link href="/app/delivery-notes">
           <Button variant="ghost" size="icon" aria-label="Back to delivery notes">
@@ -393,15 +394,17 @@ export default function NewDeliveryPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Sales orders (New / Rescheduled)</CardTitle>
+            <CardTitle className="text-base">
+              Sales orders (New / Pending / Rescheduled)
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0 sm:p-2">
             {loading ? (
               <div className="p-6 text-sm text-muted-foreground">Loading orders…</div>
             ) : orders.length === 0 ? (
               <div className="p-6 text-sm text-muted-foreground">
-                No eligible sales orders. Orders must be active with fulfillment New or
-                Rescheduled (for example, not already on a delivery note).
+                No eligible sales orders. Orders must be active with fulfillment New,
+                Pending, or Rescheduled (for example, not already on a delivery note).
               </div>
             ) : zoneLoading && driverId.trim() && resolvedZoneFilter === undefined ? (
               <div className="p-6 text-sm text-muted-foreground">

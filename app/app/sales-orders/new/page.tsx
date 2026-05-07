@@ -65,6 +65,7 @@ import {
   buildFromSnapshotForSalesOrder,
   buildBillToSnapshot,
   clientInfoFromBillSnapshot,
+  cityIdFromDeliveryCityName,
   type SalesOrderLinePayload,
   type SalesOrderStatus,
   type SalesOrderFulfillmentStatus,
@@ -340,26 +341,26 @@ function NewSalesOrderPageContent() {
         setNotes(prefs.defaultNotes || "");
         setTerms(prefs.defaultTerms || "");
 
-        const { rows } = await listCustomers({
-          search: "",
-          includeInactive: false,
-          page: 1,
-          pageSize: 100,
-        });
+        const [{ rows }, prodRes, cityRows] = await Promise.all([
+          listCustomers({
+            search: "",
+            includeInactive: false,
+            page: 1,
+            pageSize: 100,
+          }),
+          listProducts({
+            search: "",
+            includeInactive: false,
+            page: 1,
+            pageSize: 400,
+            onlyWithPositiveStock: true,
+          }),
+          listDeliveryCities(),
+        ]);
         if (cancelled) return;
         setCustomers(rows);
-
-        const { rows: productRows } = await listProducts({
-          search: "",
-          includeInactive: false,
-          page: 1,
-          pageSize: 400,
-          onlyWithPositiveStock: true,
-        });
-        if (!cancelled) setProducts(productRows);
-
-        const cityRows = await listDeliveryCities();
-        if (!cancelled) setCities(cityRows);
+        setProducts(prodRes.rows);
+        setCities(cityRows);
 
         if (convertFromQuotationId && !convertHandledRef.current) {
           convertHandledRef.current = true;
@@ -429,6 +430,10 @@ function NewSalesOrderPageContent() {
           if (cancelled) return;
           if (q) {
             const ci = clientInfoFromBillSnapshot(q.bill_to_snapshot);
+            const cityFromCatalog =
+              q.city_id && cityRows.length > 0
+                ? cityRows.find((c) => c.id === q.city_id)?.name
+                : undefined;
             setClientInfo({
               type: ci.type,
               companyName: ci.companyName,
@@ -437,7 +442,7 @@ function NewSalesOrderPageContent() {
               email: ci.email,
               phone: ci.phone,
               street: ci.street,
-              city: ci.city,
+              city: cityFromCatalog ?? ci.city,
               postal: ci.postal,
               country: ci.country,
               address_line_1: ci.address_line_1,
@@ -734,7 +739,7 @@ function NewSalesOrderPageContent() {
         notes,
         terms,
         customer_id: selectedCustomer ? selectedCustomer.id : null,
-        city_id: selectedCustomer?.cityId ?? null,
+        city_id: cityIdFromDeliveryCityName(clientInfo.city, cities),
         client_snapshot: clientSnapshot,
         from_snapshot: fromSnap,
         bill_to_snapshot: billSnap,
@@ -869,6 +874,9 @@ function NewSalesOrderPageContent() {
                               cityName:
                                 cities.find((c) => c.name === nextCity)?.name ??
                                 prev.cityName,
+                              cityId:
+                                cities.find((c) => c.name === nextCity)?.id ??
+                                null,
                             }
                           : prev
                       );

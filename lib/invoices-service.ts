@@ -275,6 +275,87 @@ function nameFromBillTo(bill?: any) {
 type SortByKey = "issueDate" | "number" | "dueDate" | "created_at";
 type SortDir = "asc" | "desc";
 
+/** Counts for invoice directory sidebars (independent of current list filters). */
+export type InvoiceListFacets = {
+  companyTotal: number;
+  unpaidCount: number;
+  paidCount: number;
+  cancelledCount: number;
+  thisMonthCount: number;
+  thisQuarterCount: number;
+  thisYearCount: number;
+};
+
+function invoiceFacetPeriodStarts(): {
+  month: string;
+  quarter: string;
+  year: string;
+} {
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const quarterStart = new Date(today);
+  quarterStart.setMonth(today.getMonth() - 2);
+  quarterStart.setDate(1);
+  const yearStart = new Date(today.getFullYear(), 0, 1);
+  return {
+    month: monthStart.toISOString().slice(0, 10),
+    quarter: quarterStart.toISOString().slice(0, 10),
+    year: yearStart.toISOString().slice(0, 10),
+  };
+}
+
+/**
+ * Parallel head counts for the invoice list filter sidebars.
+ * Uses the same `company_id` / null-or rule as {@link listInvoices}.
+ */
+export async function fetchInvoiceListFacets(): Promise<InvoiceListFacets> {
+  const companyId = await requireActiveCompanyId();
+  const baseOr = `company_id.eq.${companyId},company_id.is.null`;
+  const period = invoiceFacetPeriodStarts();
+
+  const head = () =>
+    supabase
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .or(baseOr);
+
+  const countOf = async (
+    builder: ReturnType<typeof head>,
+  ): Promise<number> => {
+    const { count, error } = await builder;
+    if (error) throw error;
+    return count ?? 0;
+  };
+
+  const [
+    companyTotal,
+    unpaidCount,
+    paidCount,
+    cancelledCount,
+    thisMonthCount,
+    thisQuarterCount,
+    thisYearCount,
+  ] = await Promise.all([
+    countOf(head()),
+    countOf(head().eq("status", "unpaid")),
+    countOf(head().eq("status", "paid")),
+    countOf(head().eq("status", "cancelled")),
+    countOf(head().gte("issue_date", period.month)),
+    countOf(head().gte("issue_date", period.quarter)),
+    countOf(head().gte("issue_date", period.year)),
+  ]);
+
+  return {
+    companyTotal,
+    unpaidCount,
+    paidCount,
+    cancelledCount,
+    thisMonthCount,
+    thisQuarterCount,
+    thisYearCount,
+  };
+}
+
 export async function listInvoices(opts?: {
   search?: string;
   status?: InvoiceStatus | "all";

@@ -2069,6 +2069,7 @@ export type Database = {
           client_snapshot: Json | null
           company_id: string
           created_at: string
+          active_driver_delivery_id: string | null
           created_from_quotation_id: string | null
           currency: string
           customer_id: string | null
@@ -2094,6 +2095,7 @@ export type Database = {
         }
         Insert: {
           bill_to_snapshot: Json
+          active_driver_delivery_id?: string | null
           client_snapshot?: Json | null
           company_id: string
           created_at?: string
@@ -2122,6 +2124,7 @@ export type Database = {
         }
         Update: {
           bill_to_snapshot?: Json
+          active_driver_delivery_id?: string | null
           client_snapshot?: Json | null
           company_id?: string
           created_at?: string
@@ -3005,6 +3008,7 @@ export type Database = {
         | "active"
       sales_order_fulfillment_status:
         | "new"
+        | "pending"
         | "delivered to driver"
         | "delivered to customer"
         | "completed"
@@ -3180,6 +3184,7 @@ export const Constants = {
       ],
       sales_order_fulfillment_status: [
         "new",
+        "pending",
         "delivered to driver",
         "delivered to customer",
         "completed",

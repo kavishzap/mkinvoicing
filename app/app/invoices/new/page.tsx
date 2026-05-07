@@ -7,10 +7,23 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2, UserPlus } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  CircleDollarSign,
+  FileText,
+  ListOrdered,
+  Plus,
+  Save,
+  Trash2,
+  UserPlus,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,12 +79,44 @@ import {
   type SalesOrderDetail,
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
-import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { AppPageShell } from "@/components/app-page-shell";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 
 const DEFAULT_TAX_PERCENT = 15;
+
+const fieldLabelClass =
+  "text-xs font-medium text-neutral-600 dark:text-neutral-400";
+const sectionTitleClass =
+  "text-sm font-semibold leading-snug text-neutral-700 dark:text-neutral-300";
+const sectionIconBoxClass =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
+const sectionIconClass = "h-3.5 w-3.5 text-neutral-600 dark:text-neutral-400";
+
+function SectionCard({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
+      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
+        <div className={sectionIconBoxClass}>
+          <Icon className={sectionIconClass} aria-hidden />
+        </div>
+        <CardTitle className={sectionTitleClass}>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="field-controls flex min-h-0 flex-1 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs [&_textarea]:text-xs">
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
 
 type LineItem = {
   id: string;
@@ -747,11 +792,18 @@ function NewInvoicePageContent() {
 
   if (loading) {
     return (
-      <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-        <div className="mt-4 h-24 rounded bg-muted animate-pulse" />
-        <div className="mt-4 h-64 rounded bg-muted animate-pulse" />
-      </div>
+      <AppPageShell
+        fillHeight
+        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+      >
+        <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+          <div className="mt-6 grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+          </div>
+        </div>
+      </AppPageShell>
     );
   }
 
@@ -766,34 +818,37 @@ function NewInvoicePageContent() {
 
   return (
     <AppPageShell
-      className="max-w-7xl"
+      fillHeight
+      className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       subtitle={headerSubtitle}
-      leading={
-        <Link href="/app/invoices">
-          <Button variant="ghost" size="icon" aria-label="Back to invoices">
+      titleBefore={
+        <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
+          <Link href="/app/invoices">
             <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       }
       actions={
-        <Button onClick={doCreateUnpaid} disabled={saving} size="sm">
-          {saving ? "Saving..." : "Save & View"}
+        <Button
+          onClick={doCreateUnpaid}
+          disabled={saving}
+          className="gap-2 rounded font-semibold shadow-sm"
+        >
+          <Save className="size-3.5 shrink-0" aria-hidden />
+          {saving ? "Saving…" : "Save & view"}
         </Button>
       }
     >
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle>Customer</CardTitle>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Your business details on the invoice come from{" "}
-                <Link href="/app/settings" className="text-primary underline">
-                  Settings
-                </Link>
-                .
-              </p>
-            </div>
+      <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
+          <SectionCard icon={Users} title="Customer">
+            <p className="text-xs text-muted-foreground">
+              Your business details on the invoice come from{" "}
+              <Link href="/app/settings" className="text-primary underline">
+                Settings
+              </Link>
+              .
+            </p>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
@@ -819,111 +874,107 @@ function NewInvoicePageContent() {
                 </Link>
               </Button>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {selectedCustomer ? (
-            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
-              <p className="font-semibold">
-                {selectedCustomer.type === "company"
-                  ? selectedCustomer.companyName
-                  : selectedCustomer.fullName}
+            {selectedCustomer ? (
+              <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                <p className="font-semibold">
+                  {selectedCustomer.type === "company"
+                    ? selectedCustomer.companyName
+                    : selectedCustomer.fullName}
+                </p>
+                {selectedCustomer.type === "company" &&
+                  selectedCustomer.contactName && (
+                    <p className="text-muted-foreground">
+                      {selectedCustomer.contactName}
+                    </p>
+                  )}
+                <p className="text-muted-foreground">{selectedCustomer.email}</p>
+                <p className="text-muted-foreground">{selectedCustomer.phone}</p>
+                <p className="text-muted-foreground">
+                  {selectedCustomer.address_line_1}
+                </p>
+              </div>
+            ) : clientInfo.email ||
+              clientInfo.companyName ||
+              clientInfo.fullName ? (
+              <div className="rounded-lg border border-dashed border-border p-3 text-sm">
+                <p className="font-medium text-foreground">
+                  Billing preview (from import)
+                </p>
+                <p className="text-muted-foreground">
+                  {clientInfo.type === "company"
+                    ? clientInfo.companyName
+                    : clientInfo.fullName}
+                </p>
+                <p className="text-muted-foreground">{clientInfo.email}</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Link a customer above if this order matches someone in your
+                  directory.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Pick someone from your customer list.
               </p>
-              {selectedCustomer.type === "company" &&
-                selectedCustomer.contactName && (
-                  <p className="text-muted-foreground">
-                    {selectedCustomer.contactName}
-                  </p>
-                )}
-              <p className="text-muted-foreground">{selectedCustomer.email}</p>
-              <p className="text-muted-foreground">{selectedCustomer.phone}</p>
-              <p className="text-muted-foreground">
-                {selectedCustomer.address_line_1}
-              </p>
-            </div>
-          ) : clientInfo.email ||
-            clientInfo.companyName ||
-            clientInfo.fullName ? (
-            <div className="rounded-lg border border-dashed border-border p-3 text-sm">
-              <p className="font-medium text-foreground">
-                Billing preview (from import)
-              </p>
-              <p className="text-muted-foreground">
-                {clientInfo.type === "company"
-                  ? clientInfo.companyName
-                  : clientInfo.fullName}
-              </p>
-              <p className="text-muted-foreground">{clientInfo.email}</p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Link a customer above if this order matches someone in your
-                directory.
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Pick someone from your customer list.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </SectionCard>
 
-      {/* Invoice Meta */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="issueDate">Issue Date</Label>
-              <Input
-                id="issueDate"
-                type="date"
-                value={issueDate}
-                onChange={(e) => setIssueDate(e.target.value)}
-              />
+          <SectionCard icon={CalendarDays} title="Dates & payment terms">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="issueDate" className={fieldLabelClass}>
+                  Issue date
+                </Label>
+                <Input
+                  id="issueDate"
+                  type="date"
+                  value={issueDate}
+                  onChange={(e) => setIssueDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dueDate" className={fieldLabelClass}>
+                  Due date
+                </Label>
+                <Input
+                  id="dueDate"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="paymentTerms" className={fieldLabelClass}>
+                  Payment terms
+                </Label>
+                <Select
+                  value={paymentTerms}
+                  onValueChange={(v) => {
+                    setPaymentTerms(v);
+                    const termsDays = Number(v || "0");
+                    const d = new Date(
+                      issueDate || new Date().toISOString().split("T")[0]
+                    );
+                    d.setDate(d.getDate() + termsDays);
+                    setDueDate(d.toISOString().split("T")[0]);
+                  }}
+                >
+                  <SelectTrigger id="paymentTerms" className="h-8 rounded-sm text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">Net 7</SelectItem>
+                    <SelectItem value="14">Net 14</SelectItem>
+                    <SelectItem value="30">Net 30</SelectItem>
+                    <SelectItem value="60">Net 60</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="dueDate">Due Date</Label>
-              <Input
-                id="dueDate"
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="paymentTerms">Payment Terms</Label>
-              <Select
-                value={paymentTerms}
-                onValueChange={(v) => {
-                  setPaymentTerms(v);
-                  const termsDays = Number(v || "0");
-                  const d = new Date(
-                    issueDate || new Date().toISOString().split("T")[0]
-                  );
-                  d.setDate(d.getDate() + termsDays);
-                  setDueDate(d.toISOString().split("T")[0]);
-                }}
-              >
-                <SelectTrigger id="paymentTerms">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="7">Net 7</SelectItem>
-                  <SelectItem value="14">Net 14</SelectItem>
-                  <SelectItem value="30">Net 30</SelectItem>
-                  <SelectItem value="60">Net 60</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </SectionCard>
+        </div>
 
-      {/* Line Items */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Line Items</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <div className="mt-6 space-y-6 lg:mt-8">
+          <SectionCard icon={ListOrdered} title="Line items">
           {errors.lineItems && (
             <p className="mb-2 text-xs text-destructive">{errors.lineItems}</p>
           )}
@@ -1102,18 +1153,14 @@ function NewInvoicePageContent() {
             <Plus className="h-4 w-4" />
             Add Row
           </Button>
-        </CardContent>
-      </Card>
+          </SectionCard>
 
-      {/* Summary */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Notes & Terms</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          <div className="grid min-h-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
+            <SectionCard icon={FileText} title="Notes & terms">
             <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
+              <Label htmlFor="notes" className={fieldLabelClass}>
+                Notes
+              </Label>
               <Textarea
                 id="notes"
                 value={notes}
@@ -1126,7 +1173,9 @@ function NewInvoicePageContent() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="terms">Terms & Conditions</Label>
+              <Label htmlFor="terms" className={fieldLabelClass}>
+                Terms & conditions
+              </Label>
               <Textarea
                 id="terms"
                 value={terms}
@@ -1138,14 +1187,9 @@ function NewInvoicePageContent() {
                 {terms.length} characters
               </p>
             </div>
-          </CardContent>
-        </Card>
+            </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+            <SectionCard icon={CircleDollarSign} title="Summary">
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Subtotal</span>
@@ -1195,7 +1239,9 @@ function NewInvoicePageContent() {
               <Separator />
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="amountPaid">Amount Paid</Label>
+                  <Label htmlFor="amountPaid" className={fieldLabelClass}>
+                    Amount paid
+                  </Label>
                   <Input
                     id="amountPaid"
                     type="number"
@@ -1227,8 +1273,9 @@ function NewInvoicePageContent() {
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
+            </SectionCard>
+          </div>
+        </div>
       </div>
 
       {/* Customer Selection Dialog (Supabase-powered) */}
@@ -1317,10 +1364,18 @@ export default function NewInvoicePage() {
   return (
     <Suspense
       fallback={
-        <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="mt-4 h-24 rounded bg-muted animate-pulse" />
-        </div>
+        <AppPageShell
+          fillHeight
+          className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
+        >
+          <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+            <div className="h-10 w-48 animate-pulse rounded bg-muted" />
+            <div className="mt-6 grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
+              <div className="h-56 animate-pulse rounded-lg bg-muted" />
+              <div className="h-56 animate-pulse rounded-lg bg-muted" />
+            </div>
+          </div>
+        </AppPageShell>
       }
     >
       <NewInvoicePageContent />

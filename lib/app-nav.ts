@@ -345,7 +345,6 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   { prefix: "/app/suppliers", requires: FEATURE_CODES.suppliers },
   { prefix: "/app/locations", requires: FEATURE_CODES.locations },
   { prefix: "/app/products", requires: FEATURE_CODES.products },
-  { prefix: "/app/inventory/stock", requires: FEATURE_CODES.inventory },
   { prefix: "/app/inventory", requires: FEATURE_CODES.inventory },
   { prefix: "/app/expenses", requires: FEATURE_CODES.expenses },
   { prefix: "/app/payroll", requires: FEATURE_CODES.payroll },

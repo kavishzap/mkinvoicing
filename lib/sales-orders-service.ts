@@ -7,6 +7,7 @@ import {
 } from "@/lib/settings-service";
 import type { Profile } from "@/lib/settings-service";
 import type { CustomerRow } from "@/lib/customers-service";
+import { listDeliveryCities } from "@/lib/delivery-zones-service";
 import type { Database } from "@/src/types/supabase";
 
 /** Only `active` (current) and `expired` (past valid_until or manual). */
@@ -18,6 +19,7 @@ export type SalesOrderFulfillmentStatus =
 
 export const SALES_ORDER_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] = [
   "new",
+  "pending",
   "delivery note created",
   "delivered to driver",
   "delivered to customer",
@@ -26,9 +28,15 @@ export const SALES_ORDER_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] = [
   "rescheduled",
 ];
 
+/** Fulfillment states where line items and amounts may still be edited in the app. */
+export function salesOrderFulfillmentAllowsEditing(
+  status: SalesOrderFulfillmentStatus
+): boolean {
+  return status === "new" || status === "pending";
+}
+
 /** Older app / DB values → current enum (best-effort). */
 const FULFILLMENT_LEGACY: Record<string, SalesOrderFulfillmentStatus> = {
-  pending: "new",
   confirmed: "new",
   processing: "new",
   shipped: "new",
@@ -46,6 +54,7 @@ export function normalizeSalesOrderFulfillmentStatus(
   if (fromLegacy) return fromLegacy;
   /** DB enum is lowercase `rescheduled`; accept legacy capital-R from older snapshots. */
   if (v.toLowerCase() === "rescheduled") return "rescheduled";
+  if (v.toLowerCase() === "pending") return "pending";
   if (v.toLowerCase() === "completed") return "completed";
   if (
     SALES_ORDER_FULFILLMENT_STATUSES.includes(v as SalesOrderFulfillmentStatus)
@@ -60,6 +69,7 @@ export const SALES_ORDER_FULFILLMENT_LABELS: Record<
   string
 > = {
   new: "New",
+  pending: "Pending",
   "delivery note created": "Delivery note created",
   "delivered to driver": "Delivered to driver",
   "delivered to customer": "Delivered to customer",
@@ -162,6 +172,8 @@ export type SalesOrderDetail = {
   terms: string | null;
   /** ISO date string `YYYY-MM-DD` or null. */
   delivery_date: string | null;
+  /** Delivery catalog city (`cities.id`); source of truth for the City field on the form. */
+  city_id: string | null;
   items: SalesOrderItemRow[];
 };
 
@@ -172,6 +184,10 @@ export type SalesOrderListRow = {
   validUntil: string;
   /** ISO `YYYY-MM-DD` or null when not set. */
   deliveryDate: string | null;
+  /** ISO timestamp from `sales_orders.created_at`. */
+  createdAt: string;
+  /** Delivery catalog city name (`cities.name` via `city_id`), else bill-to snapshot city. */
+  cityName: string;
   status: SalesOrderStatus;
   fulfillmentStatus: SalesOrderFulfillmentStatus;
   paymentStatus: SalesOrderPaymentStatus;
@@ -187,6 +203,20 @@ function nameFromBillTo(bill?: Record<string, unknown>) {
     return String(bill.company_name ?? bill.name ?? "");
   }
   return String(bill.full_name ?? bill.name ?? "");
+}
+
+function cityLabelFromListRow(
+  r: { city_id?: unknown; bill_to_snapshot?: unknown },
+  cityById: Map<string, string>,
+): string {
+  const cid =
+    r.city_id != null && String(r.city_id).trim()
+      ? String(r.city_id)
+      : "";
+  if (cid && cityById.has(cid)) return cityById.get(cid)!;
+  const bill = r.bill_to_snapshot as Record<string, unknown> | undefined;
+  if (!bill) return "";
+  return String(bill.city ?? "").trim();
 }
 
 export type SalesOrderClientInfo = {
@@ -313,6 +343,20 @@ export function billToFromCustomer(c: CustomerRow): SalesOrderClientInfo {
     address_line_1: c.address_line_1 ?? "",
     address_line_2: c.address_line_2 ?? "",
   };
+}
+
+/**
+ * Resolves `sales_orders.city_id` from the delivery city dropdown (matched by city name).
+ * The selected name always wins over the linked customer’s `city_id`.
+ */
+export function cityIdFromDeliveryCityName(
+  cityName: string,
+  cities: { id: string; name: string }[]
+): string | null {
+  const t = cityName.trim();
+  if (!t) return null;
+  const match = cities.find((c) => c.name === t);
+  return match?.id ?? null;
 }
 
 export function computeSalesOrderTotals(so: SalesOrderDetail) {
@@ -513,14 +557,17 @@ export async function listSalesOrders(opts?: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  const citiesFetch = listDeliveryCities();
+
   let q = supabase
     .from("sales_orders")
     .select(
-      "id, number, issue_date, valid_until, delivery_date, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total",
+      "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id",
       { count: "exact" }
     )
     .eq("company_id", companyId)
-    .order("issue_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .range(from, to);
 
   if (opts?.status && opts.status !== "all") {
@@ -545,8 +592,13 @@ export async function listSalesOrders(opts?: {
     );
   }
 
-  const { data, error, count } = await q;
+  const [{ data, error, count }, cityRows] = await Promise.all([
+    q,
+    citiesFetch,
+  ]);
   if (error) throw error;
+
+  const cityById = new Map(cityRows.map((c) => [c.id, c.name] as const));
 
   const rows: SalesOrderListRow[] = (data ?? []).map((r: any) => ({
     id: r.id,
@@ -557,6 +609,8 @@ export async function listSalesOrders(opts?: {
       r.delivery_date != null && String(r.delivery_date).trim()
         ? String(r.delivery_date).slice(0, 10)
         : null,
+    createdAt: r.created_at != null ? String(r.created_at) : "",
+    cityName: cityLabelFromListRow(r, cityById),
     status: normalizeSalesOrderStatus(String(r.status)),
     fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
       r.fulfillment_status
@@ -591,6 +645,7 @@ type SalesOrderSingleQueryRow = {
   shipping_amount?: unknown;
   notes?: string | null;
   terms?: string | null;
+  city_id?: string | null;
   sales_order_items?: Record<string, unknown>[];
 };
 
@@ -625,12 +680,14 @@ export async function getSalesOrder(
     mode === "view"
       ? `
       id, number, issue_date, valid_until, delivery_date, status, fulfillment_status, payment_status, currency, customer_id, created_from_quotation_id,
+      city_id,
       from_snapshot, bill_to_snapshot,
       discount_type, discount_amount, shipping_amount, notes, terms,
       ${itemsSelect}
     `
       : `
       id, number, issue_date, valid_until, delivery_date, status, fulfillment_status, payment_status, currency, customer_id, created_from_quotation_id,
+      city_id,
       from_snapshot, bill_to_snapshot, client_snapshot,
       discount_type, discount_amount, shipping_amount, notes, terms,
       ${itemsSelect}
@@ -714,6 +771,10 @@ export async function getSalesOrder(
       rawDelivery != null && String(rawDelivery).trim()
         ? String(rawDelivery).slice(0, 10)
         : null,
+    city_id:
+      row.city_id != null && String(row.city_id).trim()
+        ? String(row.city_id)
+        : null,
     items,
   };
 }
@@ -739,12 +800,22 @@ export async function updateSalesOrderFulfillmentStatus(
   fulfillment_status: SalesOrderFulfillmentStatus
 ): Promise<void> {
   const companyId = await requireActiveCompanyId();
+  const clearDriverDelivery =
+    fulfillment_status === "delivered to customer" ||
+    fulfillment_status === "completed" ||
+    fulfillment_status === "cancelled";
+
+  const patch: Record<string, unknown> = {
+    fulfillment_status,
+    updated_at: new Date().toISOString(),
+  };
+  if (clearDriverDelivery) {
+    patch.active_driver_delivery_id = null;
+  }
+
   const { error } = await supabase
     .from("sales_orders")
-    .update({
-      fulfillment_status,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch as never)
     .eq("id", id)
     .eq("company_id", companyId);
   if (error) throw error;
@@ -798,13 +869,12 @@ export async function updateSalesOrder(
   if (!existingRow) {
     throw new Error("Sales order not found.");
   }
-  if (
-    normalizeSalesOrderFulfillmentStatus(
-      (existingRow as { fulfillment_status?: string | null }).fulfillment_status
-    ) !== "new"
-  ) {
+  const existingFulfillment = normalizeSalesOrderFulfillmentStatus(
+    (existingRow as { fulfillment_status?: string | null }).fulfillment_status
+  );
+  if (!salesOrderFulfillmentAllowsEditing(existingFulfillment)) {
     throw new Error(
-      "This sales order can only be edited while fulfillment status is New."
+      "This sales order can only be edited while fulfillment status is New or Pending."
     );
   }
 

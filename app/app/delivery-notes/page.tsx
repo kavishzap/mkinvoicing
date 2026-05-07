@@ -26,10 +26,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { DeliveryNoteStatusBadge } from "@/components/delivery-note-status-badge";
+import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import {
   getDelivery,
   getDriverStockReturnContext,
@@ -38,7 +45,6 @@ import {
   setDeliveryDriverStatus,
   type DeliveryListRow,
   type DriverStockReturnLine,
-  type DriverStockReturnPeriod,
 } from "@/lib/deliveries-service";
 import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 import { addExpense } from "@/lib/expenses-service";
@@ -69,6 +75,20 @@ function fmtMoney(n: number) {
     }).format(n);
   } catch {
     return `MUR ${n.toFixed(2)}`;
+  }
+}
+
+function fmtMoneyCurrency(n: number, currency: string) {
+  const ccy = currency?.trim() || "MUR";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: ccy,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return `${ccy} ${n.toFixed(2)}`;
   }
 }
 
@@ -107,8 +127,18 @@ export default function DeliveryNotesPage() {
   const [stockLinesLoading, setStockLinesLoading] = useState(false);
   const [returnQtys, setReturnQtys] = useState<Record<string, string>>({});
   const [stockReturnBusy, setStockReturnBusy] = useState(false);
-  const [stockReturnPeriod, setStockReturnPeriod] =
-    useState<DriverStockReturnPeriod>("week");
+  const [daysLookbackSelect, setDaysLookbackSelect] = useState<
+    "1" | "7" | "14" | "30" | "custom"
+  >("7");
+  const [daysLookbackCustom, setDaysLookbackCustom] = useState("21");
+
+  const effectiveStockReturnPDays = useMemo(() => {
+    if (daysLookbackSelect === "custom") {
+      const n = Math.floor(Number(daysLookbackCustom));
+      return Math.max(1, Math.min(366, Number.isFinite(n) ? n : 1));
+    }
+    return Number(daysLookbackSelect);
+  }, [daysLookbackSelect, daysLookbackCustom]);
 
   useEffect(() => {
     let cancelled = false;
@@ -143,7 +173,8 @@ export default function DeliveryNotesPage() {
       setStockReturnLines([]);
       setDriverStockAvailable({});
       setReturnQtys({});
-      setStockReturnPeriod("week");
+      setDaysLookbackSelect("7");
+      setDaysLookbackCustom("21");
       return;
     }
     let cancelled = false;
@@ -151,7 +182,7 @@ export default function DeliveryNotesPage() {
       setStockLinesLoading(true);
       try {
         const ctx = await getDriverStockReturnContext(driverBalanceRow.id, {
-          period: stockReturnPeriod,
+          p_days: effectiveStockReturnPDays,
         });
         if (cancelled) return;
         setStockReturnLines(ctx.lines);
@@ -182,7 +213,7 @@ export default function DeliveryNotesPage() {
     return () => {
       cancelled = true;
     };
-  }, [driverBalanceRow, stockReturnPeriod, toast]);
+  }, [driverBalanceRow, effectiveStockReturnPDays, toast]);
 
   const selectedDriverBalanceMember = useMemo(
     () =>
@@ -191,8 +222,11 @@ export default function DeliveryNotesPage() {
     [drivers, driverBalanceRow]
   );
   const selectedDriverRate = Number(selectedDriverBalanceMember?.driverRate ?? 0);
-  const selectedDeliveryTotal = Number(driverBalanceRow?.totalAmount ?? 0);
-  const amountToReturnOwner = selectedDeliveryTotal - selectedDriverRate;
+  const selectedDeliveryTotalAll = Number(driverBalanceRow?.totalAmount ?? 0);
+  const selectedPaidOrdersTotal = Number(
+    driverBalanceRow?.totalAmountDeliveredToCustomer ?? 0
+  );
+  const amountToReturnOwner = selectedPaidOrdersTotal - selectedDriverRate;
 
   async function submitDriverStockReturns() {
     if (!driverBalanceRow) return;
@@ -236,7 +270,7 @@ export default function DeliveryNotesPage() {
         description: `${entries.length} product line(s): transfer from driver to primary warehouse (return_driver_stock_to_warehouse).`,
       });
       const ctx = await getDriverStockReturnContext(driverBalanceRow.id, {
-        period: stockReturnPeriod,
+        p_days: effectiveStockReturnPDays,
       });
       setStockReturnLines(ctx.lines);
       setDriverStockAvailable(ctx.availableByProduct);
@@ -273,7 +307,7 @@ export default function DeliveryNotesPage() {
         amount: rate,
         currency: "MUR",
         expense_date: new Date().toISOString().slice(0, 10),
-        notes: `Delivery total: ${selectedDeliveryTotal}. Amount returned to owner: ${amountToReturnOwner}.`,
+        notes: `Paid orders total: ${selectedPaidOrdersTotal}. All linked orders: ${selectedDeliveryTotalAll}. Amount returned to owner: ${amountToReturnOwner}.`,
         line_items: [
           {
             item: "Driver salary",
@@ -499,7 +533,7 @@ export default function DeliveryNotesPage() {
 
   return (
     <AppPageShell
-      subtitle="Assign drivers to sales orders still on New or Rescheduled fulfillment. Eligible orders leave this list once you save a delivery."
+      subtitle="Assign drivers to sales orders still on New, Pending, or Rescheduled fulfillment. Eligible orders leave this list once you save a delivery."
       actions={
         <div className="flex items-center gap-2">
           <Button
@@ -567,7 +601,7 @@ export default function DeliveryNotesPage() {
                         <p className="text-sm text-muted-foreground max-w-md">
                           No delivery notes yet. Each new delivery starts with status{" "}
                           <span className="font-medium text-foreground">New</span>. Create one
-                          to assign active sales orders (fulfillment New or Rescheduled) to a driver.
+                          to assign active sales orders (fulfillment New, Pending, or Rescheduled) to a driver.
                         </p>
                         <Button asChild variant="outline" size="sm">
                           <Link href="/app/delivery-notes/new">New delivery</Link>
@@ -716,7 +750,7 @@ export default function DeliveryNotesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-4 overflow-y-auto sm:w-[calc(100vw-2rem)]">
           <DialogHeader>
             <DialogTitle>Driver Balance Preview</DialogTitle>
             <DialogDescription>
@@ -735,9 +769,16 @@ export default function DeliveryNotesPage() {
                 <span className="font-mono text-xs">{driverBalanceRow?.id ?? "—"}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Sales order total</span>
-                <span className="font-medium">{fmtMoney(selectedDeliveryTotal)}</span>
+                <span className="text-muted-foreground">Paid orders total</span>
+                <span className="font-medium">{fmtMoney(selectedPaidOrdersTotal)}</span>
               </div>
+              {driverBalanceRow &&
+              selectedDeliveryTotalAll !== selectedPaidOrdersTotal ? (
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>All linked orders (reference)</span>
+                  <span className="tabular-nums">{fmtMoney(selectedDeliveryTotalAll)}</span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Driver daily rate</span>
                 <span className="font-medium">{fmtMoney(selectedDriverRate)}</span>
@@ -756,41 +797,51 @@ export default function DeliveryNotesPage() {
                   <Warehouse className="h-4 w-4 text-muted-foreground shrink-0" />
                   <div>
                     <p className="text-sm font-medium">Return driver stock to warehouse</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Only sales orders still in{" "}
-                      <span className="font-medium text-foreground">
-                        Delivered to driver
-                      </span>
-                      , last updated within the selected window (local time). Uses{" "}
-                      <span className="font-mono text-foreground">
-                        return_driver_stock_to_warehouse
-                      </span>
-                      , which records a <span className="font-medium text-foreground">transfer</span>{" "}
-                      from the driver location to the primary warehouse (and updates stock).
-                    </p>
                   </div>
                 </div>
-                <div className="flex flex-col gap-1.5 sm:items-end">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Order activity window
-                  </span>
-                  <ToggleGroup
-                    type="single"
-                    value={stockReturnPeriod}
-                    onValueChange={(v) => {
-                      if (v === "day" || v === "week") setStockReturnPeriod(v);
-                    }}
-                    variant="outline"
-                    size="sm"
-                    className="justify-start sm:justify-end"
-                  >
-                    <ToggleGroupItem value="day" aria-label="Today">
-                      Today
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="week" aria-label="This week">
-                      This week
-                    </ToggleGroupItem>
-                  </ToggleGroup>
+                <div className="flex flex-col gap-2 sm:items-end sm:min-w-[220px]">
+                  <Label htmlFor="driver-return-p-days" className="text-xs font-medium text-muted-foreground">
+                    Lookback window
+                  </Label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Select
+                      value={daysLookbackSelect}
+                      onValueChange={(v) => {
+                        if (v === "1" || v === "7" || v === "14" || v === "30" || v === "custom") {
+                          setDaysLookbackSelect(v);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="driver-return-p-days" className="w-full sm:w-[200px]">
+                        <SelectValue placeholder="Days" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1 day (today)</SelectItem>
+                        <SelectItem value="7">7 days</SelectItem>
+                        <SelectItem value="14">14 days</SelectItem>
+                        <SelectItem value="30">30 days</SelectItem>
+                        <SelectItem value="custom">Custom…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {daysLookbackSelect === "custom" ? (
+                      <Input
+                        type="number"
+                        min={1}
+                        max={366}
+                        className="h-9 w-full sm:w-24 text-center tabular-nums"
+                        aria-label="Custom p_days"
+                        value={daysLookbackCustom}
+                        onChange={(e) => setDaysLookbackCustom(e.target.value)}
+                      />
+                    ) : null}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground max-sm:w-full sm:text-right">
+                    Active:{" "}
+                    <span className="font-medium tabular-nums text-foreground">
+                      {effectiveStockReturnPDays}
+                    </span>{" "}
+                    day{effectiveStockReturnPDays === 1 ? "" : "s"}
+                  </p>
                 </div>
               </div>
 
@@ -799,7 +850,7 @@ export default function DeliveryNotesPage() {
               ) : stockReturnLines.length === 0 ? (
                 <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
                   {driverBalanceRow && driverBalanceRow.orderCount > 0
-                    ? "No matching lines: need sales orders in Delivered to driver with line items linked to products, and the order updated within this day/week window (or missing updated date — treated as included)."
+                    ? `No matching lines for p_days=${effectiveStockReturnPDays}: need fulfillment Delivered to driver, Rescheduled, or Pending; catalog-linked line items; and order updated_at within the window (missing updated_at is treated as included).`
                     : "No products on this delivery."}
                 </p>
               ) : (
@@ -807,9 +858,10 @@ export default function DeliveryNotesPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Product</TableHead>
+                        <TableHead className="min-w-[120px]">Product</TableHead>
+                        <TableHead className="min-w-[220px]">Sales orders</TableHead>
                         <TableHead className="text-right whitespace-nowrap">
-                          Qty (driver SOs)
+                          Line qty
                         </TableHead>
                         <TableHead className="text-right whitespace-nowrap">On driver</TableHead>
                         <TableHead className="w-[120px] text-right">Return qty</TableHead>
@@ -820,14 +872,44 @@ export default function DeliveryNotesPage() {
                         const onDriver = driverStockAvailable[l.productId] ?? 0;
                         return (
                           <TableRow key={l.productId}>
-                            <TableCell className="font-medium max-w-[200px]">
-                              <span className="line-clamp-2">{l.productName}</span>
+                            <TableCell className="font-medium max-w-[220px] align-top">
+                              <span className="line-clamp-3">{l.productName}</span>
                             </TableCell>
-                            <TableCell className="text-right tabular-nums">
+                            <TableCell className="align-top text-xs leading-snug">
+                              {l.salesOrders.length === 0 ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <ul className="space-y-2">
+                                  {l.salesOrders.map((so) => (
+                                    <li key={so.salesOrderId} className="space-y-1">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-medium text-foreground">
+                                          #{so.salesOrderNumber}
+                                        </span>
+                                        <SalesOrderFulfillmentStatusBadge
+                                          status={so.fulfillmentStatus}
+                                          className="h-5 shrink-0 px-1.5 text-[10px]"
+                                        />
+                                      </div>
+                                      <div className="text-xs">
+                                        <span className="tabular-nums">
+                                          {fmtMoneyCurrency(so.salesOrderTotal, so.currency)}
+                                        </span>
+                                        <span className="text-muted-foreground"> · qty </span>
+                                        <span className="tabular-nums font-medium text-foreground">
+                                          {so.qty}
+                                        </span>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums align-top">
                               {l.deliveryQty}
                             </TableCell>
-                            <TableCell className="text-right tabular-nums">{onDriver}</TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right tabular-nums align-top">{onDriver}</TableCell>
+                            <TableCell className="text-right align-top">
                               <Label htmlFor={`ret-qty-${l.productId}`} className="sr-only">
                                 Return quantity for {l.productName}
                               </Label>
