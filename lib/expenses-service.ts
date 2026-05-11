@@ -184,6 +184,53 @@ export async function listExpenses(opts?: {
   };
 }
 
+/**
+ * Returns every expense matching the current filters (no pagination).
+ * Used by the expenses page Export CSV / Print actions.
+ */
+export async function listAllExpensesForExport(opts?: {
+  search?: string;
+  period?: ExpensePeriodFilter;
+}): Promise<ExpenseRow[]> {
+  const companyId = await requireActiveCompanyId();
+
+  const BATCH = 1000;
+  let from = 0;
+  const out: ExpenseRow[] = [];
+
+  for (;;) {
+    let q = supabase
+      .from("expenses")
+      .select(COLUMNS)
+      .eq("company_id", companyId)
+      .order("expense_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(from, from + BATCH - 1);
+
+    const period = opts?.period ?? "all";
+    if (period === "month") {
+      q = q.gte("expense_date", localStartOfMonthISO());
+    } else if (period === "year") {
+      q = q.gte("expense_date", localStartOfYearISO());
+    }
+
+    const term = opts?.search?.trim();
+    if (term) {
+      const s = `%${term}%`;
+      q = q.or(`description.ilike.${s},notes.ilike.${s}`);
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = (data ?? []).map(mapRow);
+    out.push(...batch);
+    if (batch.length < BATCH) break;
+    from += BATCH;
+  }
+
+  return out;
+}
+
 /** Create expense */
 export async function addExpense(payload: ExpensePayload): Promise<ExpenseRow> {
   const [userId, companyId] = await Promise.all([

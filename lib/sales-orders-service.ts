@@ -194,6 +194,10 @@ export type SalesOrderListRow = {
   currency: string;
   clientName: string;
   total: number;
+  /** Display label for the user who created the order (full name → email → short id). */
+  createdByName: string;
+  /** Raw notes from `sales_orders.notes`, trimmed. Empty string when none. */
+  notes: string;
 };
 
 function nameFromBillTo(bill?: Record<string, unknown>) {
@@ -203,6 +207,35 @@ function nameFromBillTo(bill?: Record<string, unknown>) {
     return String(bill.company_name ?? bill.name ?? "");
   }
   return String(bill.full_name ?? bill.name ?? "");
+}
+
+async function userDisplayMap(
+  userIds: string[]
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("id, full_name, email")
+    .in("id", uniq);
+
+  if (error) throw new Error(error.message);
+
+  for (const row of data ?? []) {
+    const r = row as {
+      id: string;
+      full_name: string | null;
+      email: string | null;
+    };
+    const label =
+      (r.full_name && r.full_name.trim()) ||
+      (r.email && r.email.trim()) ||
+      r.id.slice(0, 8);
+    map.set(r.id, label);
+  }
+  return map;
 }
 
 function cityLabelFromListRow(
@@ -500,35 +533,40 @@ export async function createSalesOrder(
 }
 
 /**
- * Parallel head-only counts for the sales order directory KPI strip.
+ * Counts for the sales order directory sidebar: total + per-fulfillment-status.
+ * Single query that projects only `fulfillment_status`; grouping is done in JS.
  * Does not run `expireStaleSalesOrders` — call that once before this when loading the list.
  */
 export async function getSalesOrderKpiCounts(): Promise<{
   total: number;
-  active: number;
-  expired: number;
+  byFulfillment: Record<SalesOrderFulfillmentStatus, number>;
 }> {
   const companyId = await requireActiveCompanyId();
-  const mk = (status?: SalesOrderStatus) => {
-    let q = supabase
-      .from("sales_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId);
-    if (status) q = q.eq("status", status);
-    return q;
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select("fulfillment_status")
+    .eq("company_id", companyId);
+  if (error) throw error;
+
+  const byFulfillment: Record<SalesOrderFulfillmentStatus, number> = {
+    new: 0,
+    pending: 0,
+    "delivery note created": 0,
+    "delivered to driver": 0,
+    "delivered to customer": 0,
+    completed: 0,
+    cancelled: 0,
+    rescheduled: 0,
   };
-  const [allRes, activeRes, expiredRes] = await Promise.all([
-    mk(),
-    mk("active"),
-    mk("expired"),
-  ]);
-  if (allRes.error) throw allRes.error;
-  if (activeRes.error) throw activeRes.error;
-  if (expiredRes.error) throw expiredRes.error;
+  for (const row of data ?? []) {
+    const s = normalizeSalesOrderFulfillmentStatus(
+      (row as { fulfillment_status?: string | null }).fulfillment_status,
+    );
+    byFulfillment[s] = (byFulfillment[s] ?? 0) + 1;
+  }
   return {
-    total: allRes.count ?? 0,
-    active: activeRes.count ?? 0,
-    expired: expiredRes.count ?? 0,
+    total: data?.length ?? 0,
+    byFulfillment,
   };
 }
 
@@ -562,7 +600,7 @@ export async function listSalesOrders(opts?: {
   let q = supabase
     .from("sales_orders")
     .select(
-      "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id",
+      "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, user_id, notes",
       { count: "exact" }
     )
     .eq("company_id", companyId)
@@ -584,12 +622,19 @@ export async function listSalesOrders(opts?: {
   }
 
   if (opts?.search?.trim()) {
-    const s = `%${opts.search.trim()}%`;
-    q = q.or(
-      [`number.ilike.${s}`, `bill_to_snapshot->>company_name.ilike.${s}`, `bill_to_snapshot->>full_name.ilike.${s}`].join(
-        ","
-      )
-    );
+    const raw = opts.search.trim();
+    const s = `%${raw}%`;
+    const filters = [
+      `number.ilike.${s}`,
+      `bill_to_snapshot->>company_name.ilike.${s}`,
+      `bill_to_snapshot->>full_name.ilike.${s}`,
+      `bill_to_snapshot->>phone.ilike.${s}`,
+    ];
+    const digitsOnly = raw.replace(/\D/g, "");
+    if (digitsOnly && digitsOnly !== raw) {
+      filters.push(`bill_to_snapshot->>phone.ilike.%${digitsOnly}%`);
+    }
+    q = q.or(filters.join(","));
   }
 
   const [{ data, error, count }, cityRows] = await Promise.all([
@@ -600,26 +645,40 @@ export async function listSalesOrders(opts?: {
 
   const cityById = new Map(cityRows.map((c) => [c.id, c.name] as const));
 
-  const rows: SalesOrderListRow[] = (data ?? []).map((r: any) => ({
-    id: r.id,
-    number: r.number,
-    issueDate: r.issue_date,
-    validUntil: r.valid_until,
-    deliveryDate:
-      r.delivery_date != null && String(r.delivery_date).trim()
-        ? String(r.delivery_date).slice(0, 10)
-        : null,
-    createdAt: r.created_at != null ? String(r.created_at) : "",
-    cityName: cityLabelFromListRow(r, cityById),
-    status: normalizeSalesOrderStatus(String(r.status)),
-    fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
-      r.fulfillment_status
-    ),
-    paymentStatus: normalizeSalesOrderPaymentStatus(r.payment_status),
-    currency: r.currency,
-    clientName: nameFromBillTo(r.bill_to_snapshot),
-    total: Number(r.total ?? 0),
-  }));
+  const rawRows = (data ?? []) as Array<Record<string, unknown>>;
+  const creatorIds = rawRows
+    .map((r) => (r.user_id != null ? String(r.user_id) : ""))
+    .filter(Boolean);
+  const creatorNames = await userDisplayMap(creatorIds);
+
+  const rows: SalesOrderListRow[] = rawRows.map((r: any) => {
+    const creatorId = r.user_id != null ? String(r.user_id) : "";
+    const createdByName = creatorId
+      ? creatorNames.get(creatorId) ?? creatorId.slice(0, 8)
+      : "";
+    return {
+      id: r.id,
+      number: r.number,
+      issueDate: r.issue_date,
+      validUntil: r.valid_until,
+      deliveryDate:
+        r.delivery_date != null && String(r.delivery_date).trim()
+          ? String(r.delivery_date).slice(0, 10)
+          : null,
+      createdAt: r.created_at != null ? String(r.created_at) : "",
+      cityName: cityLabelFromListRow(r, cityById),
+      status: normalizeSalesOrderStatus(String(r.status)),
+      fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
+        r.fulfillment_status
+      ),
+      paymentStatus: normalizeSalesOrderPaymentStatus(r.payment_status),
+      currency: r.currency,
+      clientName: nameFromBillTo(r.bill_to_snapshot),
+      total: Number(r.total ?? 0),
+      createdByName,
+      notes: r.notes != null ? String(r.notes).trim() : "",
+    };
+  });
 
   return { rows, total: count ?? 0 };
 }

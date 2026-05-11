@@ -74,11 +74,14 @@ function DocSectionCard({
   icon: Icon,
   title,
   count,
+  showCount = true,
   children,
 }: {
   icon: LucideIcon;
   title: string;
   count: number;
+  /** When false, the count chip next to the title is hidden. */
+  showCount?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -101,9 +104,11 @@ function DocSectionCard({
                 )}
               >
                 <span className="min-w-0">{title}</span>
-                <span className="rounded-full bg-muted/90 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground dark:bg-muted/70">
-                  {count}
-                </span>
+                {showCount ? (
+                  <span className="rounded-full bg-muted/90 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground dark:bg-muted/70">
+                    {count}
+                  </span>
+                ) : null}
               </CardTitle>
             </div>
           </CardHeader>
@@ -391,7 +396,12 @@ export function CustomerRelatedDocuments({
         />
       </DocSectionCard>
 
-      <DocSectionCard icon={FileText} title="Quotations" count={quotationTotal}>
+      <DocSectionCard
+        icon={FileText}
+        title="Quotations"
+        count={quotationTotal}
+        showCount={false}
+      >
         <div className="max-h-[min(26rem,50dvh)] min-h-0 overflow-y-auto overscroll-y-contain">
           <Table>
             <TableHeader>

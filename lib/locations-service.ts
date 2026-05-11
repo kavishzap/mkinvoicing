@@ -244,6 +244,60 @@ export async function listLocations(opts?: {
   };
 }
 
+/**
+ * Returns every location matching the current filters (no pagination).
+ * Used by the locations page Export CSV / Print actions.
+ */
+export async function listAllLocationsForExport(opts?: {
+  search?: string;
+  locationType?: string | null;
+  statusFilter?: "all" | "active" | "inactive";
+}): Promise<LocationRow[]> {
+  const companyId = await requireCompanyId();
+
+  const BATCH = 1000;
+  let from = 0;
+  const out: LocationRow[] = [];
+
+  for (;;) {
+    let q = supabase
+      .from("locations")
+      .select(COLUMNS)
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .range(from, from + BATCH - 1);
+
+    const lt = opts?.locationType?.trim();
+    if (lt) {
+      q = q.eq("location_type", lt);
+    }
+
+    const sf = opts?.statusFilter ?? "all";
+    if (sf === "active") {
+      q = q.eq("is_active", true);
+    } else if (sf === "inactive") {
+      q = q.eq("is_active", false);
+    }
+
+    const term = opts?.search?.trim();
+    if (term) {
+      const s = `%${term}%`;
+      q = q.or(
+        [`name.ilike.${s}`, `code.ilike.${s}`, `city.ilike.${s}`].join(","),
+      );
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = (data ?? []).map(mapRow);
+    out.push(...batch);
+    if (batch.length < BATCH) break;
+    from += BATCH;
+  }
+
+  return out;
+}
+
 export async function getLocation(id: string): Promise<LocationRow> {
   const companyId = await requireCompanyId();
   const { data, error } = await supabase

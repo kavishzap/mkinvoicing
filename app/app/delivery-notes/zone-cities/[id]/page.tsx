@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
+  GripVertical,
   Layers,
   MapPinned,
   Pencil,
@@ -122,6 +123,22 @@ function teamDriverMembers(team: TeamMemberRow[]): TeamMemberRow[] {
   return team.filter((m) => m.roleName.toLowerCase().includes("driver"));
 }
 
+function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
+  if (
+    fromIndex === toIndex ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= arr.length ||
+    toIndex >= arr.length
+  ) {
+    return [...arr];
+  }
+  const next = [...arr];
+  const [item] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, item);
+  return next;
+}
+
 export default function DeliveryZoneDetailPage() {
   const params = useParams<{ id: string }>();
   const { toast } = useToast();
@@ -158,6 +175,11 @@ export default function DeliveryZoneDetailPage() {
     null,
   );
   const [removeSaving, setRemoveSaving] = useState(false);
+
+  const [draggingAssignmentId, setDraggingAssignmentId] = useState<
+    string | null
+  >(null);
+  const [savingReorder, setSavingReorder] = useState(false);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -327,6 +349,46 @@ export default function DeliveryZoneDetailPage() {
       });
     } finally {
       setSavingAssignmentEdit(false);
+    }
+  }
+
+  async function persistZoneCityOrder(ordered: DeliveryZoneCityRow[]) {
+    const n = ordered.length;
+    if (n === 0) return;
+    const TEMP_BASE = 100_000;
+    const optimistic = ordered.map((r, idx) => ({
+      ...r,
+      sortOrder: idx + 1,
+    }));
+    setZoneCities(optimistic);
+    try {
+      setSavingReorder(true);
+      for (let i = 0; i < n; i++) {
+        const row = ordered[i];
+        await updateZoneCityAssignment({
+          assignmentId: row.id,
+          cityId: row.cityId,
+          sortOrder: TEMP_BASE + i,
+        });
+      }
+      for (let i = 0; i < n; i++) {
+        const row = ordered[i];
+        await updateZoneCityAssignment({
+          assignmentId: row.id,
+          cityId: row.cityId,
+          sortOrder: i + 1,
+        });
+      }
+      toast({ title: "Route order saved" });
+    } catch (e: unknown) {
+      toast({
+        title: "Could not save route order",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+      await reload();
+    } finally {
+      setSavingReorder(false);
     }
   }
 
@@ -581,10 +643,16 @@ export default function DeliveryZoneDetailPage() {
               </Button>
             </div>
 
-            <div className="overflow-x-auto rounded-md border border-border/60">
+            <div
+              className={cn(
+                "overflow-x-auto rounded-md border border-border/60",
+                savingReorder && "pointer-events-none opacity-60",
+              )}
+            >
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-10 px-2" aria-label="Reorder" />
                     <TableHead>City</TableHead>
                     <TableHead className="text-right">Order</TableHead>
                     <TableHead className="text-right w-[140px]">
@@ -596,93 +664,159 @@ export default function DeliveryZoneDetailPage() {
                   {zoneCities.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={3}
+                        colSpan={4}
                         className="py-10 text-center text-muted-foreground"
                       >
                         No cities assigned yet.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    zoneCities.map((zc) => (
-                      <TableRow key={zc.id}>
-                        <TableCell>
-                          {editingAssignmentId === zc.id ? (
-                            <SearchableDeliveryCitySelect
-                              cities={activeCities}
-                              value={editingCityId}
-                              onChange={setEditingCityId}
-                              placeholder="City"
-                              compact
-                            />
-                          ) : (
-                            zc.cityName
+                    zoneCities.map((zc) => {
+                      const canDrag =
+                        editingAssignmentId === null && !savingReorder;
+                      return (
+                        <TableRow
+                          key={zc.id}
+                          className={cn(
+                            draggingAssignmentId === zc.id &&
+                              "bg-muted/50 opacity-80",
                           )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {editingAssignmentId === zc.id ? (
-                            <Input
-                              type="number"
-                              min={1}
-                              value={editingSortOrder}
-                              onChange={(e) =>
-                                setEditingSortOrder(e.target.value)
-                              }
-                              className="ml-auto h-8 w-20"
-                            />
-                          ) : (
-                            zc.sortOrder
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {editingAssignmentId === zc.id ? (
-                            <div className="inline-flex flex-wrap justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={() => void saveAssignmentEdit()}
-                                disabled={
-                                  savingAssignmentEdit ||
-                                  !editingCityId ||
-                                  !editingSortOrder
+                          onDragOver={(e) => {
+                            if (!canDrag) return;
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(e) => {
+                            if (!canDrag) return;
+                            e.preventDefault();
+                            const dragId = e.dataTransfer.getData(
+                              "application/x-zone-city-assignment",
+                            );
+                            if (!dragId || dragId === zc.id) return;
+                            const fromIndex = zoneCities.findIndex(
+                              (r) => r.id === dragId,
+                            );
+                            const toIndex = zoneCities.findIndex(
+                              (r) => r.id === zc.id,
+                            );
+                            if (fromIndex < 0 || toIndex < 0) return;
+                            if (fromIndex === toIndex) return;
+                            const newOrder = arrayMove(
+                              zoneCities,
+                              fromIndex,
+                              toIndex,
+                            );
+                            void persistZoneCityOrder(newOrder);
+                          }}
+                        >
+                          <TableCell className="w-10 px-2 align-middle">
+                            <div
+                              draggable={canDrag}
+                              aria-label={`Drag to reorder ${zc.cityName}`}
+                              title="Drag to reorder"
+                              className={cn(
+                                "flex h-8 w-8 cursor-grab items-center justify-center rounded-md border border-transparent text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing",
+                                !canDrag &&
+                                  "cursor-not-allowed opacity-40 hover:bg-transparent",
+                              )}
+                              onDragStart={(e) => {
+                                if (!canDrag) {
+                                  e.preventDefault();
+                                  return;
                                 }
-                              >
-                                Save
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={cancelEdit}
-                                disabled={savingAssignmentEdit}
-                              >
-                                Cancel
-                              </Button>
+                                e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData(
+                                  "application/x-zone-city-assignment",
+                                  zc.id,
+                                );
+                                setDraggingAssignmentId(zc.id);
+                              }}
+                              onDragEnd={() => {
+                                setDraggingAssignmentId(null);
+                              }}
+                            >
+                              <GripVertical className="h-4 w-4" aria-hidden />
                             </div>
-                          ) : (
-                            <div className="inline-flex justify-end gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => startEdit(zc)}
-                              >
-                                Edit
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                aria-label={`Remove ${zc.cityName} from zone`}
-                                onClick={() => setRemoveTarget(zc)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                          </TableCell>
+                          <TableCell>
+                            {editingAssignmentId === zc.id ? (
+                              <SearchableDeliveryCitySelect
+                                cities={activeCities}
+                                value={editingCityId}
+                                onChange={setEditingCityId}
+                                placeholder="City"
+                                compact
+                              />
+                            ) : (
+                              zc.cityName
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {editingAssignmentId === zc.id ? (
+                              <Input
+                                type="number"
+                                min={1}
+                                value={editingSortOrder}
+                                onChange={(e) =>
+                                  setEditingSortOrder(e.target.value)
+                                }
+                                className="ml-auto h-8 w-20"
+                              />
+                            ) : (
+                              zc.sortOrder
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {editingAssignmentId === zc.id ? (
+                              <div className="inline-flex flex-wrap justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => void saveAssignmentEdit()}
+                                  disabled={
+                                    savingAssignmentEdit ||
+                                    !editingCityId ||
+                                    !editingSortOrder
+                                  }
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={cancelEdit}
+                                  disabled={savingAssignmentEdit}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="inline-flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => startEdit(zc)}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                  aria-label={`Remove ${zc.cityName} from zone`}
+                                  onClick={() => setRemoveTarget(zc)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>

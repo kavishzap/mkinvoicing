@@ -128,6 +128,7 @@ export async function listCustomers(opts?: {
         `company_name.ilike.${s}`,
         `full_name.ilike.${s}`,
         `email.ilike.${s}`,
+        `phone.ilike.${s}`,
       ].join(",")
     );
   }
@@ -139,6 +140,60 @@ export async function listCustomers(opts?: {
     rows: (data ?? []).map(mapRow),
     total: count ?? 0,
   };
+}
+
+/**
+ * Fetch every customer row matching the same filters as `listCustomers`, without pagination.
+ * Used for CSV / Print exports. Internally pages through Supabase in batches of 1000.
+ */
+export async function listAllCustomersForExport(opts?: {
+  search?: string;
+  statusFilter?: CustomerStatusFilter;
+  type?: "company" | "individual";
+}): Promise<CustomerRow[]> {
+  const companyId = await requireActiveCompanyId();
+  const statusFilter: CustomerStatusFilter = opts?.statusFilter ?? "active";
+
+  const BATCH = 1000;
+  let from = 0;
+  const out: CustomerRow[] = [];
+  for (;;) {
+    let q = supabase
+      .from("customers")
+      .select(COLUMNS)
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .range(from, from + BATCH - 1);
+
+    if (statusFilter === "active") {
+      q = q.eq("is_active", true);
+    } else if (statusFilter === "inactive") {
+      q = q.eq("is_active", false);
+    }
+    if (opts?.type) {
+      q = q.eq("type", opts.type);
+    }
+    const term = opts?.search?.trim();
+    if (term) {
+      const s = `%${term}%`;
+      q = q.or(
+        [
+          `company_name.ilike.${s}`,
+          `full_name.ilike.${s}`,
+          `email.ilike.${s}`,
+          `phone.ilike.${s}`,
+        ].join(","),
+      );
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = (data ?? []).map(mapRow);
+    out.push(...batch);
+    if (batch.length < BATCH) break;
+    from += BATCH;
+  }
+  return out;
 }
 
 /** One customer for the active company, or null if not found / wrong tenant. */

@@ -8,8 +8,10 @@ import type { LucideIcon } from "lucide-react";
 import {
   Ban,
   Check,
+  Download,
   MapPin,
   Plus,
+  Printer,
   Search,
   Store,
   Truck,
@@ -32,6 +34,7 @@ import {
 import { AppPageShell } from "@/components/app-page-shell";
 import {
   fetchLocationListFacets,
+  listAllLocationsForExport,
   listLocations,
   formatLocationTypeLabel,
   type LocationListFacets,
@@ -238,6 +241,8 @@ export default function InventoryLocationsPage() {
 
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -421,6 +426,244 @@ export default function InventoryLocationsPage() {
     activeCompanyScope,
   ]);
 
+  const fetchExportRows = useCallback(
+    () =>
+      listAllLocationsForExport({
+        search: debouncedSearch || undefined,
+        locationType: typeFilter === "all" ? undefined : typeFilter,
+        statusFilter,
+      }),
+    [debouncedSearch, typeFilter, statusFilter],
+  );
+
+  const exportFilenameStem = useMemo(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `locations-${yyyy}${mm}${dd}`;
+  }, []);
+
+  const handleExportCsv = useCallback(async () => {
+    if (exportingCsv) return;
+    try {
+      setExportingCsv(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to export",
+          description: "No locations match the current filters.",
+        });
+        return;
+      }
+      const headers = [
+        "Name",
+        "Code",
+        "Type",
+        "Primary warehouse",
+        "Status",
+        "Default",
+        "Address line 1",
+        "Address line 2",
+        "City",
+        "Postal",
+        "Country",
+        "Map link",
+        "Description",
+      ];
+      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const lines = [headers.map(esc).join(",")];
+      for (const r of data) {
+        lines.push(
+          [
+            r.name,
+            r.code,
+            r.locationType ? formatLocationTypeLabel(r.locationType) : "",
+            r.locationType === "warehouse"
+              ? r.isPrimaryWarehouse
+                ? "Yes"
+                : "No"
+              : "",
+            r.isActive ? "Active" : "Inactive",
+            r.isDefault ? "Yes" : "No",
+            r.address_line_1,
+            r.address_line_2,
+            r.city,
+            r.postal,
+            r.country,
+            r.map_link,
+            r.description,
+          ]
+            .map((v) => esc(String(v ?? "")))
+            .join(","),
+        );
+      }
+      const csv = `\uFEFF${lines.join("\r\n")}\r\n`;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportFilenameStem}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({
+        title: "CSV exported",
+        description: `${data.length} location${data.length === 1 ? "" : "s"} exported.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Export failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCsv(false);
+    }
+  }, [exportingCsv, fetchExportRows, exportFilenameStem, toast]);
+
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+    try {
+      setPrinting(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to print",
+          description: "No locations match the current filters.",
+        });
+        return;
+      }
+      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const autoTable = autoTableMod.default;
+
+      const doc = new jsPDF({
+        unit: "pt",
+        format: "a4",
+        orientation: "landscape",
+      });
+      const pageW = doc.internal.pageSize.getWidth();
+      const M = 36;
+
+      doc.setFont("helvetica", "bold").setFontSize(16);
+      doc.text("Locations", M, M + 6);
+      doc.setFont("helvetica", "normal").setFontSize(10);
+      const filterBits: string[] = [];
+      if (statusFilter !== "all") filterBits.push(`Status: ${statusFilter}`);
+      if (typeFilter !== "all") {
+        filterBits.push(`Type: ${formatLocationTypeLabel(typeFilter)}`);
+      }
+      if (debouncedSearch) filterBits.push(`Search: "${debouncedSearch}"`);
+      const subtitle = [
+        new Date().toLocaleString(),
+        `${data.length} location${data.length === 1 ? "" : "s"}`,
+        ...filterBits,
+      ].join("  •  ");
+      doc.setTextColor(120);
+      doc.text(subtitle, M, M + 24);
+      doc.setTextColor(0);
+
+      const body = data.map((r) => {
+        const cityCountry = [r.city, r.country].filter(Boolean).join(", ");
+        return [
+          r.name,
+          r.code || "",
+          r.locationType ? formatLocationTypeLabel(r.locationType) : "",
+          r.locationType === "warehouse"
+            ? r.isPrimaryWarehouse
+              ? "Primary"
+              : ""
+            : "",
+          r.isActive ? "Active" : "Inactive",
+          r.address_line_1 || "",
+          cityCountry,
+          r.postal || "",
+        ];
+      });
+
+      autoTable(doc, {
+        startY: M + 36,
+        head: [
+          [
+            "Name",
+            "Code",
+            "Type",
+            "Primary WH",
+            "Status",
+            "Address",
+            "City / Country",
+            "Postal",
+          ],
+        ],
+        body,
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
+        headStyles: {
+          fillColor: [243, 244, 246],
+          textColor: 20,
+          fontStyle: "bold",
+        },
+        alternateRowStyles: { fillColor: [250, 250, 251] },
+        columnStyles: {
+          0: { cellWidth: 130 },
+          1: { cellWidth: 60 },
+          2: { cellWidth: 80 },
+          3: { cellWidth: 56 },
+          4: { cellWidth: 52 },
+          5: { cellWidth: 160 },
+          6: { cellWidth: 130 },
+          7: { cellWidth: 60 },
+        },
+        margin: { left: M, right: M },
+        didDrawPage: () => {
+          const pageH = doc.internal.pageSize.getHeight();
+          const pageNumber = doc.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.setTextColor(140);
+          doc.text(`Page ${pageNumber}`, pageW - M, pageH - 14, {
+            align: "right",
+          });
+          doc.setTextColor(0);
+        },
+      });
+
+      const filename = `${exportFilenameStem}.pdf`;
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl, "_blank");
+      if (printWindow) {
+        printWindow.onload = () => {
+          setTimeout(() => printWindow.print(), 250);
+        };
+      } else {
+        doc.save(filename);
+        toast({
+          title: "Print blocked",
+          description: "Allow popups to print. PDF downloaded instead.",
+        });
+      }
+    } catch (e: unknown) {
+      toast({
+        title: "Print failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrinting(false);
+    }
+  }, [
+    printing,
+    fetchExportRows,
+    statusFilter,
+    typeFilter,
+    debouncedSearch,
+    exportFilenameStem,
+    toast,
+  ]);
+
   const columns = useMemo<ColumnDef<LocationRow>[]>(
     () => [
       {
@@ -545,12 +788,44 @@ export default function InventoryLocationsPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
-          <Link href="/app/locations/new">
-            <Plus className="h-4 w-4" />
-            Add location
-          </Link>
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              exportingCsv ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handleExportCsv()}
+          >
+            <Download className="h-4 w-4" />
+            {exportingCsv ? "Exporting…" : "Export CSV"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              printing ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handlePrint()}
+          >
+            <Printer className="h-4 w-4" />
+            {printing ? "Preparing…" : "Print"}
+          </Button>
+          <Button className="gap-2" disabled={companyReady !== true} asChild>
+            <Link href="/app/locations/new">
+              <Plus className="h-4 w-4" />
+              Add location
+            </Link>
+          </Button>
+        </div>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (

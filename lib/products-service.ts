@@ -222,6 +222,58 @@ export async function listProducts(opts?: {
   };
 }
 
+/**
+ * Fetch every product matching the same filters as `listProducts`, without pagination.
+ * Internally pages through Supabase in batches of 1000.
+ */
+export async function listAllProductsForExport(opts?: {
+  search?: string;
+  status?: ProductListStatus;
+}): Promise<ProductRow[]> {
+  const companyId = await requireCompanyId();
+  const listStatus = resolveListStatus(opts);
+
+  const BATCH = 1000;
+  let from = 0;
+  const out: ProductRow[] = [];
+
+  for (;;) {
+    let q = supabase
+      .from("products")
+      .select(LIST_COLUMNS)
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .range(from, from + BATCH - 1);
+
+    if (listStatus === "active") {
+      q = q.eq("is_active", true);
+    } else if (listStatus === "inactive") {
+      q = q.eq("is_active", false);
+    }
+
+    const term = opts?.search?.trim();
+    if (term) {
+      const s = `%${term}%`;
+      q = q.or(
+        [`name.ilike.${s}`, `sku.ilike.${s}`, `description.ilike.${s}`].join(
+          ",",
+        ),
+      );
+    }
+
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []).map((r) =>
+      mapRow(r as Record<string, unknown>, false),
+    );
+    out.push(...batch);
+    if (batch.length < BATCH) break;
+    from += BATCH;
+  }
+
+  return out;
+}
+
 export async function getProduct(id: string): Promise<ProductRow> {
   const companyId = await requireCompanyId();
 

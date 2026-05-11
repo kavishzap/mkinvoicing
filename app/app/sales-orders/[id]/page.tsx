@@ -2,7 +2,6 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -12,7 +11,6 @@ import {
   Pencil,
   Receipt,
   ScrollText,
-  Store,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -31,6 +29,7 @@ import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfi
 import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
 import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
 import { SalesOrderViewActions } from "@/components/sales-order-view-actions";
+import { CustomerInfoDialog } from "@/components/customer-info-dialog";
 import {
   getSalesOrder,
   computeSalesOrderTotals,
@@ -126,6 +125,7 @@ export default function SalesOrderViewPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deliveryCities, setDeliveryCities] = useState<DeliveryCityRow[]>([]);
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -244,12 +244,6 @@ export default function SalesOrderViewPage() {
   const ccy = salesOrder.currency;
 
   const from = salesOrder.from_snapshot as {
-    type?: string;
-    company_name?: string;
-    full_name?: string;
-    email?: string;
-    registration_id?: string;
-    vat_number?: string;
     logoUrl?: string;
   };
   const bill = salesOrder.bill_to_snapshot as {
@@ -267,25 +261,8 @@ export default function SalesOrderViewPage() {
   const billName =
     bill.type === "company" ? bill.company_name : bill.full_name;
 
-  const safeProfile = {
-    accountType: profile?.accountType ?? "individual",
-    companyName: profile?.companyName ?? "",
-    fullName: profile?.fullName ?? "",
-    email: profile?.email ?? "",
-    logoUrl: (profile as { logoUrl?: string })?.logoUrl,
-  };
-
-  const fromName =
-    from.type === "company"
-      ? from.company_name
-      : from.full_name ||
-        (safeProfile.accountType === "company"
-          ? safeProfile.companyName
-          : safeProfile.fullName);
-
-  const fromEmail = from.email || safeProfile.email;
-  const logoSrc =
-    from.logoUrl || safeProfile.logoUrl || "/kredence.png";
+  const profileLogoUrl = (profile as { logoUrl?: string } | null)?.logoUrl;
+  const logoSrc = from.logoUrl || profileLogoUrl || "/kredence.png";
 
   const billToIcon = bill.type === "company" ? Building2 : UserRound;
 
@@ -368,105 +345,69 @@ export default function SalesOrderViewPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10">
-            <SectionCard icon={Store} title="Seller">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                {logoSrc ? (
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
-                    <Image
-                      src={logoSrc}
-                      alt=""
-                      width={56}
-                      height={56}
-                      className="object-contain"
-                      priority
-                    />
-                  </div>
-                ) : (
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary text-lg font-bold text-primary-foreground">
-                    S
-                  </div>
-                )}
-                <div className="min-w-0 flex-1 space-y-3">
-                  <InfoRow label="Name">{fromName || "—"}</InfoRow>
-                  {fromEmail ? <InfoRow label="Email">{fromEmail}</InfoRow> : null}
-                  {from?.type === "company" && from?.registration_id ? (
-                    <InfoRow label="Registration">
-                      {String(from.registration_id)}
-                    </InfoRow>
-                  ) : null}
-                  {from?.type === "company" && from?.vat_number ? (
-                    <InfoRow label="VAT">{String(from.vat_number)}</InfoRow>
-                  ) : null}
-                </div>
-              </div>
-            </SectionCard>
-
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start lg:gap-6 xl:gap-7">
           <SectionCard icon={billToIcon} title="Bill to">
-            <div className="space-y-3">
-              <InfoRow label="Customer">{billName || "—"}</InfoRow>
-              {bill?.email ? <InfoRow label="Email">{bill.email}</InfoRow> : null}
-              {bill?.phone ? <InfoRow label="Phone">{bill.phone}</InfoRow> : null}
-              {(bill?.street ||
-                billCityDisplay ||
-                bill?.postal ||
-                bill?.country) && (
-                <InfoRow label="Address">
-                  <span className="block font-normal leading-relaxed">
-                    {bill?.street ? <>{bill.street}</> : null}
-                    {bill?.street && (billCityDisplay || bill?.postal) ? <br /> : null}
-                    {[billCityDisplay, bill?.postal].filter(Boolean).join(", ")}
-                    {bill?.country ? (
-                      <>
-                        {(billCityDisplay || bill?.postal) ? <br /> : null}
-                        {bill.country}
-                      </>
-                    ) : null}
-                  </span>
+            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              <div className="space-y-3">
+                <InfoRow label="Customer">{billName || "—"}</InfoRow>
+                {bill?.email ? <InfoRow label="Email">{bill.email}</InfoRow> : null}
+                {bill?.phone ? <InfoRow label="Phone">{bill.phone}</InfoRow> : null}
+                {(bill?.street ||
+                  billCityDisplay ||
+                  bill?.postal ||
+                  bill?.country) && (
+                  <InfoRow label="Address">
+                    <span className="block font-normal leading-relaxed">
+                      {bill?.street ? <>{bill.street}</> : null}
+                      {bill?.street && (billCityDisplay || bill?.postal) ? <br /> : null}
+                      {[billCityDisplay, bill?.postal].filter(Boolean).join(", ")}
+                      {bill?.country ? (
+                        <>
+                          {(billCityDisplay || bill?.postal) ? <br /> : null}
+                          {bill.country}
+                        </>
+                      ) : null}
+                    </span>
+                  </InfoRow>
+                )}
+              </div>
+
+              <div className="space-y-3 sm:border-l sm:border-border/60 sm:pl-6">
+                <InfoRow label="Delivery date">
+                  {salesOrder.delivery_date ? (
+                    fmtDate(salesOrder.delivery_date)
+                  ) : (
+                    <span className="font-normal italic text-muted-foreground">
+                      Date not set yet
+                    </span>
+                  )}
                 </InfoRow>
-              )}
+                {salesOrder.created_from_quotation_id ? (
+                  <InfoRow label="Created from quotation">
+                    <Link
+                      href={`/app/quotations/${salesOrder.created_from_quotation_id}`}
+                      className="font-medium text-primary underline underline-offset-2"
+                    >
+                      Open quotation
+                    </Link>
+                  </InfoRow>
+                ) : null}
+                {salesOrder.customer_id ? (
+                  <InfoRow label="Linked customer">
+                    <button
+                      type="button"
+                      onClick={() => setCustomerDialogOpen(true)}
+                      className="font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
+                    >
+                      View customer
+                    </button>
+                  </InfoRow>
+                ) : null}
+              </div>
             </div>
-
-            <Separator className="my-4" />
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <InfoRow label="Issue date">{fmtDate(salesOrder.issue_date)}</InfoRow>
-              <InfoRow label="Valid until">{fmtDate(salesOrder.valid_until)}</InfoRow>
-              <InfoRow label="Delivery date">
-                {salesOrder.delivery_date
-                  ? fmtDate(salesOrder.delivery_date)
-                  : "—"}
-              </InfoRow>
-            </div>
-            {salesOrder.created_from_quotation_id ? (
-              <InfoRow label="Created from quotation">
-                <Link
-                  href={`/app/quotations/${salesOrder.created_from_quotation_id}`}
-                  className="font-medium text-primary underline underline-offset-2"
-                >
-                  Open quotation
-                </Link>
-              </InfoRow>
-            ) : null}
-            {salesOrder.customer_id ? (
-              <InfoRow label="Linked customer">
-                <Link
-                  href={`/app/customers/${salesOrder.customer_id}/edit`}
-                  className="font-medium text-primary underline underline-offset-2"
-                >
-                  View customer record
-                </Link>
-              </InfoRow>
-            ) : null}
           </SectionCard>
-        </div>
 
-        <div className="flex justify-stretch lg:justify-end">
-          <SectionCard
-            icon={Receipt}
-            title="Totals"
-            className="w-full lg:max-w-md"
-          >
+          <SectionCard icon={Receipt} title="Totals">
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Subtotal</span>
@@ -599,6 +540,14 @@ export default function SalesOrderViewPage() {
         )}
         </div>
       </div>
+
+      {salesOrder.customer_id ? (
+        <CustomerInfoDialog
+          customerId={salesOrder.customer_id}
+          open={customerDialogOpen}
+          onOpenChange={setCustomerDialogOpen}
+        />
+      ) : null}
     </AppPageShell>
   );
 }

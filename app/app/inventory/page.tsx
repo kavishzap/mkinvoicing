@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Layers,
+  MapPin,
   RefreshCw,
   ArrowRightLeft,
   PackagePlus,
@@ -58,6 +59,14 @@ function formatWhen(iso: string) {
   } catch {
     return iso;
   }
+}
+
+function formatQty(n: number) {
+  if (n === 0) return "0";
+  const abs = Math.abs(n);
+  if (abs >= 1 && Number.isInteger(n)) return String(n);
+  const s = n.toFixed(3).replace(/\.?0+$/, "");
+  return s;
 }
 
 export default function InventoryPage() {
@@ -380,6 +389,40 @@ export default function InventoryPage() {
   const balancePages = Math.max(1, Math.ceil(balanceTotal / balancePageSize));
   const movPages = Math.max(1, Math.ceil(movTotal / movPageSize));
 
+  /** Groups current page rows by warehouse so each location is one block with its products listed underneath. */
+  const balancesByLocation = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        locationId: string;
+        locationName: string;
+        locationCode: string;
+        lines: StockBalanceRow[];
+      }
+    >();
+    for (const b of balances) {
+      let g = map.get(b.location_id);
+      if (!g) {
+        g = {
+          locationId: b.location_id,
+          locationName: b.location_name,
+          locationCode: b.location_code,
+          lines: [],
+        };
+        map.set(b.location_id, g);
+      }
+      g.lines.push(b);
+    }
+    for (const g of map.values()) {
+      g.lines.sort((a, b) =>
+        a.product_name.localeCompare(b.product_name, undefined, { sensitivity: "base" }),
+      );
+    }
+    return [...map.values()].sort((a, b) =>
+      a.locationName.localeCompare(b.locationName, undefined, { sensitivity: "base" }),
+    );
+  }, [balances]);
+
   const shellActions = useMemo(() => {
     const disabled = companyReady !== true;
     if (tab === "balances") {
@@ -509,7 +552,8 @@ export default function InventoryPage() {
               <div>
                 <CardTitle className="text-base">On-hand by location</CardTitle>
                 <CardDescription>
-                  Current quantity per product and warehouse (from live balances).
+                  Stock grouped by warehouse: open a location to see every product and quantity on hand
+                  there (live balances).
                 </CardDescription>
               </div>
             </CardHeader>
@@ -561,65 +605,101 @@ export default function InventoryPage() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50 text-muted-foreground">
-                    <tr>
-                      <th className="p-3 text-left">Location</th>
-                      <th className="p-3 text-left">Product</th>
-                      <th className="p-3 text-left">SKU</th>
-                      <th className="p-3 text-right">Qty</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {balanceLoading ? (
-                      <tr>
-                        <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                          Loading…
-                        </td>
-                      </tr>
-                    ) : (
-                      balances.map((b) => (
-                        <tr key={`${b.location_id}-${b.product_id}`} className="border-t">
-                          <td className="p-3">
-                            <Link
-                              href={`/app/locations/${b.location_id}?tab=products-line`}
-                              className="inline-flex font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-                            >
-                              {b.location_name}
-                              {b.location_code ? (
-                                <span className="text-muted-foreground font-normal">
-                                  {" "}
-                                  ({b.location_code})
-                                </span>
-                              ) : null}
-                            </Link>
-                          </td>
-                          <td className="p-3">{b.product_name}</td>
-                          <td className="p-3 text-muted-foreground">{b.product_sku || "—"}</td>
-                          <td className="p-3 text-right tabular-nums font-medium">{b.quantity}</td>
-                        </tr>
-                      ))
-                    )}
-                    {!balanceLoading && balances.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                          <div className="flex flex-col items-center gap-2">
-                            <Layers className="h-10 w-10 opacity-40" />
-                            No stock rows yet. Use Refill to add inventory, or sync from product setup.
+              {balanceLoading ? (
+                <div className="rounded-md border p-10 text-center text-sm text-muted-foreground">
+                  Loading…
+                </div>
+              ) : balances.length === 0 ? (
+                <div className="rounded-md border p-8 text-center text-muted-foreground">
+                  <div className="flex flex-col items-center gap-2">
+                    <Layers className="h-10 w-10 opacity-40" />
+                    No stock rows yet. Use Refill to add inventory, or sync from product setup.
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {balancesByLocation.map((group) => {
+                    const totalUnits = group.lines.reduce((s, row) => s + row.quantity, 0);
+                    return (
+                      <div
+                        key={group.locationId}
+                        className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <MapPin
+                              className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+                              aria-hidden
+                            />
+                            <div className="min-w-0">
+                              <Link
+                                href={`/app/locations/${group.locationId}?tab=products-line`}
+                                className="inline-flex flex-wrap items-baseline gap-x-2 font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                              >
+                                <span>{group.locationName}</span>
+                                {group.location_code ? (
+                                  <span className="text-sm font-normal text-muted-foreground">
+                                    ({group.location_code})
+                                  </span>
+                                ) : null}
+                              </Link>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {group.lines.length} product{group.lines.length === 1 ? "" : "s"} ·{" "}
+                                {formatQty(totalUnits)} total units
+                              </p>
+                            </div>
                           </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/25 text-xs text-muted-foreground">
+                              <tr>
+                                <th className="px-4 py-2 text-left font-medium">Product</th>
+                                <th className="px-4 py-2 text-left font-medium">SKU</th>
+                                <th className="px-4 py-2 text-right font-medium">Qty</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.lines.map((b) => (
+                                <tr
+                                  key={`${b.location_id}-${b.product_id}`}
+                                  className="border-t border-border/60"
+                                >
+                                  <td className="px-4 py-2.5">{b.product_name}</td>
+                                  <td className="px-4 py-2.5 text-muted-foreground">
+                                    {b.product_sku || "—"}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right tabular-nums font-medium">
+                                    {formatQty(b.quantity)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <span>
-                  Page <span className="font-medium text-foreground">{balancePage}</span> /{" "}
-                  {balancePages} — {balanceTotal} row(s)
-                </span>
+                <div className="space-y-1">
+                  <span>
+                    Page <span className="font-medium text-foreground">{balancePage}</span> /{" "}
+                    {balancePages} — {balanceTotal} product line(s)
+                    {!balanceLoading && balances.length > 0 ? (
+                      <>
+                        {" "}
+                        · {balancesByLocation.length} location
+                        {balancesByLocation.length === 1 ? "" : "s"} on this page
+                      </>
+                    ) : null}
+                  </span>
+                  <p className="text-xs text-muted-foreground">
+                    Pagination counts product lines; a location can span two pages if it has many SKUs.
+                  </p>
+                </div>
                 <div className="flex gap-2">
                   <Button
                     type="button"

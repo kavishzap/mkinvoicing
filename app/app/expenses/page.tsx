@@ -9,9 +9,10 @@ import type { LucideIcon } from "lucide-react";
 import {
   CalendarDays,
   CalendarRange,
-  CircleDollarSign,
+  Download,
   MoreVertical,
   Plus,
+  Printer,
   Receipt,
   Search,
   SlidersVertical,
@@ -49,6 +50,7 @@ import { AppPageShell } from "@/components/app-page-shell";
 import {
   deleteExpense,
   fetchExpenseListFacets,
+  listAllExpensesForExport,
   listExpenses,
   type ExpenseListFacets,
   type ExpensePeriodFilter,
@@ -60,14 +62,10 @@ function ExpensesFilterSidebar({
   facets,
   periodFilter,
   onPeriodChange,
-  currencyFilter,
-  onCurrencyChange,
 }: {
   facets: ExpenseListFacets;
   periodFilter: ExpensePeriodFilter;
   onPeriodChange: (v: ExpensePeriodFilter) => void;
-  currencyFilter: string;
-  onCurrencyChange: (v: string) => void;
 }) {
   const periodRows: {
     id: ExpensePeriodFilter;
@@ -94,22 +92,6 @@ function ExpensesFilterSidebar({
       count: facets.thisYearCount,
     },
   ];
-
-  const currencyRows: { id: string; label: string; icon: LucideIcon; count: number }[] =
-    [
-      {
-        id: "all",
-        label: "All currencies",
-        icon: CircleDollarSign,
-        count: facets.companyTotal,
-      },
-      ...facets.currencyCounts.map((c) => ({
-        id: c.currency,
-        label: c.currency,
-        icon: CircleDollarSign,
-        count: c.count,
-      })),
-    ];
 
   const rowBtn =
     "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors leading-snug";
@@ -154,43 +136,6 @@ function ExpensesFilterSidebar({
             })}
           </nav>
         </div>
-        <div>
-          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
-            By currency
-          </h3>
-          <nav className="flex flex-col gap-px" aria-label="Filter by currency">
-            {currencyRows.map((item) => {
-              const Icon = item.icon;
-              const selected = currencyFilter === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onCurrencyChange(item.id)}
-                  aria-pressed={selected}
-                  className={cn(
-                    rowBtn,
-                    selected
-                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
-                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  <span
-                    className={cn(
-                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
-                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
-                      "dark:bg-muted/70",
-                    )}
-                  >
-                    {item.count}
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
       </div>
     </aside>
   );
@@ -206,7 +151,6 @@ export default function ExpensesPage() {
   const [facets, setFacets] = useState<ExpenseListFacets | null>(null);
 
   const [periodFilter, setPeriodFilter] = useState<ExpensePeriodFilter>("all");
-  const [currencyFilter, setCurrencyFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -219,13 +163,14 @@ export default function ExpensesPage() {
   const prevListDepsRef = useRef({
     debouncedSearch: "",
     periodFilter: "all" as ExpensePeriodFilter,
-    currencyFilter: "all",
     pageSize: 10,
     activeCompanyScope: 0,
   });
 
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -295,7 +240,6 @@ export default function ExpensesPage() {
     const depsChanged =
       prev.debouncedSearch !== debouncedSearch ||
       prev.periodFilter !== periodFilter ||
-      prev.currencyFilter !== currencyFilter ||
       prev.pageSize !== pageSize ||
       prev.activeCompanyScope !== activeCompanyScope;
 
@@ -307,7 +251,6 @@ export default function ExpensesPage() {
     prevListDepsRef.current = {
       debouncedSearch,
       periodFilter,
-      currencyFilter,
       pageSize,
       activeCompanyScope,
     };
@@ -321,7 +264,6 @@ export default function ExpensesPage() {
         const listRes = await listExpenses({
           search: debouncedSearch || undefined,
           period: periodFilter,
-          currency: currencyFilter === "all" ? undefined : currencyFilter,
           page,
           pageSize,
         });
@@ -351,7 +293,6 @@ export default function ExpensesPage() {
     companyReady,
     debouncedSearch,
     periodFilter,
-    currencyFilter,
     page,
     pageSize,
     activeCompanyScope,
@@ -368,7 +309,6 @@ export default function ExpensesPage() {
         listExpenses({
           search: debouncedSearch || undefined,
           period: periodFilter,
-          currency: currencyFilter === "all" ? undefined : currencyFilter,
           page,
           pageSize,
         }),
@@ -380,7 +320,6 @@ export default function ExpensesPage() {
       prevListDepsRef.current = {
         debouncedSearch,
         periodFilter,
-        currencyFilter,
         pageSize,
         activeCompanyScope,
       };
@@ -399,7 +338,6 @@ export default function ExpensesPage() {
   }, [
     companyReady,
     periodFilter,
-    currencyFilter,
     debouncedSearch,
     page,
     pageSize,
@@ -426,6 +364,253 @@ export default function ExpensesPage() {
       setConfirmDeleteId(null);
     }
   }
+
+  const fetchExportRows = useCallback(
+    () =>
+      listAllExpensesForExport({
+        search: debouncedSearch || undefined,
+        period: periodFilter,
+      }),
+    [debouncedSearch, periodFilter],
+  );
+
+  const exportFilenameStem = useMemo(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `expenses-${yyyy}${mm}${dd}`;
+  }, []);
+
+  const formatExpenseDate = (iso?: string) => {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  const formatAmount = (n: number) =>
+    n.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  const handleExportCsv = useCallback(async () => {
+    if (exportingCsv) return;
+    try {
+      setExportingCsv(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to export",
+          description: "No expenses match the current filters.",
+        });
+        return;
+      }
+      const headers = [
+        "Date",
+        "Description",
+        "Currency",
+        "Amount",
+        "Notes",
+        "Invoice ID",
+        "Line items",
+      ];
+      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const lines = [headers.map(esc).join(",")];
+      for (const r of data) {
+        const itemsLabel = (r.line_items ?? [])
+          .map((li) => {
+            const name = (li.item ?? "").trim() || "Item";
+            const qty = Number(li.quantity ?? 0);
+            const total = Number(li.line_total ?? 0);
+            return `${name} (x${qty}) — ${formatAmount(total)}`;
+          })
+          .join(" | ");
+        lines.push(
+          [
+            formatExpenseDate(r.expense_date),
+            r.description ?? "",
+            r.currency ?? "MUR",
+            formatAmount(Number(r.amount ?? 0)),
+            r.notes ?? "",
+            r.invoice_id ?? "",
+            itemsLabel,
+          ]
+            .map((v) => esc(String(v ?? "")))
+            .join(","),
+        );
+      }
+      const csv = `\uFEFF${lines.join("\r\n")}\r\n`;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportFilenameStem}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({
+        title: "CSV exported",
+        description: `${data.length} expense${data.length === 1 ? "" : "s"} exported.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Export failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCsv(false);
+    }
+  }, [exportingCsv, fetchExportRows, exportFilenameStem, toast]);
+
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+    try {
+      setPrinting(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to print",
+          description: "No expenses match the current filters.",
+        });
+        return;
+      }
+      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const autoTable = autoTableMod.default;
+
+      const doc = new jsPDF({
+        unit: "pt",
+        format: "a4",
+        orientation: "landscape",
+      });
+      const pageW = doc.internal.pageSize.getWidth();
+      const M = 36;
+
+      doc.setFont("helvetica", "bold").setFontSize(16);
+      doc.text("Expenses", M, M + 6);
+      doc.setFont("helvetica", "normal").setFontSize(10);
+
+      const totalsByCurrency = new Map<string, number>();
+      for (const r of data) {
+        const cur = (r.currency || "MUR").toUpperCase();
+        totalsByCurrency.set(
+          cur,
+          (totalsByCurrency.get(cur) ?? 0) + Number(r.amount ?? 0),
+        );
+      }
+      const totalsLabel = [...totalsByCurrency.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([cur, sum]) => `${cur} ${formatAmount(sum)}`)
+        .join(" · ");
+
+      const filterBits: string[] = [];
+      if (periodFilter === "month") filterBits.push("Period: This month");
+      else if (periodFilter === "year") filterBits.push("Period: This year");
+      if (debouncedSearch) filterBits.push(`Search: "${debouncedSearch}"`);
+
+      const subtitle = [
+        new Date().toLocaleString(),
+        `${data.length} expense${data.length === 1 ? "" : "s"}`,
+        ...filterBits,
+      ].join("  •  ");
+      doc.setTextColor(120);
+      doc.text(subtitle, M, M + 24);
+      if (totalsLabel) {
+        doc.setFont("helvetica", "bold").setTextColor(20);
+        doc.text(`Total: ${totalsLabel}`, M, M + 40);
+      }
+      doc.setFont("helvetica", "normal").setTextColor(0);
+
+      const body = data.map((r) => {
+        const notes = (r.notes ?? "").replace(/\s+/g, " ").trim();
+        const notesShort =
+          notes.length > 140 ? `${notes.slice(0, 137)}…` : notes;
+        return [
+          formatExpenseDate(r.expense_date),
+          r.description ?? "",
+          r.currency ?? "MUR",
+          formatAmount(Number(r.amount ?? 0)),
+          String((r.line_items ?? []).length),
+          notesShort,
+        ];
+      });
+
+      autoTable(doc, {
+        startY: M + (totalsLabel ? 54 : 36),
+        head: [["Date", "Description", "Currency", "Amount", "Items", "Notes"]],
+        body,
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
+        headStyles: {
+          fillColor: [243, 244, 246],
+          textColor: 20,
+          fontStyle: "bold",
+        },
+        alternateRowStyles: { fillColor: [250, 250, 251] },
+        columnStyles: {
+          0: { cellWidth: 72 },
+          1: { cellWidth: 220 },
+          2: { cellWidth: 48, halign: "center" },
+          3: { cellWidth: 80, halign: "right" },
+          4: { cellWidth: 40, halign: "right" },
+          5: { cellWidth: 280 },
+        },
+        margin: { left: M, right: M },
+        didDrawPage: () => {
+          const pageH = doc.internal.pageSize.getHeight();
+          const pageNumber = doc.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.setTextColor(140);
+          doc.text(`Page ${pageNumber}`, pageW - M, pageH - 14, {
+            align: "right",
+          });
+          doc.setTextColor(0);
+        },
+      });
+
+      const filename = `${exportFilenameStem}.pdf`;
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl, "_blank");
+      if (printWindow) {
+        printWindow.onload = () => {
+          setTimeout(() => printWindow.print(), 250);
+        };
+      } else {
+        doc.save(filename);
+        toast({
+          title: "Print blocked",
+          description: "Allow popups to print. PDF downloaded instead.",
+        });
+      }
+    } catch (e: unknown) {
+      toast({
+        title: "Print failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrinting(false);
+    }
+  }, [
+    printing,
+    fetchExportRows,
+    periodFilter,
+    debouncedSearch,
+    exportFilenameStem,
+    toast,
+  ]);
 
   const columns = useMemo<ColumnDef<ExpenseRow>[]>(
     () => [
@@ -528,11 +713,8 @@ export default function ExpensesPage() {
   );
 
   const hasActiveFilters = useMemo(
-    () =>
-      debouncedSearch !== "" ||
-      periodFilter !== "all" ||
-      currencyFilter !== "all",
-    [debouncedSearch, periodFilter, currencyFilter],
+    () => debouncedSearch !== "" || periodFilter !== "all",
+    [debouncedSearch, periodFilter],
   );
 
   const listRangeLabel = useMemo(() => {
@@ -564,12 +746,44 @@ export default function ExpensesPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
-          <Link href="/app/expenses/new">
-            <Plus className="h-4 w-4" />
-            Add expense
-          </Link>
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              exportingCsv ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handleExportCsv()}
+          >
+            <Download className="h-4 w-4" />
+            {exportingCsv ? "Exporting…" : "Export CSV"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              printing ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handlePrint()}
+          >
+            <Printer className="h-4 w-4" />
+            {printing ? "Preparing…" : "Print"}
+          </Button>
+          <Button className="gap-2" disabled={companyReady !== true} asChild>
+            <Link href="/app/expenses/new">
+              <Plus className="h-4 w-4" />
+              Add expense
+            </Link>
+          </Button>
+        </div>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
@@ -634,11 +848,6 @@ export default function ExpensesPage() {
                 onPeriodChange={(v) => {
                   setPage(1);
                   setPeriodFilter(v);
-                }}
-                currencyFilter={currencyFilter}
-                onCurrencyChange={(v) => {
-                  setPage(1);
-                  setCurrencyFilter(v);
                 }}
               />
             </div>
@@ -707,7 +916,6 @@ export default function ExpensesPage() {
                             setPage(1);
                             setSearchQuery("");
                             setPeriodFilter("all");
-                            setCurrencyFilter("all");
                           }}
                         >
                           Clear filters

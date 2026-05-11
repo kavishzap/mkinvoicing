@@ -9,16 +9,24 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { LucideIcon } from "lucide-react";
 import {
   BadgeCheck,
+  CalendarClock,
+  CheckCircle2,
   ClipboardList,
+  Clock,
   Copy,
   Eye,
+  FilePlus2,
+  FileText,
   MoreHorizontal,
+  PackageCheck,
   Pencil,
   Plus,
   Search,
   SlidersVertical,
-  TimerOff,
+  StickyNote,
   Trash2,
+  Truck,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,6 +48,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
@@ -55,8 +69,8 @@ import {
   updateSalesOrderPaymentStatus,
   salesOrderFulfillmentAllowsEditing,
   SALES_ORDER_FULFILLMENT_LABELS,
+  type SalesOrderFulfillmentStatus,
   type SalesOrderListRow,
-  type SalesOrderStatus,
 } from "@/lib/sales-orders-service";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
@@ -68,23 +82,44 @@ import { cn } from "@/lib/utils";
 
 type SalesOrderListFacets = {
   companyTotal: number;
-  activeCount: number;
-  expiredCount: number;
+  byFulfillment: Record<SalesOrderFulfillmentStatus, number>;
 };
+
+const FULFILLMENT_FILTER_ICONS: Record<SalesOrderFulfillmentStatus, LucideIcon> = {
+  new: FilePlus2,
+  pending: Clock,
+  "delivery note created": FileText,
+  "delivered to driver": Truck,
+  "delivered to customer": PackageCheck,
+  completed: CheckCircle2,
+  cancelled: XCircle,
+  rescheduled: CalendarClock,
+};
+
+const FULFILLMENT_FILTER_ORDER: SalesOrderFulfillmentStatus[] = [
+  "new",
+  "pending",
+  "delivery note created",
+  "delivered to driver",
+  "delivered to customer",
+  "completed",
+  "rescheduled",
+  "cancelled",
+];
 
 function SalesOrdersFilterSidebar({
   id,
   facets,
-  statusFilter,
-  onStatusChange,
+  fulfillmentFilter,
+  onFulfillmentChange,
 }: {
   id?: string;
   facets: SalesOrderListFacets;
-  statusFilter: SalesOrderStatus | "all";
-  onStatusChange: (v: SalesOrderStatus | "all") => void;
+  fulfillmentFilter: SalesOrderFulfillmentStatus | "all";
+  onFulfillmentChange: (v: SalesOrderFulfillmentStatus | "all") => void;
 }) {
   const rows: {
-    id: SalesOrderStatus | "all";
+    id: SalesOrderFulfillmentStatus | "all";
     label: string;
     icon: LucideIcon;
     count: number;
@@ -95,18 +130,12 @@ function SalesOrdersFilterSidebar({
       icon: ClipboardList,
       count: facets.companyTotal,
     },
-    {
-      id: "active",
-      label: "Active",
-      icon: BadgeCheck,
-      count: facets.activeCount,
-    },
-    {
-      id: "expired",
-      label: "Expired",
-      icon: TimerOff,
-      count: facets.expiredCount,
-    },
+    ...FULFILLMENT_FILTER_ORDER.map((s) => ({
+      id: s,
+      label: SALES_ORDER_FULFILLMENT_LABELS[s] ?? s,
+      icon: FULFILLMENT_FILTER_ICONS[s],
+      count: facets.byFulfillment[s] ?? 0,
+    })),
   ];
 
   const rowBtn =
@@ -117,17 +146,20 @@ function SalesOrdersFilterSidebar({
       <div className="space-y-7 py-1">
         <div>
           <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
-            By validity
+            By fulfillment
           </h3>
-          <nav className="flex flex-col gap-px" aria-label="Filter by validity">
+          <nav
+            className="flex flex-col gap-px"
+            aria-label="Filter by fulfillment status"
+          >
             {rows.map((item) => {
               const Icon = item.icon;
-              const selected = statusFilter === item.id;
+              const selected = fulfillmentFilter === item.id;
               return (
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => onStatusChange(item.id)}
+                  onClick={() => onFulfillmentChange(item.id)}
                   aria-pressed={selected}
                   className={cn(
                     rowBtn,
@@ -166,9 +198,9 @@ export default function SalesOrdersPage() {
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<SalesOrderListFacets | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState<SalesOrderStatus | "all">(
-    "all",
-  );
+  const [fulfillmentFilter, setFulfillmentFilter] = useState<
+    SalesOrderFulfillmentStatus | "all"
+  >("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -181,7 +213,7 @@ export default function SalesOrdersPage() {
   const listRequestGen = useRef(0);
   const prevListDepsRef = useRef({
     debouncedSearch: "",
-    statusFilter: "all" as SalesOrderStatus | "all",
+    fulfillmentFilter: "all" as SalesOrderFulfillmentStatus | "all",
     pageSize: 10,
     activeCompanyScope: 0,
   });
@@ -238,8 +270,7 @@ export default function SalesOrdersPage() {
         if (cancelled) return;
         setFacets({
           companyTotal: kpis.total,
-          activeCount: kpis.active,
-          expiredCount: kpis.expired,
+          byFulfillment: kpis.byFulfillment,
         });
       } catch (e: unknown) {
         if (!cancelled) {
@@ -268,7 +299,7 @@ export default function SalesOrdersPage() {
     const prev = prevListDepsRef.current;
     const depsChanged =
       prev.debouncedSearch !== debouncedSearch ||
-      prev.statusFilter !== statusFilter ||
+      prev.fulfillmentFilter !== fulfillmentFilter ||
       prev.pageSize !== pageSize ||
       prev.activeCompanyScope !== activeCompanyScope;
 
@@ -279,7 +310,7 @@ export default function SalesOrdersPage() {
 
     prevListDepsRef.current = {
       debouncedSearch,
-      statusFilter,
+      fulfillmentFilter,
       pageSize,
       activeCompanyScope,
     };
@@ -292,7 +323,7 @@ export default function SalesOrdersPage() {
       try {
         const listRes = await listSalesOrders({
           search: debouncedSearch || undefined,
-          status: statusFilter,
+          fulfillmentStatus: fulfillmentFilter,
           page,
           pageSize,
           skipExpireStale: true,
@@ -322,7 +353,7 @@ export default function SalesOrdersPage() {
   }, [
     companyReady,
     debouncedSearch,
-    statusFilter,
+    fulfillmentFilter,
     page,
     pageSize,
     activeCompanyScope,
@@ -339,7 +370,7 @@ export default function SalesOrdersPage() {
         getSalesOrderKpiCounts(),
         listSalesOrders({
           search: debouncedSearch || undefined,
-          status: statusFilter,
+          fulfillmentStatus: fulfillmentFilter,
           page,
           pageSize,
           skipExpireStale: true,
@@ -348,14 +379,13 @@ export default function SalesOrdersPage() {
       if (gen !== listRequestGen.current) return;
       setFacets({
         companyTotal: kpis.total,
-        activeCount: kpis.active,
-        expiredCount: kpis.expired,
+        byFulfillment: kpis.byFulfillment,
       });
       setRows(listRes.rows);
       setTotal(listRes.total);
       prevListDepsRef.current = {
         debouncedSearch,
-        statusFilter,
+        fulfillmentFilter,
         pageSize,
         activeCompanyScope,
       };
@@ -373,7 +403,7 @@ export default function SalesOrdersPage() {
   }, [
     companyReady,
     debouncedSearch,
-    statusFilter,
+    fulfillmentFilter,
     page,
     pageSize,
     activeCompanyScope,
@@ -458,34 +488,12 @@ export default function SalesOrdersPage() {
         meta: { tdClassName: "text-muted-foreground" },
       },
       {
-        id: "createdAt",
-        accessorFn: (r) =>
-          r.createdAt ? new Date(r.createdAt).getTime() : 0,
+        id: "createdBy",
+        accessorFn: (r) => r.createdByName ?? "",
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Created" />
+          <DataTableColumnHeader column={column} title="Created by" />
         ),
-        cell: ({ row }) =>
-          row.original.createdAt
-            ? formatDate(row.original.createdAt)
-            : "—",
-        meta: { tdClassName: "text-muted-foreground" },
-      },
-      {
-        id: "issueDate",
-        accessorFn: (r) => new Date(r.issueDate).getTime(),
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Issue date" />
-        ),
-        cell: ({ row }) => formatDate(row.original.issueDate),
-        meta: { tdClassName: "text-muted-foreground" },
-      },
-      {
-        id: "validUntil",
-        accessorFn: (r) => new Date(r.validUntil).getTime(),
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Valid until" />
-        ),
-        cell: ({ row }) => formatDate(row.original.validUntil),
+        cell: ({ row }) => row.original.createdByName || "—",
         meta: { tdClassName: "text-muted-foreground" },
       },
       {
@@ -507,11 +515,48 @@ export default function SalesOrdersPage() {
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Fulfillment" />
         ),
-        cell: ({ row }) => (
-          <SalesOrderFulfillmentStatusBadge
-            status={row.original.fulfillmentStatus}
-          />
-        ),
+        cell: ({ row }) => {
+          const so = row.original;
+          const showNoteHint =
+            so.fulfillmentStatus === "pending" && so.notes.length > 0;
+          return (
+            <div className="flex items-center gap-1.5">
+              <SalesOrderFulfillmentStatusBadge
+                status={so.fulfillmentStatus}
+              />
+              {showNoteHint ? (
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Pending sales order has notes"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300/70 bg-amber-100 text-amber-900 hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:border-amber-700/60 dark:bg-amber-900/40 dark:text-amber-100"
+                      >
+                        <StickyNote className="h-3 w-3" aria-hidden />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      align="start"
+                      className="max-w-xs whitespace-pre-line text-left"
+                    >
+                      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-background/70">
+                        Pending — notes
+                      </p>
+                      <p className="text-xs leading-snug">
+                        {so.notes.length > 240
+                          ? `${so.notes.slice(0, 240)}…`
+                          : so.notes}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+            </div>
+          );
+        },
         meta: {
           tdClassName: "text-muted-foreground",
           searchValue: (row: SalesOrderListRow) =>
@@ -632,8 +677,8 @@ export default function SalesOrdersPage() {
   };
 
   const hasActiveFilters = useMemo(
-    () => debouncedSearch !== "" || statusFilter !== "all",
-    [debouncedSearch, statusFilter],
+    () => debouncedSearch !== "" || fulfillmentFilter !== "all",
+    [debouncedSearch, fulfillmentFilter],
   );
 
   const listRangeLabel = useMemo(() => {
@@ -728,10 +773,10 @@ export default function SalesOrdersPage() {
             <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
               <SalesOrdersFilterSidebar
                 facets={facets}
-                statusFilter={statusFilter}
-                onStatusChange={(v) => {
+                fulfillmentFilter={fulfillmentFilter}
+                onFulfillmentChange={(v) => {
                   setPage(1);
-                  setStatusFilter(v);
+                  setFulfillmentFilter(v);
                 }}
               />
             </div>
@@ -748,7 +793,7 @@ export default function SalesOrdersPage() {
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by order # or client…"
+                  placeholder="Search by order #, client, or phone…"
                   className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
                   aria-label="Search sales orders"
                   autoComplete="off"
@@ -781,7 +826,7 @@ export default function SalesOrdersPage() {
                   hasActiveFilters ? (
                     <FeatureEmptyState
                       title="No sales orders match your filters"
-                      description="Try clearing search or adjusting validity filters."
+                      description="Try clearing search or adjusting fulfillment filters."
                       action={
                         <Button
                           variant="outline"
@@ -789,7 +834,7 @@ export default function SalesOrdersPage() {
                           onClick={() => {
                             setPage(1);
                             setSearchQuery("");
-                            setStatusFilter("all");
+                            setFulfillmentFilter("all");
                           }}
                         >
                           Clear filters
@@ -801,7 +846,7 @@ export default function SalesOrdersPage() {
                     <FeatureEmptyState
                       icon={ClipboardList}
                       title="No sales orders yet"
-                      description="Create a sales order to see it listed here with validity counts in the sidebar."
+                      description="Create a sales order to see it listed here with fulfillment counts in the sidebar."
                       action={
                         <Button className="gap-2" asChild>
                           <Link href="/app/sales-orders/new">

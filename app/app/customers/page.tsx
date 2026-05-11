@@ -7,12 +7,12 @@ import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { LucideIcon } from "lucide-react";
 import {
-  Ban,
   Building2,
-  Check,
+  Download,
   MoreVertical,
   Pencil,
   Plus,
+  Printer,
   Search,
   SlidersVertical,
   Trash2,
@@ -48,11 +48,11 @@ import { useToast } from "@/hooks/use-toast";
 import {
   deleteCustomer,
   fetchCustomerListFacets,
+  listAllCustomersForExport,
   listCustomers,
   setCustomerActive,
   type CustomerListFacets,
   type CustomerRow,
-  type CustomerStatusFilter,
 } from "@/lib/customers-service";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
@@ -78,43 +78,13 @@ function iconForCustomerType(type: string): LucideIcon {
 
 function CustomersFilterSidebar({
   facets,
-  statusFilter,
-  onStatusChange,
   typeFilter,
   onTypeChange,
 }: {
   facets: CustomerListFacets;
-  statusFilter: CustomerStatusFilter;
-  onStatusChange: (v: CustomerStatusFilter) => void;
   typeFilter: "all" | "company" | "individual";
   onTypeChange: (v: "all" | "company" | "individual") => void;
 }) {
-  const statusRows: {
-    id: CustomerStatusFilter;
-    label: string;
-    icon: LucideIcon;
-    count: number;
-  }[] = [
-    {
-      id: "all",
-      label: "All customers",
-      icon: Users,
-      count: facets.companyTotal,
-    },
-    {
-      id: "active",
-      label: "Active",
-      icon: Check,
-      count: facets.activeCount,
-    },
-    {
-      id: "inactive",
-      label: "Inactive",
-      icon: Ban,
-      count: facets.inactiveCount,
-    },
-  ];
-
   const typeRows: {
     id: "all" | "company" | "individual";
     label: string;
@@ -147,43 +117,6 @@ function CustomersFilterSidebar({
   return (
     <aside className="w-full shrink-0 lg:self-stretch">
       <div className="space-y-7 py-1">
-        <div>
-          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
-            By status
-          </h3>
-          <nav className="flex flex-col gap-px" aria-label="Filter customers by status">
-            {statusRows.map((item) => {
-              const Icon = item.icon;
-              const selected = statusFilter === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onStatusChange(item.id)}
-                  aria-pressed={selected}
-                  className={cn(
-                    rowBtn,
-                    selected
-                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
-                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  <span
-                    className={cn(
-                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
-                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
-                      "dark:bg-muted/70",
-                    )}
-                  >
-                    {item.count}
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
         <div>
           <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
             By type
@@ -235,8 +168,6 @@ export default function CustomersPage() {
   const [total, setTotal] = useState(0);
   const [facets, setFacets] = useState<CustomerListFacets | null>(null);
 
-  const [statusFilter, setStatusFilter] =
-    useState<CustomerStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<
     "all" | "company" | "individual"
   >("all");
@@ -252,7 +183,6 @@ export default function CustomersPage() {
   const listRequestGen = useRef(0);
   const prevListDepsRef = useRef({
     debouncedSearch: "",
-    statusFilter: "all" as CustomerStatusFilter,
     typeFilter: "all" as "all" | "company" | "individual",
     pageSize: 10,
     activeCompanyScope: 0,
@@ -263,6 +193,9 @@ export default function CustomersPage() {
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [singleDeleting, setSingleDeleting] = useState(false);
+
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -332,7 +265,6 @@ export default function CustomersPage() {
     const prev = prevListDepsRef.current;
     const depsChanged =
       prev.debouncedSearch !== debouncedSearch ||
-      prev.statusFilter !== statusFilter ||
       prev.typeFilter !== typeFilter ||
       prev.pageSize !== pageSize ||
       prev.activeCompanyScope !== activeCompanyScope;
@@ -344,7 +276,6 @@ export default function CustomersPage() {
 
     prevListDepsRef.current = {
       debouncedSearch,
-      statusFilter,
       typeFilter,
       pageSize,
       activeCompanyScope,
@@ -358,7 +289,7 @@ export default function CustomersPage() {
       try {
         const listRes = await listCustomers({
           search: debouncedSearch || undefined,
-          statusFilter,
+          statusFilter: "all",
           type: typeFilter === "all" ? undefined : typeFilter,
           page,
           pageSize,
@@ -388,7 +319,6 @@ export default function CustomersPage() {
   }, [
     companyReady,
     debouncedSearch,
-    statusFilter,
     typeFilter,
     page,
     pageSize,
@@ -405,7 +335,7 @@ export default function CustomersPage() {
         fetchCustomerListFacets(),
         listCustomers({
           search: debouncedSearch || undefined,
-          statusFilter,
+          statusFilter: "all",
           type: typeFilter === "all" ? undefined : typeFilter,
           page,
           pageSize,
@@ -417,7 +347,6 @@ export default function CustomersPage() {
       setTotal(listRes.total);
       prevListDepsRef.current = {
         debouncedSearch,
-        statusFilter,
         typeFilter,
         pageSize,
         activeCompanyScope,
@@ -437,7 +366,6 @@ export default function CustomersPage() {
   }, [
     companyReady,
     typeFilter,
-    statusFilter,
     debouncedSearch,
     page,
     pageSize,
@@ -496,6 +424,204 @@ export default function CustomersPage() {
     [rows.length, page, reload, toast],
   );
 
+  const fetchExportRows = useCallback(
+    () =>
+      listAllCustomersForExport({
+        search: debouncedSearch || undefined,
+        statusFilter: "all",
+        type: typeFilter === "all" ? undefined : typeFilter,
+      }),
+    [debouncedSearch, typeFilter],
+  );
+
+  const exportFilenameStem = useMemo(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `customers-${yyyy}${mm}${dd}`;
+  }, []);
+
+  const handleExportCsv = useCallback(async () => {
+    if (exportingCsv) return;
+    try {
+      setExportingCsv(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to export",
+          description: "No customers match the current filters.",
+        });
+        return;
+      }
+      const headers = [
+        "Type",
+        "Name",
+        "Contact",
+        "Email",
+        "Phone",
+        "City",
+        "Country",
+        "Status",
+      ];
+      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const lines = [headers.map(esc).join(",")];
+      for (const c of data) {
+        const name =
+          (c.type === "company" ? c.companyName : c.fullName)?.trim() || "";
+        const contact = c.type === "company" ? c.contactName?.trim() || "" : "";
+        lines.push(
+          [
+            c.type === "company" ? "Company" : "Individual",
+            name,
+            contact,
+            c.email ?? "",
+            c.phone ?? "",
+            c.cityName || c.city || "",
+            c.country ?? "",
+            c.isActive === false ? "Inactive" : "Active",
+          ]
+            .map((v) => esc(String(v ?? "")))
+            .join(","),
+        );
+      }
+      const csv = `\uFEFF${lines.join("\r\n")}\r\n`;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportFilenameStem}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({
+        title: "CSV exported",
+        description: `${data.length} customer${data.length === 1 ? "" : "s"} exported.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Export failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCsv(false);
+    }
+  }, [exportingCsv, fetchExportRows, exportFilenameStem, toast]);
+
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+    try {
+      setPrinting(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to print",
+          description: "No customers match the current filters.",
+        });
+        return;
+      }
+      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
+        import("jspdf"),
+        import("jspdf-autotable"),
+      ]);
+      const autoTable = autoTableMod.default;
+
+      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const M = 36;
+
+      doc.setFont("helvetica", "bold").setFontSize(16);
+      doc.text("Customers", M, M + 6);
+      doc.setFont("helvetica", "normal").setFontSize(10);
+      const filterBits: string[] = [];
+      if (typeFilter !== "all") filterBits.push(`Type: ${typeFilter}`);
+      if (debouncedSearch) filterBits.push(`Search: "${debouncedSearch}"`);
+      const subtitle = [
+        new Date().toLocaleString(),
+        `${data.length} customer${data.length === 1 ? "" : "s"}`,
+        ...filterBits,
+      ].join("  •  ");
+      doc.setTextColor(120);
+      doc.text(subtitle, M, M + 24);
+      doc.setTextColor(0);
+
+      const body = data.map((c) => {
+        const name =
+          (c.type === "company" ? c.companyName : c.fullName)?.trim() || "";
+        const contact = c.type === "company" ? c.contactName?.trim() || "" : "";
+        return [
+          c.type === "company" ? "Company" : "Individual",
+          name + (contact ? `\n${contact}` : ""),
+          c.email ?? "",
+          c.phone ?? "",
+          c.cityName || c.city || "",
+          c.country ?? "",
+          c.isActive === false ? "Inactive" : "Active",
+        ];
+      });
+
+      autoTable(doc, {
+        startY: M + 36,
+        head: [["Type", "Name", "Email", "Phone", "City", "Country", "Status"]],
+        body,
+        styles: { font: "helvetica", fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: [243, 244, 246], textColor: 20, fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [250, 250, 251] },
+        columnStyles: {
+          0: { cellWidth: 70 },
+          1: { cellWidth: 170 },
+          2: { cellWidth: 150 },
+          3: { cellWidth: 90 },
+          4: { cellWidth: 90 },
+          5: { cellWidth: 70 },
+          6: { cellWidth: 60 },
+        },
+        margin: { left: M, right: M },
+        didDrawPage: () => {
+          const pageH = doc.internal.pageSize.getHeight();
+          const pageNumber = doc.getNumberOfPages();
+          doc.setFontSize(8);
+          doc.setTextColor(140);
+          doc.text(`Page ${pageNumber}`, pageW - M, pageH - 14, { align: "right" });
+          doc.setTextColor(0);
+        },
+      });
+
+      const filename = `${exportFilenameStem}.pdf`;
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl, "_blank");
+      if (printWindow) {
+        printWindow.onload = () => {
+          setTimeout(() => printWindow.print(), 250);
+        };
+      } else {
+        doc.save(filename);
+        toast({
+          title: "Print blocked",
+          description: "Allow popups to print. PDF downloaded instead.",
+        });
+      }
+    } catch (e: unknown) {
+      toast({
+        title: "Print failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrinting(false);
+    }
+  }, [
+    printing,
+    fetchExportRows,
+    typeFilter,
+    debouncedSearch,
+    exportFilenameStem,
+    toast,
+  ]);
+
   const columns = useMemo<ColumnDef<CustomerRow>[]>(
     () => [
       {
@@ -533,7 +659,14 @@ export default function CustomersPage() {
         ),
         meta: {
           searchValue: (row: CustomerRow) =>
-            [row.companyName, row.fullName, row.email].filter(Boolean).join(" "),
+            [
+              row.companyName,
+              row.fullName,
+              row.email,
+              row.phone,
+            ]
+              .filter(Boolean)
+              .join(" "),
         },
         cell: ({ row }) => (
           <span className="font-semibold text-foreground">
@@ -582,27 +715,6 @@ export default function CustomersPage() {
             {formatCity(row.original)}
           </span>
         ),
-      },
-      {
-        id: "status",
-        accessorFn: (r) => (r.isActive ? 1 : 0),
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Status" />
-        ),
-        meta: {
-          searchValue: (row: CustomerRow) =>
-            row.isActive ? "active" : "inactive",
-        },
-        cell: ({ row }) =>
-          row.original.isActive ? (
-            <span className="inline-flex rounded-full bg-emerald-500/12 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
-              Active
-            </span>
-          ) : (
-            <span className="inline-flex rounded-full bg-muted/80 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-              Inactive
-            </span>
-          ),
       },
       {
         id: "actions",
@@ -661,9 +773,8 @@ export default function CustomersPage() {
   const hasActiveFilters = useMemo(
     () =>
       debouncedSearch !== "" ||
-      statusFilter !== "all" ||
       typeFilter !== "all",
-    [debouncedSearch, statusFilter, typeFilter],
+    [debouncedSearch, typeFilter],
   );
 
   const listRangeLabel = useMemo(() => {
@@ -690,12 +801,44 @@ export default function CustomersPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
-          <Link href="/app/customers/new">
-            <Plus className="h-4 w-4" />
-            Add customer
-          </Link>
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              exportingCsv ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handleExportCsv()}
+          >
+            <Download className="h-4 w-4" />
+            {exportingCsv ? "Exporting…" : "Export CSV"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              printing ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handlePrint()}
+          >
+            <Printer className="h-4 w-4" />
+            {printing ? "Preparing…" : "Print"}
+          </Button>
+          <Button className="gap-2" disabled={companyReady !== true} asChild>
+            <Link href="/app/customers/new">
+              <Plus className="h-4 w-4" />
+              Add customer
+            </Link>
+          </Button>
+        </div>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
@@ -758,11 +901,6 @@ export default function CustomersPage() {
             <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
               <CustomersFilterSidebar
                 facets={facets}
-                statusFilter={statusFilter}
-                onStatusChange={(v) => {
-                  setPage(1);
-                  setStatusFilter(v);
-                }}
                 typeFilter={typeFilter}
                 onTypeChange={(v) => {
                   setPage(1);
@@ -782,7 +920,7 @@ export default function CustomersPage() {
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by name, email, or company…"
+                  placeholder="Search by name, email, phone, or company…"
                   className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
                   aria-label="Search customers"
                   autoComplete="off"
@@ -822,7 +960,6 @@ export default function CustomersPage() {
                           onClick={() => {
                             setPage(1);
                             setSearchQuery("");
-                            setStatusFilter("all");
                             setTypeFilter("all");
                           }}
                         >
