@@ -10,7 +10,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { useToast } from "@/hooks/use-toast";
-import { Banknote, Receipt, TrendingUp, Users } from "lucide-react";
+import { Banknote, BarChart3, Receipt, TrendingUp, Users } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -24,6 +24,7 @@ import {
   getIncomeOverTime,
 } from "@/lib/dashboard-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { Button } from "@/components/ui/button";
 
 const chartConfig = {
   income: {
@@ -201,6 +202,23 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Shortcuts</CardTitle>
+          <p className="text-sm font-normal text-muted-foreground">
+            Quick links to reports and tools you use often.
+          </p>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2 pt-0">
+          <Button variant="outline" className="gap-2" asChild>
+            <Link href="/app/sales-report">
+              <BarChart3 className="h-4 w-4 shrink-0" />
+              Sales report
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

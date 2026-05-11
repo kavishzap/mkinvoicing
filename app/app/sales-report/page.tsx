@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, FileDown, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  FileDown,
+  FileText,
+  Loader2,
+  Package,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import {
   getSalesReportData,
   type SalesReportData,
@@ -25,7 +35,7 @@ import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { generateSalesReportPDF } from "@/lib/sales-report-pdf";
 import { AppPageShell } from "@/components/app-page-shell";
 
-type ReportRange = "monthly" | "yearly" | "custom";
+type ReportRange = "today" | "monthly" | "yearly" | "custom";
 
 function toLocalDateStr(d: Date): string {
   const y = d.getFullYear();
@@ -41,6 +51,10 @@ function getDateRange(
 ): { start: string; end: string } {
   const today = new Date();
   const y = today.getFullYear();
+  if (range === "today") {
+    const t = toLocalDateStr(today);
+    return { start: t, end: t };
+  }
   if (range === "monthly") {
     const start = new Date(y, today.getMonth(), 1);
     return { start: toLocalDateStr(start), end: toLocalDateStr(today) };
@@ -76,9 +90,131 @@ const PAYMENT_LABELS: Record<string, string> = {
   "Bank Transfer": "Bank / Juice",
 };
 
+/** Tailwind classes for the payment-method pill in the Invoice Details table. */
+const PAYMENT_BADGE: Record<string, string> = {
+  Cash: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  "Card Payment":
+    "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+  "Credit Facilities":
+    "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  "Bank Transfer":
+    "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
+};
+
+type InvoiceStatus = "paid" | "partial" | "unpaid";
+
+function getInvoiceStatus(amountPaid: number, amountDue: number): InvoiceStatus {
+  if (amountDue <= 0) return "paid";
+  return amountPaid > 0 ? "partial" : "unpaid";
+}
+
+/** Per-status colors for the pill, plus a row tint so partial/unpaid stand out. */
+const STATUS_BADGE: Record<
+  InvoiceStatus,
+  { label: string; pill: string; row: string }
+> = {
+  paid: {
+    label: "Paid",
+    pill: "border-emerald-500/30 bg-emerald-500/12 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+    row: "",
+  },
+  partial: {
+    label: "Partial",
+    pill: "border-amber-500/30 bg-amber-500/12 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
+    row: "bg-amber-50/50 dark:bg-amber-950/15",
+  },
+  unpaid: {
+    label: "Unpaid",
+    pill: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
+    row: "bg-rose-50/50 dark:bg-rose-950/15",
+  },
+};
+
+const PILL_BASE =
+  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-none tabular-nums";
+
+/**
+ * Per-section colour scheme so the three breakdown tables are easy to tell apart
+ * at a glance. Each tone styles: the card frame, the title capsule, the table
+ * header row, and the small icon.
+ */
+type ReportTone = "sky" | "violet" | "indigo" | "amber";
+
+const REPORT_TONE: Record<
+  ReportTone,
+  { card: string; pill: string; headerRow: string; icon: string }
+> = {
+  sky: {
+    card: "border-sky-300/70 bg-sky-50/40 dark:border-sky-800/50 dark:bg-sky-950/15",
+    pill: "border-sky-500/30 bg-sky-500/15 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200",
+    headerRow: "bg-sky-100/70 dark:bg-sky-900/30",
+    icon: "text-sky-600 dark:text-sky-300",
+  },
+  violet: {
+    card: "border-violet-300/70 bg-violet-50/40 dark:border-violet-800/50 dark:bg-violet-950/15",
+    pill: "border-violet-500/30 bg-violet-500/15 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200",
+    headerRow: "bg-violet-100/70 dark:bg-violet-900/30",
+    icon: "text-violet-600 dark:text-violet-300",
+  },
+  indigo: {
+    card: "border-indigo-300/70 bg-indigo-50/40 dark:border-indigo-800/50 dark:bg-indigo-950/15",
+    pill: "border-indigo-500/30 bg-indigo-500/15 text-indigo-800 dark:bg-indigo-500/20 dark:text-indigo-200",
+    headerRow: "bg-indigo-100/70 dark:bg-indigo-900/30",
+    icon: "text-indigo-600 dark:text-indigo-300",
+  },
+  amber: {
+    card: "border-amber-300/80 bg-amber-50/50 dark:border-amber-800/60 dark:bg-amber-950/15",
+    pill: "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
+    headerRow: "bg-amber-100/70 dark:bg-amber-900/30",
+    icon: "text-amber-600 dark:text-amber-300",
+  },
+};
+
+function ReportTableSection({
+  title,
+  icon: Icon,
+  tone,
+  count,
+  children,
+}: {
+  title: string;
+  icon: LucideIcon;
+  tone: ReportTone;
+  count?: number;
+  children: React.ReactNode;
+}) {
+  const t = REPORT_TONE[tone];
+  return (
+    <section
+      className={cn(
+        "overflow-hidden rounded-xl border-2 shadow-sm",
+        t.card,
+      )}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold tracking-wide",
+            t.pill,
+          )}
+        >
+          <Icon className={cn("h-3.5 w-3.5", t.icon)} aria-hidden />
+          {title}
+        </span>
+        {typeof count === "number" ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {count} {count === 1 ? "row" : "rows"}
+          </span>
+        ) : null}
+      </header>
+      <div className="border-t bg-card">{children}</div>
+    </section>
+  );
+}
+
 export default function SalesReportPage() {
   const { toast } = useToast();
-  const [range, setRange] = useState<ReportRange>("yearly");
+  const [range, setRange] = useState<ReportRange>("today");
   const [customStart, setCustomStart] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -198,7 +334,7 @@ export default function SalesReportPage() {
           <div className="space-y-3">
             <Label>Report period</Label>
             <div className="flex flex-wrap gap-2">
-              {(["monthly", "yearly", "custom"] as const).map((r) => (
+              {(["today", "monthly", "yearly", "custom"] as const).map((r) => (
                 <Button
                   key={r}
                   type="button"
@@ -206,7 +342,13 @@ export default function SalesReportPage() {
                   size="sm"
                   onClick={() => setRange(r)}
                 >
-                  {r === "monthly" ? "Monthly" : r === "yearly" ? "Yearly" : "Custom range"}
+                  {r === "today"
+                    ? "Today"
+                    : r === "monthly"
+                      ? "Monthly"
+                      : r === "yearly"
+                        ? "Yearly"
+                        : "Custom range"}
                 </Button>
               ))}
             </div>
@@ -399,15 +541,21 @@ export default function SalesReportPage() {
                   </div>
 
                   {/* Sales by Product */}
-                  <div>
-                    <p className="font-semibold mb-2">Sales by Product</p>
+                  <ReportTableSection
+                    title="Sales by Product"
+                    icon={Package}
+                    tone="sky"
+                    count={data.byProduct.length}
+                  >
                     {data.byProduct.length === 0 ? (
-                      <p className="text-muted-foreground text-xs">No product data</p>
+                      <p className="px-4 py-6 text-xs text-muted-foreground">
+                        No product data
+                      </p>
                     ) : (
-                      <div className="rounded-md border overflow-x-auto">
+                      <div className="overflow-x-auto">
                         <Table>
                           <TableHeader>
-                            <TableRow>
+                            <TableRow className={REPORT_TONE.sky.headerRow}>
                               <TableHead>Product</TableHead>
                               <TableHead className="text-right">Qty Sold</TableHead>
                               <TableHead className="text-right">Unit Price</TableHead>
@@ -418,11 +566,22 @@ export default function SalesReportPage() {
                             {data.byProduct.map((row) => (
                               <TableRow key={row.product}>
                                 <TableCell className="font-medium">{row.product}</TableCell>
-                                <TableCell className="text-right">{row.qtySold}</TableCell>
                                 <TableCell className="text-right">
+                                  <span
+                                    className={cn(
+                                      PILL_BASE,
+                                      row.qtySold > 0
+                                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                                        : "border-border bg-muted/60 text-muted-foreground",
+                                    )}
+                                  >
+                                    {row.qtySold.toLocaleString()}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right text-muted-foreground tabular-nums">
                                   {formatCurrency(row.unitPrice, data.currency)}
                                 </TableCell>
-                                <TableCell className="text-right font-medium">
+                                <TableCell className="text-right font-semibold tabular-nums text-sky-700 dark:text-sky-300">
                                   {formatCurrency(row.total, data.currency)}
                                 </TableCell>
                               </TableRow>
@@ -431,18 +590,24 @@ export default function SalesReportPage() {
                         </Table>
                       </div>
                     )}
-                  </div>
+                  </ReportTableSection>
 
                   {/* Sales by Customer */}
-                  <div>
-                    <p className="font-semibold mb-2">Sales by Customer</p>
+                  <ReportTableSection
+                    title="Sales by Customer"
+                    icon={Users}
+                    tone="violet"
+                    count={data.byCustomer.length}
+                  >
                     {data.byCustomer.length === 0 ? (
-                      <p className="text-muted-foreground text-xs">No customer data</p>
+                      <p className="px-4 py-6 text-xs text-muted-foreground">
+                        No customer data
+                      </p>
                     ) : (
-                      <div className="rounded-md border overflow-x-auto">
+                      <div className="overflow-x-auto">
                         <Table>
                           <TableHeader>
-                            <TableRow>
+                            <TableRow className={REPORT_TONE.violet.headerRow}>
                               <TableHead>Customer</TableHead>
                               <TableHead className="text-right">Total Sales</TableHead>
                               <TableHead className="text-right">Paid</TableHead>
@@ -450,33 +615,63 @@ export default function SalesReportPage() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {data.byCustomer.map((row) => (
-                              <TableRow key={row.customer}>
-                                <TableCell className="font-medium">{row.customer}</TableCell>
-                                <TableCell className="text-right">
-                                  {formatCurrency(row.totalSales, data.currency)}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {formatCurrency(row.paid, data.currency)}
-                                </TableCell>
-                                <TableCell className="text-right font-medium">
-                                  {formatCurrency(row.outstanding, data.currency)}
-                                </TableCell>
-                              </TableRow>
-                            ))}
+                            {data.byCustomer.map((row) => {
+                              const hasOutstanding = row.outstanding > 0;
+                              return (
+                                <TableRow
+                                  key={row.customer}
+                                  className={
+                                    hasOutstanding
+                                      ? "bg-amber-50/40 dark:bg-amber-950/15"
+                                      : ""
+                                  }
+                                >
+                                  <TableCell className="font-medium">
+                                    {row.customer}
+                                  </TableCell>
+                                  <TableCell className="text-right font-semibold tabular-nums">
+                                    {formatCurrency(row.totalSales, data.currency)}
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      "text-right tabular-nums",
+                                      row.paid > 0
+                                        ? "text-emerald-700 font-medium dark:text-emerald-400"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {formatCurrency(row.paid, data.currency)}
+                                  </TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      "text-right tabular-nums",
+                                      hasOutstanding
+                                        ? "font-semibold text-amber-700 dark:text-amber-300"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    {formatCurrency(row.outstanding, data.currency)}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </div>
                     )}
-                  </div>
+                  </ReportTableSection>
 
                   {/* Invoice Details */}
-                  <div>
-                    <p className="font-semibold mb-2">Invoice Details</p>
-                    <div className="rounded-md border overflow-x-auto max-h-[300px] overflow-y-auto">
+                  <ReportTableSection
+                    title="Invoice Details"
+                    icon={FileText}
+                    tone="indigo"
+                    count={data.invoices.length}
+                  >
+                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
                       <Table>
-                        <TableHeader>
-                          <TableRow>
+                        <TableHeader className="sticky top-0 z-10">
+                          <TableRow className={REPORT_TONE.indigo.headerRow}>
                             <TableHead>Invoice #</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Customer</TableHead>
@@ -487,42 +682,78 @@ export default function SalesReportPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {data.invoices.map((inv) => (
-                            <TableRow key={inv.id}>
-                              <TableCell className="font-medium">{inv.number}</TableCell>
-                              <TableCell>{formatDate(inv.issueDate)}</TableCell>
-                              <TableCell>{inv.clientName}</TableCell>
-                              <TableCell>
-                                {inv.paymentMethod ? PAYMENT_LABELS[inv.paymentMethod] ?? inv.paymentMethod : "—"}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {formatCurrency(inv.total, data.currency)}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {formatCurrency(inv.amountPaid, data.currency)}
-                              </TableCell>
-                              <TableCell>
-                                {inv.amountDue > 0
-                                  ? inv.amountPaid > 0
-                                    ? "Partial"
-                                    : "Unpaid"
-                                  : "Paid"}
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {data.invoices.map((inv) => {
+                            const status = getInvoiceStatus(
+                              inv.amountPaid,
+                              inv.amountDue,
+                            );
+                            const sb = STATUS_BADGE[status];
+                            const paymentLabel = inv.paymentMethod
+                              ? PAYMENT_LABELS[inv.paymentMethod] ??
+                                inv.paymentMethod
+                              : null;
+                            const paymentCls = inv.paymentMethod
+                              ? PAYMENT_BADGE[inv.paymentMethod] ??
+                                "border-border bg-muted/60 text-muted-foreground"
+                              : null;
+                            return (
+                              <TableRow key={inv.id} className={sb.row}>
+                                <TableCell className="font-medium">
+                                  {inv.number}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground tabular-nums">
+                                  {formatDate(inv.issueDate)}
+                                </TableCell>
+                                <TableCell>{inv.clientName}</TableCell>
+                                <TableCell>
+                                  {paymentLabel ? (
+                                    <span
+                                      className={cn(PILL_BASE, paymentCls)}
+                                    >
+                                      {paymentLabel}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right font-semibold tabular-nums">
+                                  {formatCurrency(inv.total, data.currency)}
+                                </TableCell>
+                                <TableCell
+                                  className={cn(
+                                    "text-right tabular-nums",
+                                    inv.amountPaid > 0
+                                      ? "text-emerald-700 font-medium dark:text-emerald-400"
+                                      : "text-muted-foreground",
+                                  )}
+                                >
+                                  {formatCurrency(inv.amountPaid, data.currency)}
+                                </TableCell>
+                                <TableCell>
+                                  <span className={cn(PILL_BASE, sb.pill)}>
+                                    {sb.label}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
                     </div>
-                  </div>
+                  </ReportTableSection>
 
                   {/* Outstanding Invoices */}
                   {data.outstandingInvoices.length > 0 && (
-                    <div>
-                      <p className="font-semibold mb-2">Outstanding Invoices</p>
-                      <div className="rounded-md border overflow-x-auto">
+                    <ReportTableSection
+                      title="Outstanding Invoices"
+                      icon={AlertTriangle}
+                      tone="amber"
+                      count={data.outstandingInvoices.length}
+                    >
+                      <div className="overflow-x-auto">
                         <Table>
                           <TableHeader>
-                            <TableRow>
+                            <TableRow className={REPORT_TONE.amber.headerRow}>
                               <TableHead>Invoice #</TableHead>
                               <TableHead>Customer</TableHead>
                               <TableHead className="text-right">Amount Due</TableHead>
@@ -530,20 +761,53 @@ export default function SalesReportPage() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {data.outstandingInvoices.map((inv) => (
-                              <TableRow key={inv.id}>
-                                <TableCell className="font-medium">{inv.number}</TableCell>
-                                <TableCell>{inv.clientName}</TableCell>
-                                <TableCell className="text-right font-medium text-amber-600 dark:text-amber-400">
-                                  {formatCurrency(inv.amountDue, data.currency)}
-                                </TableCell>
-                                <TableCell>{formatDate(inv.dueDate)}</TableCell>
-                              </TableRow>
-                            ))}
+                            {data.outstandingInvoices.map((inv) => {
+                              const today = toLocalDateStr(new Date());
+                              const isOverdue =
+                                !!inv.dueDate && inv.dueDate < today;
+                              return (
+                                <TableRow
+                                  key={inv.id}
+                                  className={
+                                    isOverdue
+                                      ? "bg-rose-50/50 dark:bg-rose-950/15"
+                                      : "bg-amber-50/40 dark:bg-amber-950/15"
+                                  }
+                                >
+                                  <TableCell className="font-medium">
+                                    {inv.number}
+                                  </TableCell>
+                                  <TableCell>{inv.clientName}</TableCell>
+                                  <TableCell
+                                    className={cn(
+                                      "text-right font-semibold tabular-nums",
+                                      isOverdue
+                                        ? "text-rose-700 dark:text-rose-300"
+                                        : "text-amber-700 dark:text-amber-300",
+                                    )}
+                                  >
+                                    {formatCurrency(inv.amountDue, data.currency)}
+                                  </TableCell>
+                                  <TableCell>
+                                    <span
+                                      className={cn(
+                                        PILL_BASE,
+                                        isOverdue
+                                          ? "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
+                                          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+                                      )}
+                                    >
+                                      {formatDate(inv.dueDate)}
+                                      {isOverdue ? " · Overdue" : ""}
+                                    </span>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
                           </TableBody>
                         </Table>
                       </div>
-                    </div>
+                    </ReportTableSection>
                   )}
                 </CardContent>
               </Card>
