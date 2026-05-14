@@ -33,42 +33,44 @@ export default function InvoiceViewPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const loadInvoiceData = async () => {
-    if (!id) return;
-    
-    try {
-      setLoading(true);
-      setError(null);
-      const [inv, prof] = await Promise.allSettled([
-        getInvoice(id),
-        fetchProfile(),
-      ]);
-
-      if (inv.status === "fulfilled") {
-        setInvoice(inv.value);
-      } else {
-        setInvoice(null);
-        setError(inv.reason?.message ?? "Failed to load invoice.");
-      }
-
-      if (prof.status === "fulfilled") {
-        setProfile(prof.value);
-      } else {
-        setProfile(null);
-      }
-    } catch (e: any) {
-      setError(e?.message ?? "Something went wrong.");
-      setInvoice(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    let cancelled = false;
     if (!id) return;
+    let cancelled = false;
 
-    loadInvoiceData();
+    setError(null);
+    setLoading(true);
+
+    /*
+     * Kick off both requests in parallel but render the page as soon as the
+     * invoice resolves — the profile is only used for fallback fields (logo,
+     * sender name/email) and doesn't need to block the main view. Profile
+     * fills in moments later if it lags behind. `fetchProfile` is also cached
+     * for the session, so subsequent navigations resolve it instantly.
+     */
+    const invoicePromise = getInvoice(id);
+    const profilePromise = fetchProfile();
+
+    invoicePromise
+      .then((inv) => {
+        if (cancelled) return;
+        setInvoice(inv);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setInvoice(null);
+        setError(e instanceof Error ? e.message : "Failed to load invoice.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    profilePromise
+      .then((prof) => {
+        if (!cancelled) setProfile(prof);
+      })
+      .catch(() => {
+        if (!cancelled) setProfile(null);
+      });
 
     return () => {
       cancelled = true;

@@ -24,6 +24,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
@@ -94,6 +104,10 @@ export default function DeliveryDetailPage() {
   const [loading, setLoading] = useState(true);
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<DeliveryNoteStatus | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -150,80 +164,90 @@ export default function DeliveryDetailPage() {
   const nextStatus = getNextDeliveryNoteStatus(delivery.status);
   const statusIdx = DELIVERY_NOTE_STATUSES.indexOf(delivery.status);
 
+  const applyStatusAdvance = async (target: DeliveryNoteStatus) => {
+    setStatusBusy(true);
+    try {
+      const updated = await advanceDeliveryNoteStatus(delivery.id);
+      if (updated) {
+        setDelivery(updated);
+        const soMsg =
+          target === "delivered_to_driver"
+            ? " Stock was transferred from the primary warehouse to the driver's location. Linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
+            : target === "completed"
+              ? " Linked sales orders on this delivery are set to Delivered to customer where applicable."
+              : "";
+        toast({
+          title: "Status updated",
+          description: `${DELIVERY_NOTE_STATUS_LABELS[target]}.${soMsg}`,
+        });
+      }
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      toast({
+        title: "Could not update status",
+        description: err?.message ?? "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setStatusBusy(false);
+    }
+  };
+
   return (
-    <AppPageShell
-      className="max-w-[1800px]"
-      leading={
-        <Button variant="ghost" size="icon" asChild aria-label="Back to delivery notes">
-          <Link href="/app/delivery-notes">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-        </Button>
-      }
-      subtitle={`Created ${fmtWhen(delivery.createdAt)} · Driver ${delivery.driverDisplay}`}
-      belowSubtitle={
-        <div className="print:hidden">
-          <DeliveryNoteViewActions deliveryId={id} delivery={delivery} />
-        </div>
-      }
-    >
-      <div className="w-full space-y-4">
-        <div className="overflow-x-auto rounded-lg border-2 border-primary/40 bg-primary/5 shadow-sm">
-          <table className="w-full min-w-[1100px] border-collapse text-sm">
-            <tbody>
-              <tr className="bg-primary/15">
-                <th className="border px-3 py-2 text-left font-semibold" colSpan={8}>
-                  Delivery Summary
-                </th>
-              </tr>
-              <tr>
-                <td className="border px-3 py-2 font-medium">Delivery status</td>
-                <td className="border px-3 py-2">
-                  <div className="max-w-xs space-y-2">
-                    <Select
-                      value={delivery.status}
-                      disabled={statusBusy || delivery.status === "completed"}
-                      onValueChange={async (value) => {
-                        const target = value as DeliveryNoteStatus;
-                        if (target === delivery.status) return;
-                        const allowedNext = getNextDeliveryNoteStatus(delivery.status);
-                        if (allowedNext !== target) {
-                          toast({
-                            title: "One step at a time",
-                            description:
-                              "Choose the next status in order (you cannot skip from New to Completed).",
-                            variant: "destructive",
-                          });
-                          return;
+    <>
+      <AppPageShell
+        className="max-w-[1800px]"
+        leading={
+          <Button variant="ghost" size="icon" asChild aria-label="Back to delivery notes">
+            <Link href="/app/delivery-notes">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+          </Button>
+        }
+        subtitle={`Created ${fmtWhen(delivery.createdAt)} · Driver ${delivery.driverDisplay}`}
+        belowSubtitle={
+          <div className="print:hidden">
+            <DeliveryNoteViewActions deliveryId={id} delivery={delivery} />
+          </div>
+        }
+      >
+        <div className="w-full space-y-4">
+          <div className="overflow-x-auto rounded-lg border-2 border-primary/40 bg-primary/5 shadow-sm">
+            <table className="w-full min-w-[1100px] border-collapse text-sm">
+              <tbody>
+                <tr className="bg-primary/15">
+                  <th className="border px-3 py-2 text-left font-semibold" colSpan={8}>
+                    Delivery Summary
+                  </th>
+                </tr>
+                <tr>
+                  <td className="border px-3 py-2 font-medium">Delivery status</td>
+                  <td className="border px-3 py-2">
+                    <div className="max-w-xs space-y-2">
+                      <Select
+                        value={delivery.status}
+                        disabled={
+                          statusBusy ||
+                          delivery.status === "completed" ||
+                          statusConfirmOpen
                         }
-                        setStatusBusy(true);
-                        try {
-                          const updated = await advanceDeliveryNoteStatus(delivery.id);
-                          if (updated) {
-                            setDelivery(updated);
-                            const soMsg =
-                              target === "delivered_to_driver"
-                                ? " Stock was transferred from the primary warehouse to the driver's location. Linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
-                                : target === "completed"
-                                  ? " Linked sales orders on this delivery are set to Delivered to customer where applicable."
-                                  : "";
+                        onValueChange={(value) => {
+                          const target = value as DeliveryNoteStatus;
+                          if (target === delivery.status) return;
+                          const allowedNext = getNextDeliveryNoteStatus(delivery.status);
+                          if (allowedNext !== target) {
                             toast({
-                              title: "Status updated",
-                              description: `${DELIVERY_NOTE_STATUS_LABELS[target]}.${soMsg}`,
+                              title: "One step at a time",
+                              description:
+                                "Choose the next status in order (you cannot skip from New to Completed).",
+                              variant: "destructive",
                             });
+                            return;
                           }
-                        } catch (e: unknown) {
-                          const err = e as { message?: string };
-                          toast({
-                            title: "Could not update status",
-                            description: err?.message ?? "Please try again.",
-                            variant: "destructive",
-                          });
-                        } finally {
-                          setStatusBusy(false);
-                        }
-                      }}
-                    >
+                          setPendingStatus(target);
+                          setStatusConfirmOpen(true);
+                        }}
+                      >
                       <SelectTrigger id="delivery-note-status" size="sm" className="w-full max-w-xs">
                         <SelectValue />
                       </SelectTrigger>
@@ -345,5 +369,53 @@ export default function DeliveryDetailPage() {
         </div>
       </div>
     </AppPageShell>
+
+      <AlertDialog
+        open={statusConfirmOpen}
+        onOpenChange={(open) => {
+          setStatusConfirmOpen(open);
+          if (!open) setPendingStatus(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change delivery status?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingStatus ? (
+                <>
+                  This will move the delivery from{" "}
+                  <span className="font-medium text-foreground">
+                    {DELIVERY_NOTE_STATUS_LABELS[delivery.status]}
+                  </span>{" "}
+                  to{" "}
+                  <span className="font-medium text-foreground">
+                    {DELIVERY_NOTE_STATUS_LABELS[pendingStatus]}
+                  </span>
+                  . This can update linked sales orders and stock. Continue?
+                </>
+              ) : (
+                "Confirm this status change."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={statusBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={statusBusy || !pendingStatus}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!pendingStatus) return;
+                const target = pendingStatus;
+                setStatusConfirmOpen(false);
+                setPendingStatus(null);
+                void applyStatusAdvance(target);
+              }}
+            >
+              {statusBusy ? "Updating…" : "Confirm"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

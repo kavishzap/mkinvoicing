@@ -275,36 +275,60 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const prefs = await fetchPreferences();
-        setPreferences(prefs);
-        try {
-          const co = await fetchActiveCompanySettings();
+        const [prefsResult, companyResult, subResult] = await Promise.allSettled([
+          fetchPreferences(),
+          fetchActiveCompanySettings(),
+          fetchCompanySubscriptionDetails(),
+        ]);
+        if (cancelled) return;
+
+        if (prefsResult.status === "fulfilled") {
+          setPreferences(prefsResult.value);
+        } else {
+          const msg =
+            prefsResult.reason instanceof Error
+              ? prefsResult.reason.message
+              : "Please try again.";
+          toast({
+            title: "Failed to load preferences",
+            description: msg,
+            variant: "destructive",
+          });
+        }
+
+        if (companyResult.status === "fulfilled") {
+          const co = companyResult.value;
           setCompany(co);
           setLogoPreview(co.company_logo_url || null);
           setNoActiveCompany(false);
-          try {
-            setSubscription(await fetchCompanySubscriptionDetails());
-          } catch {
-            setSubscription(null);
-          }
-        } catch {
+        } else {
           setNoActiveCompany(true);
           setCompany(emptyActiveCompanySettings());
           setLogoPreview(null);
+        }
+
+        if (subResult.status === "fulfilled") {
+          setSubscription(subResult.value);
+        } else {
           setSubscription(null);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Please try again.";
         toast({
           title: "Failed to load settings",
-          description: err?.message ?? "Please try again.",
+          description: msg,
           variant: "destructive",
         });
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [toast]);
 
   useEffect(() => () => revokeLogoObjectUrl(), []);
@@ -885,7 +909,7 @@ export default function SettingsPage() {
           value="roles"
           className="mt-0 flex min-h-0 flex-1 flex-col space-y-4 focus-visible:outline-none data-[state=inactive]:hidden"
         >
-          <CompanyRolesSettings />
+          {settingsTab === "roles" ? <CompanyRolesSettings /> : null}
         </TabsContent>
       </Tabs>
       </div>

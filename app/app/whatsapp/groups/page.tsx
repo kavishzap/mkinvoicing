@@ -35,22 +35,22 @@ import { useToast } from "@/hooks/use-toast";
 import { AppPageShell } from "@/components/app-page-shell";
 import { getActiveCompanyId } from "@/lib/active-company";
 import {
-  countMembersForGroups,
   deleteWhatsAppGroup,
-  listWhatsAppGroups,
+  listWhatsAppGroupsWithMemberCounts,
   updateWhatsAppGroup,
+  type WhatsAppGroupListRow,
   type WhatsAppGroupRow,
 } from "@/lib/whatsapp-groups-service";
-
-type GroupListItem = WhatsAppGroupRow & { memberCount: number };
+import { cn } from "@/lib/utils";
 
 export default function WhatsAppGroupsPage() {
   const { toast } = useToast();
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
 
-  const [groups, setGroups] = useState<GroupListItem[]>([]);
+  const [groups, setGroups] = useState<WhatsAppGroupListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -58,24 +58,22 @@ export default function WhatsAppGroupsPage() {
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 220);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
   const loadGroups = useCallback(async () => {
     if (companyReady !== true) return;
     setLoading(true);
     try {
-      const res = await listWhatsAppGroups({
-        search,
+      const res = await listWhatsAppGroupsWithMemberCounts({
+        search: debouncedSearch || undefined,
         includeInactive,
         page,
         pageSize,
       });
-      const ids = res.rows.map((g) => g.id);
-      const counts = await countMembersForGroups(ids);
-      setGroups(
-        res.rows.map((g) => ({
-          ...g,
-          memberCount: counts.get(g.id) ?? 0,
-        }))
-      );
+      setGroups(res.rows);
       setTotal(res.total);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
@@ -83,7 +81,7 @@ export default function WhatsAppGroupsPage() {
     } finally {
       setLoading(false);
     }
-  }, [companyReady, search, includeInactive, page, pageSize, toast]);
+  }, [companyReady, debouncedSearch, includeInactive, page, pageSize, toast]);
 
   useEffect(() => {
     (async () => {
@@ -97,12 +95,12 @@ export default function WhatsAppGroupsPage() {
       if (companyReady === false) setLoading(false);
       return;
     }
-    loadGroups();
+    void loadGroups();
   }, [companyReady, loadGroups]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, includeInactive, pageSize]);
+  }, [debouncedSearch, includeInactive, pageSize]);
 
   async function handleToggleActive(g: WhatsAppGroupRow) {
     try {
@@ -135,6 +133,11 @@ export default function WhatsAppGroupsPage() {
 
   return (
     <AppPageShell
+      fillHeight
+      className={cn(
+        "max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background",
+        "flex min-h-0 min-w-0 flex-1 flex-col",
+      )}
       leading={
         <Link href="/app/whatsapp">
           <Button variant="ghost" size="icon" aria-label="Back to WhatsApp">
@@ -168,163 +171,170 @@ export default function WhatsAppGroupsPage() {
         </Card>
       )}
 
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                placeholder="Search groups…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+        <Card className="shrink-0">
+          <CardContent className="space-y-4 pt-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-9"
+                  placeholder="Search groups…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  disabled={companyReady !== true}
+                  aria-label="Search groups"
+                  autoComplete="off"
+                />
+              </div>
+              <label className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox
+                  checked={includeInactive}
+                  onCheckedChange={(v) => setIncludeInactive(v === true)}
+                  disabled={companyReady !== true}
+                />
+                Include inactive
+              </label>
+              <select
+                className="h-9 shrink-0 rounded-md border bg-background px-2 text-sm"
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
                 disabled={companyReady !== true}
-              />
+                aria-label="Rows per page"
+              >
+                <option value={5}>5 / page</option>
+                <option value={10}>10 / page</option>
+                <option value={20}>20 / page</option>
+              </select>
             </div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Checkbox
-                checked={includeInactive}
-                onCheckedChange={(v) => setIncludeInactive(v === true)}
-                disabled={companyReady !== true}
-              />
-              Include inactive
-            </label>
-            <select
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              disabled={companyReady !== true}
-            >
-              <option value={5}>5 / page</option>
-              <option value={10}>10 / page</option>
-              <option value={20}>20 / page</option>
-            </select>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-muted-foreground">
-            <tr>
-              <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Members</th>
-              <th className="p-3 text-left">Status</th>
-              <th className="p-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                  Loading…
-                </td>
-              </tr>
-            ) : (
-              groups.map((g) => (
-                <tr key={g.id} className="border-t">
-                  <td className="p-3">
-                    <div className="font-medium">{g.name}</div>
-                    {g.description ? (
-                      <div className="text-xs text-muted-foreground line-clamp-2">
-                        {g.description}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="p-3 tabular-nums">{g.memberCount}</td>
-                  <td className="p-3">
-                    {g.isActive ? (
-                      <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        Inactive
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3 text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem asChild>
-                          <Link href={`/app/whatsapp/groups/${g.id}/edit`}>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Edit
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleToggleActive(g)}>
-                          {g.isActive ? (
-                            <>
-                              <Lock className="mr-2 h-4 w-4" />
-                              Deactivate
-                            </>
-                          ) : (
-                            <>
-                              <Unlock className="mr-2 h-4 w-4" />
-                              Activate
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => setDeleteId(g.id)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-card">
+          <div className="h-full overflow-x-auto overflow-y-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="sticky top-0 z-[1] bg-muted/50 text-muted-foreground backdrop-blur-sm">
+                <tr>
+                  <th className="p-3 text-left">Name</th>
+                  <th className="p-3 text-left">Members</th>
+                  <th className="p-3 text-left">Status</th>
+                  <th className="p-3 text-right">Actions</th>
                 </tr>
-              ))
-            )}
-            {!loading && groups.length === 0 && (
-              <tr>
-                <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                  <div className="flex flex-col items-center gap-2">
-                    <Users className="h-10 w-10 opacity-40" />
-                    {companyReady === false
-                      ? "Link a company and assign customers to that company."
-                      : "No groups yet. Create one to use with catalogue sharing."}
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {!loading && companyReady === true && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page <span className="font-medium text-foreground">{page}</span> / {pages}{" "}
-            — {total} group(s)
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= pages}
-              onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            >
-              Next
-            </Button>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-muted-foreground">
+                      Loading…
+                    </td>
+                  </tr>
+                ) : (
+                  groups.map((g) => (
+                    <tr key={g.id} className="border-t">
+                      <td className="p-3">
+                        <div className="font-medium">{g.name}</div>
+                        {g.description ? (
+                          <div className="text-xs text-muted-foreground line-clamp-2">
+                            {g.description}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="p-3 tabular-nums">{g.memberCount}</td>
+                      <td className="p-3">
+                        {g.isActive ? (
+                          <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600">
+                            Active
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                            Inactive
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                              <Link href={`/app/whatsapp/groups/${g.id}/edit`}>
+                                <Pencil className="mr-2 h-4 w-4" />
+                                Edit
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleToggleActive(g)}>
+                              {g.isActive ? (
+                                <>
+                                  <Lock className="mr-2 h-4 w-4" />
+                                  Deactivate
+                                </>
+                              ) : (
+                                <>
+                                  <Unlock className="mr-2 h-4 w-4" />
+                                  Activate
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => setDeleteId(g.id)}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  ))
+                )}
+                {!loading && groups.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center text-muted-foreground">
+                      <div className="flex flex-col items-center gap-2">
+                        <Users className="h-10 w-10 opacity-40" />
+                        {companyReady === false
+                          ? "Link a company and assign customers to that company."
+                          : "No groups yet. Create one to use with catalogue sharing."}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
+
+        {!loading && companyReady === true && (
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+            <span>
+              Page <span className="font-medium text-foreground">{page}</span> / {pages}{" "}
+              — {total} group(s)
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= pages}
+                onClick={() => setPage((p) => Math.min(pages, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent>
@@ -338,7 +348,7 @@ export default function WhatsAppGroupsPage() {
             <Button variant="outline" onClick={() => setDeleteId(null)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => deleteId && handleDelete(deleteId)}>
+            <Button variant="destructive" onClick={() => deleteId && void handleDelete(deleteId)}>
               Delete
             </Button>
           </DialogFooter>

@@ -36,6 +36,10 @@ async function getUserId() {
 const COLUMNS =
   "id,type,company_name,contact_name,full_name,email,phone,city,city_id,cities(name),address_line_1,address_line_2,is_active,created_at,updated_at";
 
+/** Slim select for pickers (no city join). */
+const CUSTOMER_PICKER_COLUMNS =
+  "id,type,company_name,contact_name,full_name,email,phone,is_active,created_at,updated_at";
+
 export type CustomerStatusFilter = "all" | "active" | "inactive";
 
 export type CustomerListFacets = {
@@ -213,15 +217,18 @@ export async function getCustomer(id: string): Promise<CustomerRow | null> {
 /**
  * Active customers for the current user's company (for WhatsApp groups, etc.).
  * Returns up to 500 rows; empty if no company context.
+ * Use `columns: "picker"` for a faster payload (no city join / address fields).
  */
 export async function listCustomersForCompany(opts?: {
   search?: string;
+  columns?: "full" | "picker";
 }): Promise<CustomerRow[]> {
   const companyId = await requireActiveCompanyId();
+  const cols = opts?.columns === "picker" ? CUSTOMER_PICKER_COLUMNS : COLUMNS;
 
   let q = supabase
     .from("customers")
-    .select(COLUMNS)
+    .select(cols)
     .eq("company_id", companyId)
     .eq("is_active", true)
     .order("created_at", { ascending: false })
@@ -233,6 +240,7 @@ export async function listCustomersForCompany(opts?: {
     q = q.or(
       [
         `company_name.ilike.${s}`,
+        `contact_name.ilike.${s}`,
         `full_name.ilike.${s}`,
         `email.ilike.${s}`,
         `phone.ilike.${s}`,

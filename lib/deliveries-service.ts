@@ -1,13 +1,35 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
 import { getCurrentUserId } from "@/lib/settings-service";
-import { listTeamMembers, isDriverRoleTeamMember, type TeamMemberRow } from "@/lib/company-team-service";
+import { listDriverRoleTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 import {
   normalizeSalesOrderFulfillmentStatus,
   normalizeSalesOrderPaymentStatus,
   type SalesOrderFulfillmentStatus,
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
+
+/**
+ * Sum order totals that should count as cash with the driver for route settlement.
+ * Cancelled orders are excluded.
+ */
+function salesOrderCountsForDriverSettlementCash(
+  paymentStatus: string | null | undefined,
+  fulfillmentStatus: string | null | undefined
+): boolean {
+  const fulfillment = normalizeSalesOrderFulfillmentStatus(fulfillmentStatus);
+  if (fulfillment === "cancelled") return false;
+  const payment = normalizeSalesOrderPaymentStatus(paymentStatus);
+  if (payment === "paid" || payment === "partial") return true;
+  if (payment === "unpaid") {
+    return (
+      fulfillment === "delivered to customer" ||
+      fulfillment === "completed" ||
+      fulfillment === "delivered to driver"
+    );
+  }
+  return false;
+}
 
 export const DELIVERY_NOTE_STATUSES = [
   "new",
@@ -195,8 +217,16 @@ export type DeliveryListRow = {
   orderCount: number;
   /** Sum of `sales_orders.total` for all orders linked to this delivery. */
   totalAmount: number;
-  /** Sum of totals for sales orders with **payment status paid** (cash collected; fulfillment may already be completed). */
-  totalAmountDeliveredToCustomer: number;
+  /**
+   * Sum of totals for orders counted as cash with the driver for settlement: paid or partial,
+   * or unpaid once fulfillment is at least `delivered to driver` (COD / status lag before paid).
+   */
+  totalAmountCashForSettlement: number;
+  /**
+   * When `driver_status` is true and a settlement row exists: cash + bank paid to owner.
+   * Null if collection is still pending, or settled without a settlement row (legacy).
+   */
+  driverCollectedAmount: number | null;
 };
 
 export type DeliveryDetailSalesOrder = {
@@ -210,6 +240,7 @@ export type DeliveryDetailSalesOrder = {
   email: string;
   addressLines: string;
   fulfillmentStatus: SalesOrderFulfillmentStatus;
+  paymentStatus: SalesOrderPaymentStatus;
   /** Sales order row `updated_at` (used for day/week return filters). */
   updatedAt: string | null;
   items: DeliveryLineItem[];
@@ -218,6 +249,8 @@ export type DeliveryDetailSalesOrder = {
 export type DeliveryDetail = {
   id: string;
   status: DeliveryNoteStatus;
+  /** True when driver cash/balance has been collected and recorded. */
+  driverStatus: boolean;
   notes: string | null;
   deliveryDate: string | null;
   createdAt: string;
@@ -344,8 +377,7 @@ async function profileDisplayMap(
 
 /** Team members whose role name includes “driver” (case-insensitive). */
 export async function listDriverTeamMembers(): Promise<TeamMemberRow[]> {
-  const all = await listTeamMembers();
-  return all.filter(isDriverRoleTeamMember);
+  return listDriverRoleTeamMembers();
 }
 
 /** Active sales orders with fulfillment **New**, **Pending**, or **Rescheduled**, including line items for the picker. */
@@ -429,6 +461,7 @@ const SALES_ORDER_ROWS_FOR_DELIVERY_DETAIL = `
   number,
   currency,
   total,
+  payment_status,
   bill_to_snapshot,
   fulfillment_status,
   updated_at,
@@ -478,6 +511,9 @@ function deliveryDetailSalesOrderFromSoRecord(
     fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
       so.fulfillment_status as string | null
     ),
+    paymentStatus: normalizeSalesOrderPaymentStatus(
+      so.payment_status as string | null | undefined
+    ),
     updatedAt: so.updated_at != null ? String(so.updated_at) : null,
     items,
   };
@@ -520,12 +556,9 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       driver_status,
       driver_user_id,
       created_by,
-      notes,
       delivery_date,
       created_at,
-      updated_at,
       delivery_sales_orders (
-        id,
         sales_orders ( id, total, fulfillment_status, payment_status )
       )
     `
@@ -541,13 +574,62 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
     r.driver_user_id as string,
     r.created_by as string,
   ]);
-  const names = await profileDisplayMap(userIds);
+  const deliveryIds = rows
+    .map((r: Record<string, unknown>) => String(r.id ?? "").trim())
+    .filter(Boolean);
+
+  const pinnedQuery =
+    deliveryIds.length === 0
+      ? Promise.resolve({
+          data: [] as Record<string, unknown>[],
+          error: null as null,
+        })
+      : supabase
+          .from("sales_orders")
+          .select(
+            "id, total, fulfillment_status, payment_status, active_driver_delivery_id"
+          )
+          .eq("company_id", companyId)
+          .in("active_driver_delivery_id", deliveryIds)
+          .neq("fulfillment_status", "cancelled");
+
+  const settlementsQuery =
+    deliveryIds.length === 0
+      ? Promise.resolve({
+          data: [] as Record<string, unknown>[],
+          error: null as null,
+        })
+      : supabase
+          .from("delivery_driver_settlements")
+          .select("delivery_id, cash_amount, bank_transfer_amount")
+          .eq("company_id", companyId)
+          .in("delivery_id", deliveryIds);
+
+  const [names, pinnedRes, settlementsRes] = await Promise.all([
+    profileDisplayMap(userIds),
+    pinnedQuery,
+    settlementsQuery,
+  ]);
+
+  if (pinnedRes.error) throw new Error(pinnedRes.error.message);
+  if (settlementsRes.error) throw new Error(settlementsRes.error.message);
+
+  const settlementByDelivery = new Map<string, { cash: number; bank: number }>();
+  for (const row of settlementsRes.data ?? []) {
+    const rec = row as Record<string, unknown>;
+    const did = String(rec.delivery_id ?? "").trim();
+    if (!did) continue;
+    settlementByDelivery.set(did, {
+      cash: Number(rec.cash_amount ?? 0),
+      bank: Number(rec.bank_transfer_amount ?? 0),
+    });
+  }
 
   const partials = rows.map((r: Record<string, unknown>) => {
     const lines = (r.delivery_sales_orders ?? []) as Record<string, unknown>[];
     const linkedIds = new Set<string>();
     let totalAmount = 0;
-    let totalAmountDeliveredToCustomer = 0;
+    let totalAmountCashForSettlement = 0;
     for (const line of lines) {
       const nested = line.sales_orders;
       const so = (Array.isArray(nested) ? nested[0] : nested) as
@@ -557,11 +639,12 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       if (sid) linkedIds.add(sid);
       totalAmount += Number(so?.total ?? 0);
       if (
-        normalizeSalesOrderPaymentStatus(
-          so?.payment_status as string | null | undefined
-        ) === "paid"
+        salesOrderCountsForDriverSettlementCash(
+          so?.payment_status as string | null | undefined,
+          so?.fulfillment_status as string | null | undefined
+        )
       ) {
-        totalAmountDeliveredToCustomer += Number(so?.total ?? 0);
+        totalAmountCashForSettlement += Number(so?.total ?? 0);
       }
     }
     const driverId = r.driver_user_id as string;
@@ -571,13 +654,13 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       linkedIds,
       lineCount: lines.length,
       totalAmount,
-      totalAmountDeliveredToCustomer,
+      totalAmountCashForSettlement,
       driverId,
       createdId,
     };
   });
 
-  const deliveryIds = partials.map((p) => p.r.id as string);
+  const pinnedRows = (pinnedRes.data ?? []) as Record<string, unknown>[];
   const pinnedByDelivery = new Map<
     string,
     {
@@ -588,37 +671,24 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
     }[]
   >();
 
-  if (deliveryIds.length > 0) {
-    const { data: pinnedRows, error: pinErr } = await supabase
-      .from("sales_orders")
-      .select(
-        "id, total, fulfillment_status, payment_status, active_driver_delivery_id"
-      )
-      .eq("company_id", companyId)
-      .in("active_driver_delivery_id", deliveryIds)
-      .neq("fulfillment_status", "cancelled");
-
-    if (pinErr) throw new Error(pinErr.message);
-
-    for (const row of pinnedRows ?? []) {
-      const pr = row as {
-        id: string;
-        total: unknown;
-        fulfillment_status: string | null;
-        payment_status: string | null;
-        active_driver_delivery_id: string | null;
-      };
-      const did = pr.active_driver_delivery_id;
-      if (!did) continue;
-      const arr = pinnedByDelivery.get(did) ?? [];
-      arr.push({
-        id: pr.id,
-        total: Number(pr.total ?? 0),
-        fulfillment_status: pr.fulfillment_status,
-        payment_status: pr.payment_status,
-      });
-      pinnedByDelivery.set(did, arr);
-    }
+  for (const row of pinnedRows) {
+    const pr = row as {
+      id: string;
+      total: unknown;
+      fulfillment_status: string | null;
+      payment_status: string | null;
+      active_driver_delivery_id: string | null;
+    };
+    const did = pr.active_driver_delivery_id;
+    if (!did) continue;
+    const arr = pinnedByDelivery.get(did) ?? [];
+    arr.push({
+      id: pr.id,
+      total: Number(pr.total ?? 0),
+      fulfillment_status: pr.fulfillment_status,
+      payment_status: pr.payment_status,
+    });
+    pinnedByDelivery.set(did, arr);
   }
 
   return partials.map((p) => {
@@ -626,23 +696,36 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       (x) => !p.linkedIds.has(x.id)
     );
     let addTotal = 0;
-    let addDelCust = 0;
+    let addSettlementCash = 0;
     for (const x of extras) {
       addTotal += x.total;
-      if (normalizeSalesOrderPaymentStatus(x.payment_status) === "paid") {
-        addDelCust += x.total;
+      if (
+        salesOrderCountsForDriverSettlementCash(
+          x.payment_status,
+          x.fulfillment_status
+        )
+      ) {
+        addSettlementCash += x.total;
       }
     }
 
+    const deliveryId = p.r.id as string;
+    const settled = Boolean(p.r.driver_status);
+    const split = settlementByDelivery.get(deliveryId);
+    const driverCollectedAmount =
+      settled && split != null
+        ? roundMoney2(split.cash + split.bank)
+        : null;
+
     return {
-      id: p.r.id as string,
+      id: deliveryId,
       status: normalizeDeliveryNoteStatus(p.r.status as string | null | undefined),
-      driverStatus: Boolean(p.r.driver_status),
+      driverStatus: settled,
       driverUserId: p.driverId,
       driverDisplay: names.get(p.driverId) ?? p.driverId.slice(0, 8),
       createdByUserId: p.createdId,
       createdByDisplay: names.get(p.createdId) ?? p.createdId.slice(0, 8),
-      notes: (p.r.notes as string | null) ?? null,
+      notes: null,
       deliveryDate:
         p.r.delivery_date != null && String(p.r.delivery_date).trim()
           ? String(p.r.delivery_date).slice(0, 10)
@@ -650,8 +733,9 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       createdAt: String(p.r.created_at ?? ""),
       orderCount: p.lineCount + extras.length,
       totalAmount: p.totalAmount + addTotal,
-      totalAmountDeliveredToCustomer:
-        p.totalAmountDeliveredToCustomer + addDelCust,
+      totalAmountCashForSettlement:
+        p.totalAmountCashForSettlement + addSettlementCash,
+      driverCollectedAmount,
     };
   });
 }
@@ -672,6 +756,148 @@ export async function setDeliveryDriverStatus(
   if (error) throw new Error(error.message);
 }
 
+function roundMoney2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export type InsertDeliveryDriverSettlementParams = {
+  deliveryId: string;
+  driverUserId: string;
+  amountToOwner: number;
+  currency?: string;
+  settlementCashTotal?: number | null;
+  driverDailyRate?: number | null;
+  linkedOrdersTotal?: number | null;
+  /** Portion of amount_to_owner paid in cash (>= 0). */
+  cashAmount: number;
+  /** Portion of amount_to_owner paid by bank transfer (>= 0). */
+  bankTransferAmount: number;
+  /** Optional note when any amount was paid by bank transfer. */
+  bankReference?: string | null;
+  expenseId?: string | null;
+};
+
+/**
+ * Inserts a row in `delivery_driver_settlements` (RLS: same company, `recorded_by` = current user).
+ * When amount_to_owner > 0, cash_amount + bank_transfer_amount must match (enforced in DB and here).
+ */
+export async function insertDeliveryDriverSettlement(
+  params: InsertDeliveryDriverSettlementParams
+): Promise<{ id: string }> {
+  const companyId = await requireActiveCompanyId();
+  const uid = await getCurrentUserId();
+  const cash = roundMoney2(Number(params.cashAmount));
+  const bank = roundMoney2(Number(params.bankTransferAmount));
+  const due = roundMoney2(Number(params.amountToOwner));
+  const refTrim = String(params.bankReference ?? "").trim();
+
+  if (!Number.isFinite(cash) || !Number.isFinite(bank) || cash < 0 || bank < 0) {
+    throw new Error("Cash and bank amounts must be valid non-negative numbers.");
+  }
+  if (due > 0) {
+    if (roundMoney2(cash + bank) !== due) {
+      throw new Error("Cash plus bank transfer must equal the amount to return to the owner.");
+    }
+    if (cash <= 0 && bank <= 0) {
+      throw new Error("Enter at least one of cash or bank transfer amount.");
+    }
+  } else if (cash !== 0 || bank !== 0) {
+    throw new Error("When the net amount to owner is zero or negative, leave cash and bank amounts at zero.");
+  }
+
+  const insert = {
+    company_id: companyId,
+    delivery_id: params.deliveryId,
+    driver_user_id: params.driverUserId,
+    recorded_by: uid,
+    amount_to_owner: due,
+    currency: (params.currency ?? "MUR").trim() || "MUR",
+    settlement_cash_total: params.settlementCashTotal ?? null,
+    driver_daily_rate: params.driverDailyRate ?? null,
+    linked_orders_total: params.linkedOrdersTotal ?? null,
+    cash_amount: cash,
+    bank_transfer_amount: bank,
+    bank_reference: bank > 0 && refTrim ? refTrim : null,
+    expense_id: params.expenseId ?? null,
+  };
+
+  const { data, error } = await supabase
+    .from("delivery_driver_settlements")
+    .insert(insert)
+    .select("id")
+    .single();
+
+  if (error) throw new Error(error.message);
+  const id = String((data as { id?: string })?.id ?? "").trim();
+  if (!id) throw new Error("Settlement insert returned no id.");
+  return { id };
+}
+
+/** Used to roll back if a later step fails after a successful settlement insert. */
+export async function deleteDeliveryDriverSettlement(id: string): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("delivery_driver_settlements")
+    .delete()
+    .eq("id", id)
+    .eq("company_id", companyId);
+  if (error) throw new Error(error.message);
+}
+
+/** One settlement row per delivery (when recorded). */
+export type DeliveryDriverSettlementSnapshot = {
+  id: string;
+  amountToOwner: number;
+  currency: string;
+  settlementCashTotal: number | null;
+  driverDailyRate: number | null;
+  linkedOrdersTotal: number | null;
+  cashAmount: number;
+  bankTransferAmount: number;
+  bankReference: string | null;
+  createdAt: string;
+};
+
+export async function getDeliveryDriverSettlement(
+  deliveryId: string
+): Promise<DeliveryDriverSettlementSnapshot | null> {
+  const companyId = await requireActiveCompanyId();
+  const { data, error } = await supabase
+    .from("delivery_driver_settlements")
+    .select(
+      "id, amount_to_owner, currency, settlement_cash_total, driver_daily_rate, linked_orders_total, cash_amount, bank_transfer_amount, bank_reference, created_at"
+    )
+    .eq("company_id", companyId)
+    .eq("delivery_id", deliveryId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+
+  const r = data as Record<string, unknown>;
+  return {
+    id: String(r.id ?? ""),
+    amountToOwner: roundMoney2(Number(r.amount_to_owner ?? 0)),
+    currency: String(r.currency ?? "MUR").trim() || "MUR",
+    settlementCashTotal:
+      r.settlement_cash_total != null && String(r.settlement_cash_total).trim() !== ""
+        ? roundMoney2(Number(r.settlement_cash_total))
+        : null,
+    driverDailyRate:
+      r.driver_daily_rate != null && String(r.driver_daily_rate).trim() !== ""
+        ? roundMoney2(Number(r.driver_daily_rate))
+        : null,
+    linkedOrdersTotal:
+      r.linked_orders_total != null && String(r.linked_orders_total).trim() !== ""
+        ? roundMoney2(Number(r.linked_orders_total))
+        : null,
+    cashAmount: roundMoney2(Number(r.cash_amount ?? 0)),
+    bankTransferAmount: roundMoney2(Number(r.bank_transfer_amount ?? 0)),
+    bankReference: r.bank_reference != null ? String(r.bank_reference) : null,
+    createdAt: String(r.created_at ?? ""),
+  };
+}
+
 export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
   const companyId = await requireActiveCompanyId();
 
@@ -681,6 +907,7 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
       `
       id,
       status,
+      driver_status,
       driver_user_id,
       created_by,
       notes,
@@ -695,6 +922,7 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
           number,
           currency,
           total,
+          payment_status,
           bill_to_snapshot,
           fulfillment_status,
           updated_at,
@@ -749,6 +977,7 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
   return {
     id: d.id as string,
     status: normalizeDeliveryNoteStatus(d.status as string | null | undefined),
+    driverStatus: Boolean(d.driver_status),
     notes: (d.notes as string | null) ?? null,
     deliveryDate:
       d.delivery_date != null && String(d.delivery_date).trim()
@@ -786,7 +1015,7 @@ export type DriverStockReturnContext = {
   lines: DriverStockReturnLine[];
   /** Current quantity at the driver's active stock location per product. */
   availableByProduct: Record<string, number>;
-  /** Inclusive calendar-day lookback from local start of today (`p_days` = 1 is today only). */
+  /** Calendar-day lookback from local start of today, or **0** = no date filter (all updates). */
   p_days: number;
 };
 
@@ -840,7 +1069,12 @@ function aggregateDeliveryProductLines(
 
   for (const so of d.salesOrders) {
     if (!DRIVER_STOCK_RETURN_FULFILLMENT.has(so.fulfillmentStatus)) continue;
-    if (!salesOrderInReturnWindow(so.updatedAt, pDays)) continue;
+    if (
+      pDays > 0 &&
+      !salesOrderInReturnWindow(so.updatedAt, pDays)
+    ) {
+      continue;
+    }
 
     const soId = so.salesOrderId;
     const soNum = so.number;
@@ -921,17 +1155,20 @@ async function getDriverLocationStockForProducts(
 
 /**
  * Catalog-linked lines for sales orders on this delivery whose fulfillment is
- * **Delivered to driver**, **Rescheduled**, or **Pending**, scoped by `p_days`
- * (inclusive calendar days from local start of today backward).
+ * **Delivered to driver**, **Rescheduled**, or **Pending**.
+ * When `p_days` is **0**, every matching order is included (no `updated_at` window).
+ * When `p_days` is 1–366, only orders whose `updated_at` falls in that inclusive day window
+ * (local midnight) are included; missing `updated_at` is treated as included.
  */
 export async function getDriverStockReturnContext(
   deliveryId: string,
   opts?: { p_days?: number }
 ): Promise<DriverStockReturnContext> {
-  const p_days = Math.max(
-    1,
-    Math.min(366, Math.floor(Number(opts?.p_days ?? 7)) || 7)
-  );
+  const raw = opts?.p_days;
+  const n = Math.floor(Number(raw));
+  const p_days = Number.isFinite(n)
+    ? Math.max(0, Math.min(366, n))
+    : 0;
   const d = await getDelivery(deliveryId);
   if (!d) {
     return { lines: [], availableByProduct: {}, p_days };

@@ -39,6 +39,8 @@ import { useToast } from "@/hooks/use-toast";
 import {
   listInvoices,
   fetchInvoiceListFacets,
+  getCachedInvoiceFacets,
+  getCachedInvoiceList,
   type InvoiceListRow,
   type InvoiceListFacets,
   type InvoiceStatus,
@@ -271,7 +273,6 @@ export default function InvoicesPage() {
     let cancelled = false;
 
     (async () => {
-      setFacetsLoading(true);
       const id = await getActiveCompanyId();
       if (cancelled) return;
 
@@ -282,6 +283,16 @@ export default function InvoicesPage() {
         setFacets(null);
         setFacetsLoading(false);
         return;
+      }
+
+      // Show cached facets immediately while revalidating in the background
+      // so the sidebar doesn't blank out on every navigation back to the page.
+      const cached = getCachedInvoiceFacets(id);
+      if (cached) {
+        setFacets(cached);
+        setFacetsLoading(false);
+      } else {
+        setFacetsLoading(true);
       }
 
       try {
@@ -295,7 +306,7 @@ export default function InvoicesPage() {
             description: msg,
             variant: "destructive",
           });
-          setFacets(null);
+          if (!cached) setFacets(null);
         }
       } finally {
         if (!cancelled) setFacetsLoading(false);
@@ -336,17 +347,35 @@ export default function InvoicesPage() {
     let cancelled = false;
 
     (async () => {
-      setListLoading(true);
+      const companyId = await getActiveCompanyId();
+      if (cancelled || gen !== listRequestGen.current) return;
+
+      const listOpts = {
+        search: debouncedSearch || undefined,
+        status: statusFilter,
+        period: periodFilter,
+        page,
+        pageSize,
+        sortBy: "issueDate" as const,
+        sort: "desc" as const,
+      };
+
+      // Show cached rows immediately if we have them; still revalidate in the
+      // background so the data stays current. Visual loading state stays off
+      // for cache hits so the table doesn't dim on every navigation back.
+      const cached = companyId
+        ? getCachedInvoiceList(companyId, listOpts)
+        : null;
+      if (cached) {
+        setRows(cached.rows);
+        setTotal(cached.total);
+        setListLoading(false);
+      } else {
+        setListLoading(true);
+      }
+
       try {
-        const listRes = await listInvoices({
-          search: debouncedSearch || undefined,
-          status: statusFilter,
-          period: periodFilter,
-          page,
-          pageSize,
-          sortBy: "issueDate",
-          sort: "desc",
-        });
+        const listRes = await listInvoices(listOpts);
         if (cancelled || gen !== listRequestGen.current) return;
         setRows(listRes.rows);
         setTotal(listRes.total);

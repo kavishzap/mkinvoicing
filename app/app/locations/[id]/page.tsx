@@ -402,7 +402,7 @@ export default function LocationDetailPage() {
         )
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+      <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="flex min-w-0 flex-col gap-1 border-b border-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
@@ -472,7 +472,7 @@ export default function LocationDetailPage() {
         <Tabs
           value={tab}
           onValueChange={handleTabChange}
-          className="flex min-h-0 flex-1 flex-col gap-4"
+          className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4"
         >
           <TabsList className={cn("w-full justify-start sm:w-auto")}>
             <TabsTrigger value="details">Details</TabsTrigger>
@@ -487,7 +487,7 @@ export default function LocationDetailPage() {
 
           <TabsContent
             value="details"
-            className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+            className="mt-0 flex min-h-0 min-w-0 w-full flex-1 flex-col data-[state=inactive]:hidden"
           >
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
               <SectionCard icon={Building2} title="Location basics">
@@ -677,7 +677,7 @@ export default function LocationDetailPage() {
           {isDriverLocation ? (
             <TabsContent
               value="routing"
-              className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+              className="mt-0 flex min-h-0 min-w-0 w-full flex-1 flex-col data-[state=inactive]:hidden"
             >
               <LocationRoutingTab
                 locationId={id}
@@ -689,7 +689,7 @@ export default function LocationDetailPage() {
 
           <TabsContent
             value="products-line"
-            className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+            className="mt-0 flex min-h-0 min-w-0 w-full flex-1 flex-col data-[state=inactive]:hidden"
           >
             <LocationProductsLineTab
               locationId={id}

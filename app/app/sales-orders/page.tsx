@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Clock,
   Copy,
+  Download,
   Eye,
   FilePlus2,
   FileText,
@@ -21,6 +22,7 @@ import {
   PackageCheck,
   Pencil,
   Plus,
+  Printer,
   Search,
   SlidersVertical,
   StickyNote,
@@ -63,12 +65,14 @@ import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-s
 import { useToast } from "@/hooks/use-toast";
 import {
   listSalesOrders,
+  listAllSalesOrdersForExport,
   deleteSalesOrder,
   expireStaleSalesOrders,
   getSalesOrderKpiCounts,
   updateSalesOrderPaymentStatus,
   salesOrderFulfillmentAllowsEditing,
   SALES_ORDER_FULFILLMENT_LABELS,
+  SALES_ORDER_PAYMENT_LABELS,
   type SalesOrderFulfillmentStatus,
   type SalesOrderListRow,
 } from "@/lib/sales-orders-service";
@@ -223,6 +227,8 @@ export default function SalesOrdersPage() {
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -410,17 +416,156 @@ export default function SalesOrdersPage() {
     toast,
   ]);
 
-  const formatCurrency = (amount: number, currency: string) =>
-    new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
-      amount,
-    );
+  const formatCurrency = useCallback(
+    (amount: number, currency: string) =>
+      new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
+        amount,
+      ),
+    [],
+  );
 
-  const formatDate = (dateString: string) =>
+  const formatDate = useCallback((dateString: string) =>
     new Date(dateString).toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
+    }), []);
+
+  const fetchExportRows = useCallback(async () => {
+    await expireStaleSalesOrders();
+    return listAllSalesOrdersForExport({
+      search: debouncedSearch || undefined,
+      fulfillmentStatus: fulfillmentFilter,
+      skipExpireStale: true,
     });
+  }, [debouncedSearch, fulfillmentFilter]);
+
+  const exportFilenameStem = useMemo(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `sales-orders-${yyyy}${mm}${dd}`;
+  }, []);
+
+  const handleExportCsv = useCallback(async () => {
+    if (exportingCsv) return;
+    try {
+      setExportingCsv(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to export",
+          description: "No sales orders match the current filters.",
+        });
+        return;
+      }
+      const headers = [
+        "Order #",
+        "Client",
+        "City",
+        "Created by",
+        "Delivery date",
+        "Fulfillment",
+        "Payment",
+        "Total",
+      ];
+      const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const lines = [headers.map(esc).join(",")];
+      for (const r of data) {
+        lines.push(
+          [
+            r.number,
+            r.clientName || "",
+            r.cityName || "",
+            r.createdByName || "",
+            r.deliveryDate ? formatDate(r.deliveryDate) : "",
+            SALES_ORDER_FULFILLMENT_LABELS[r.fulfillmentStatus] ??
+              r.fulfillmentStatus,
+            SALES_ORDER_PAYMENT_LABELS[r.paymentStatus] ?? r.paymentStatus,
+            formatCurrency(r.total, r.currency),
+          ]
+            .map((v) => esc(String(v ?? "")))
+            .join(","),
+        );
+      }
+      const csv = `\uFEFF${lines.join("\r\n")}\r\n`;
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${exportFilenameStem}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({
+        title: "CSV exported",
+        description: `${data.length} sales order${data.length === 1 ? "" : "s"} exported.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Export failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingCsv(false);
+    }
+  }, [exportingCsv, fetchExportRows, exportFilenameStem, formatDate, formatCurrency, toast]);
+
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+    try {
+      setPrinting(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to print",
+          description: "No sales orders match the current filters.",
+        });
+        return;
+      }
+      const { buildSalesOrdersListPdfDoc } = await import(
+        "@/lib/sales-orders-list-pdf"
+      );
+      const doc = await buildSalesOrdersListPdfDoc({
+        rows: data,
+        fulfillmentFilter,
+        searchQuery: debouncedSearch,
+      });
+      const filename = `${exportFilenameStem}.pdf`;
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl, "_blank");
+      if (printWindow) {
+        printWindow.onload = () => {
+          setTimeout(() => printWindow.print(), 250);
+        };
+      } else {
+        doc.save(filename);
+        toast({
+          title: "Print blocked",
+          description: "Allow popups to print. PDF downloaded instead.",
+        });
+      }
+    } catch (e: unknown) {
+      toast({
+        title: "Print failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrinting(false);
+    }
+  }, [
+    printing,
+    fetchExportRows,
+    fulfillmentFilter,
+    debouncedSearch,
+    exportFilenameStem,
+    toast,
+  ]);
 
   const handleDuplicate = useCallback(
     (idParam: string) => {
@@ -654,7 +799,7 @@ export default function SalesOrdersPage() {
         },
       },
     ],
-    [router, handleDuplicate, handleMarkAsPaid],
+    [router, handleDuplicate, handleMarkAsPaid, formatDate, formatCurrency],
   );
 
   const confirmDelete = async () => {
@@ -705,12 +850,44 @@ export default function SalesOrdersPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
-          <Link href="/app/sales-orders/new">
-            <Plus className="h-4 w-4" />
-            Create sales order
-          </Link>
-        </Button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              exportingCsv ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handleExportCsv()}
+          >
+            <Download className="h-4 w-4" />
+            {exportingCsv ? "Exporting…" : "Export CSV"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="gap-2"
+            disabled={
+              companyReady !== true ||
+              printing ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handlePrint()}
+          >
+            <Printer className="h-4 w-4" />
+            {printing ? "Preparing…" : "Print"}
+          </Button>
+          <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+            <Link href="/app/sales-orders/new">
+              <Plus className="h-4 w-4" />
+              Create sales order
+            </Link>
+          </Button>
+        </div>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (

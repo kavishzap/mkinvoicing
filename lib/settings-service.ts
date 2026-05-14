@@ -185,21 +185,46 @@ export async function getCurrentUserId() {
   return data.user.id;
 }
 
+/* ------------------------------------------------------------------ *
+ * Profile in-memory cache (per browser tab). `fetchProfile` is called
+ * by many pages (invoice view, sales report, invoice/quotation/SO/PI
+ * exports, etc.) and the row is essentially stable across a session,
+ * so we cache it for 60s by user. Mutating helpers below clear it.
+ * ------------------------------------------------------------------ */
+const PROFILE_TTL_MS = 60_000;
+let profileCache:
+  | { userId: string; profile: Profile; expires: number }
+  | null = null;
+
+export function invalidateProfileCache(): void {
+  profileCache = null;
+}
+
 export async function fetchProfile(): Promise<Profile> {
   const userId = await getCurrentUserId();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", userId)
-    .maybeSingle();
+  if (
+    profileCache &&
+    profileCache.userId === userId &&
+    profileCache.expires > Date.now()
+  ) {
+    return profileCache.profile;
+  }
 
-  if (error) throw error;
-  const row = data ?? {};
+  /*
+   * Run the profiles row + active company id resolution in parallel.
+   * `getActiveCompanyId` is itself cached and either returns immediately
+   * or kicks off a single in-flight request shared across callers.
+   */
+  const [profileRes, companyId] = await Promise.all([
+    supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+    getActiveCompanyId(),
+  ]);
+
+  if (profileRes.error) throw profileRes.error;
+  const row = profileRes.data ?? {};
   let profile = profileFromDbRow(row as Record<string, unknown>);
 
-  const companyId = await getActiveCompanyId();
   const isCompanyAccount = profile.accountType === "company";
-
   if (companyId && isCompanyAccount) {
     const { data: co, error: cErr } = await supabase
       .from("companies")
@@ -218,6 +243,11 @@ export async function fetchProfile(): Promise<Profile> {
     };
   }
 
+  profileCache = {
+    userId,
+    profile,
+    expires: Date.now() + PROFILE_TTL_MS,
+  };
   return profile;
 }
 
@@ -357,6 +387,7 @@ export async function updateActiveCompanySettings(
     .eq("id", companyId);
 
   if (error) throw error;
+  invalidateProfileCache();
 }
 
 /** Writes a personal `profiles` row only (not used for active-company document identity). */
@@ -395,6 +426,7 @@ export async function upsertProfile(profile: Profile) {
     .from("profiles")
     .upsert(payload, { onConflict: "id" });
   if (error) throw error;
+  invalidateProfileCache();
 }
 
 export async function fetchPreferences(): Promise<Preferences> {

@@ -10,7 +10,15 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { useToast } from "@/hooks/use-toast";
-import { Banknote, BarChart3, Receipt, TrendingUp, Users } from "lucide-react";
+import {
+  Banknote,
+  BarChart3,
+  FileStack,
+  Landmark,
+  Receipt,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -19,10 +27,7 @@ import {
   YAxis,
 } from "recharts";
 import Link from "next/link";
-import {
-  getDashboardStats,
-  getIncomeOverTime,
-} from "@/lib/dashboard-service";
+import { getDashboardData } from "@/lib/dashboard-service";
 import { AppPageShell } from "@/components/app-page-shell";
 import { Button } from "@/components/ui/button";
 
@@ -51,6 +56,10 @@ export default function DashboardPage() {
     totalPurchases: number;
     profitableIncome: number;
     customerCount: number;
+    salesInvoiceCount: number;
+    driverSettlementCount: number;
+    driverSettlementsCashTotal: number;
+    driverSettlementsBankTotal: number;
     currency: string;
   } | null>(null);
   const [incomeData, setIncomeData] = useState<
@@ -62,12 +71,9 @@ export default function DashboardPage() {
     (async () => {
       try {
         setLoading(true);
-        const [s, data] = await Promise.all([
-          getDashboardStats(),
-          getIncomeOverTime(),
-        ]);
+        const { stats: s, incomeByMonth } = await getDashboardData();
         setStats(s);
-        setIncomeData(data);
+        setIncomeData(incomeByMonth);
       } catch (e: unknown) {
         const err = e as { message?: string };
         toast({
@@ -84,17 +90,31 @@ export default function DashboardPage() {
   if (loading || !stats) {
     return (
       <AppPageShell subtitle="See how sales, cash in, and costs look at a glance—then open any module from the sidebar.">
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Card key={i}>
-              <CardHeader className="pb-2">
-                <div className="h-5 w-24 bg-muted rounded animate-pulse" />
-              </CardHeader>
-              <CardContent>
-                <div className="h-8 w-32 bg-muted rounded animate-pulse" />
-              </CardContent>
-            </Card>
-          ))}
+        <div className="space-y-4">
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <Card key={i}>
+                <CardHeader className="pb-2">
+                  <div className="h-5 w-24 bg-muted rounded animate-pulse" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-32 bg-muted rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={`b-${i}`}>
+                <CardHeader className="pb-2">
+                  <div className="h-5 w-24 bg-muted rounded animate-pulse" />
+                </CardHeader>
+                <CardContent>
+                  <div className="h-8 w-32 bg-muted rounded animate-pulse" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
         <Card>
           <CardHeader>
@@ -110,97 +130,157 @@ export default function DashboardPage() {
 
   return (
     <AppPageShell subtitle="See how sales, cash in, and costs look at a glance—then open any module from the sidebar.">
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4" data-tour-id="dashboard">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Net Sales
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {formatCurrency(stats.netSales, stats.currency)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Total invoice value (paid + pending)
-            </p>
-          </CardContent>
-        </Card>
+      <div className="space-y-4" data-tour-id="dashboard">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Net Sales
+              </CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold">
+                {formatCurrency(stats.netSales, stats.currency)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Total invoice value (paid + pending)
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Money In (Paid)
-            </CardTitle>
-            <Banknote className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold text-green-600">
-              {formatCurrency(stats.totalPaid, stats.currency)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Invoices marked as paid
-            </p>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Money In (Paid)
+              </CardTitle>
+              <Banknote className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold text-green-600">
+                {formatCurrency(stats.totalPaid, stats.currency)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Invoices marked as paid
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Expense
-            </CardTitle>
-            <Receipt className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {formatCurrency(stats.totalExpense, stats.currency)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              All expenses
-            </p>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Total Expense
+              </CardTitle>
+              <Receipt className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold">
+                {formatCurrency(stats.totalExpense, stats.currency)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                All expenses
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Customers
-            </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">
-              {stats.customerCount}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Active & inactive
-            </p>
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Profitable Income
+              </CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div
+                className={`text-xl font-bold ${
+                  stats.profitableIncome >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
+                }`}
+              >
+                {formatCurrency(stats.profitableIncome, stats.currency)}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Paid sales − purchases − expenses
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Profitable Income
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div
-              className={`text-xl font-bold ${
-                stats.profitableIncome >= 0
-                  ? "text-green-600"
-                  : "text-red-600"
-              }`}
-            >
-              {formatCurrency(stats.profitableIncome, stats.currency)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Paid sales − purchases − expenses
-            </p>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Customers
+              </CardTitle>
+              <Users className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold">{stats.customerCount}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Active & inactive
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Sales Invoices
+              </CardTitle>
+              <FileStack className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl font-bold">{stats.salesInvoiceCount}</div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Non-cancelled invoices (same basis as net sales)
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Driver settlements
+              </CardTitle>
+              <Landmark className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-sm font-semibold tabular-nums">
+                {stats.driverSettlementCount} recorded
+              </div>
+              <div className="grid gap-1 text-xs text-muted-foreground">
+                <div className="flex justify-between gap-2 tabular-nums">
+                  <span>Cash to owner</span>
+                  <span className="font-medium text-foreground">
+                    {formatCurrency(stats.driverSettlementsCashTotal, stats.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 tabular-nums">
+                  <span>Bank to owner</span>
+                  <span className="font-medium text-foreground">
+                    {formatCurrency(stats.driverSettlementsBankTotal, stats.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 border-t pt-1 tabular-nums font-medium text-foreground">
+                  <span>Combined</span>
+                  <span>
+                    {formatCurrency(
+                      stats.driverSettlementsCashTotal + stats.driverSettlementsBankTotal,
+                      stats.currency,
+                    )}
+                  </span>
+                </div>
+              </div>
+              <Link
+                href="/app/delivery-notes"
+                className="inline-block text-xs text-primary underline-offset-4 hover:underline"
+              >
+                Open delivery notes
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <Card>

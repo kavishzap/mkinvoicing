@@ -252,6 +252,47 @@ function cityLabelFromListRow(
   return String(bill.city ?? "").trim();
 }
 
+async function finishSalesOrderListRows(
+  rawRows: Array<Record<string, unknown>>,
+  cityById: Map<string, string>,
+): Promise<SalesOrderListRow[]> {
+  const creatorIds = rawRows
+    .map((r) => (r.user_id != null ? String(r.user_id) : ""))
+    .filter(Boolean);
+  const creatorNames = await userDisplayMap(creatorIds);
+
+  return rawRows.map((r: Record<string, unknown>) => {
+    const creatorId = r.user_id != null ? String(r.user_id) : "";
+    const createdByName = creatorId
+      ? creatorNames.get(creatorId) ?? creatorId.slice(0, 8)
+      : "";
+    return {
+      id: String(r.id),
+      number: String(r.number ?? ""),
+      issueDate: String(r.issue_date ?? ""),
+      validUntil: String(r.valid_until ?? ""),
+      deliveryDate:
+        r.delivery_date != null && String(r.delivery_date).trim()
+          ? String(r.delivery_date).slice(0, 10)
+          : null,
+      createdAt: r.created_at != null ? String(r.created_at) : "",
+      cityName: cityLabelFromListRow(r, cityById),
+      status: normalizeSalesOrderStatus(String(r.status)),
+      fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
+        r.fulfillment_status as string | null | undefined,
+      ),
+      paymentStatus: normalizeSalesOrderPaymentStatus(
+        r.payment_status as string | null | undefined,
+      ),
+      currency: String(r.currency ?? ""),
+      clientName: nameFromBillTo(r.bill_to_snapshot as Record<string, unknown>),
+      total: Number(r.total ?? 0),
+      createdByName,
+      notes: r.notes != null ? String(r.notes).trim() : "",
+    };
+  });
+}
+
 export type SalesOrderClientInfo = {
   type: "company" | "individual";
   companyName: string;
@@ -646,41 +687,83 @@ export async function listSalesOrders(opts?: {
   const cityById = new Map(cityRows.map((c) => [c.id, c.name] as const));
 
   const rawRows = (data ?? []) as Array<Record<string, unknown>>;
-  const creatorIds = rawRows
-    .map((r) => (r.user_id != null ? String(r.user_id) : ""))
-    .filter(Boolean);
-  const creatorNames = await userDisplayMap(creatorIds);
-
-  const rows: SalesOrderListRow[] = rawRows.map((r: any) => {
-    const creatorId = r.user_id != null ? String(r.user_id) : "";
-    const createdByName = creatorId
-      ? creatorNames.get(creatorId) ?? creatorId.slice(0, 8)
-      : "";
-    return {
-      id: r.id,
-      number: r.number,
-      issueDate: r.issue_date,
-      validUntil: r.valid_until,
-      deliveryDate:
-        r.delivery_date != null && String(r.delivery_date).trim()
-          ? String(r.delivery_date).slice(0, 10)
-          : null,
-      createdAt: r.created_at != null ? String(r.created_at) : "",
-      cityName: cityLabelFromListRow(r, cityById),
-      status: normalizeSalesOrderStatus(String(r.status)),
-      fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
-        r.fulfillment_status
-      ),
-      paymentStatus: normalizeSalesOrderPaymentStatus(r.payment_status),
-      currency: r.currency,
-      clientName: nameFromBillTo(r.bill_to_snapshot),
-      total: Number(r.total ?? 0),
-      createdByName,
-      notes: r.notes != null ? String(r.notes).trim() : "",
-    };
-  });
+  const rows = await finishSalesOrderListRows(rawRows, cityById);
 
   return { rows, total: count ?? 0 };
+}
+
+/**
+ * All sales order rows matching the same filters as `listSalesOrders`, without pagination.
+ * Used for CSV / PDF export. Pages through Supabase in batches of 1000.
+ */
+export async function listAllSalesOrdersForExport(opts?: {
+  search?: string;
+  fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
+  customerId?: string;
+  status?: SalesOrderStatus | "all";
+  /**
+   * When true, skips `expireStaleSalesOrders()` (caller should run it once before export).
+   */
+  skipExpireStale?: boolean;
+}): Promise<SalesOrderListRow[]> {
+  if (!opts?.skipExpireStale) {
+    await expireStaleSalesOrders();
+  }
+  const companyId = await requireActiveCompanyId();
+  const cityRows = await listDeliveryCities();
+  const cityById = new Map(cityRows.map((c) => [c.id, c.name] as const));
+
+  const BATCH = 1000;
+  let from = 0;
+  const out: SalesOrderListRow[] = [];
+
+  for (;;) {
+    let q = supabase
+      .from("sales_orders")
+      .select(
+        "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, user_id, notes",
+      )
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + BATCH - 1);
+
+    if (opts?.status && opts.status !== "all") {
+      q = q.eq("status", opts.status);
+    }
+    if (opts?.fulfillmentStatus && opts.fulfillmentStatus !== "all") {
+      q = q.eq("fulfillment_status", opts.fulfillmentStatus);
+    }
+    const cid = opts?.customerId?.trim();
+    if (cid) {
+      q = q.eq("customer_id", cid);
+    }
+    if (opts?.search?.trim()) {
+      const raw = opts.search.trim();
+      const s = `%${raw}%`;
+      const filters = [
+        `number.ilike.${s}`,
+        `bill_to_snapshot->>company_name.ilike.${s}`,
+        `bill_to_snapshot->>full_name.ilike.${s}`,
+        `bill_to_snapshot->>phone.ilike.${s}`,
+      ];
+      const digitsOnly = raw.replace(/\D/g, "");
+      if (digitsOnly && digitsOnly !== raw) {
+        filters.push(`bill_to_snapshot->>phone.ilike.%${digitsOnly}%`);
+      }
+      q = q.or(filters.join(","));
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+    const rawRows = (data ?? []) as Array<Record<string, unknown>>;
+    const batch = await finishSalesOrderListRows(rawRows, cityById);
+    out.push(...batch);
+    if (batch.length < BATCH) break;
+    from += BATCH;
+  }
+
+  return out;
 }
 
 /** Shape of `sales_orders` row returned by `getSalesOrder` embedded select (dynamic string breaks generated Supabase types). */

@@ -33,14 +33,13 @@ import {
   ACTIVE_COMPANY_ID_STORAGE_KEY,
   getActiveCompanyId,
 } from "@/lib/active-company";
-import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 import {
   createDeliveryCity,
-  listDeliveryCities,
-  listDeliveryZonesWithCityCounts,
+  loadDeliveryZoneCitiesPageData,
   type DeliveryCityRow,
   type DeliveryZoneWithCityCount,
 } from "@/lib/delivery-zones-service";
+import type { TeamMemberRow } from "@/lib/company-team-service";
 import { cn } from "@/lib/utils";
 
 type ZoneListFacets = {
@@ -323,11 +322,8 @@ export default function DeliveryZoneCitiesPage() {
     setCompanyReady(true);
     setListLoading(true);
     try {
-      const [zoneRows, cityRows, teamRows] = await Promise.all([
-        listDeliveryZonesWithCityCounts(),
-        listDeliveryCities(),
-        listTeamMembers(),
-      ]);
+      const { zones: zoneRows, cities: cityRows, teamMembers: teamRows } =
+        await loadDeliveryZoneCitiesPageData();
       setZones(zoneRows);
       setCities(cityRows);
       const drivers = teamDriverMembers(teamRows);

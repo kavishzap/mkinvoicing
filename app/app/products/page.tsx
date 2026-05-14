@@ -389,96 +389,12 @@ export default function ProductsPage() {
         });
         return;
       }
-      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
-        import("jspdf"),
-        import("jspdf-autotable"),
-      ]);
-      const autoTable = autoTableMod.default;
-
-      const doc = new jsPDF({
-        unit: "pt",
-        format: "a4",
-        orientation: "landscape",
+      const { buildProductsListPdfDoc } = await import("@/lib/products-list-pdf");
+      const doc = await buildProductsListPdfDoc({
+        rows: data,
+        statusFilter,
+        searchQuery: debouncedSearch,
       });
-      const pageW = doc.internal.pageSize.getWidth();
-      const M = 36;
-
-      doc.setFont("helvetica", "bold").setFontSize(16);
-      doc.text("Products", M, M + 6);
-      doc.setFont("helvetica", "normal").setFontSize(10);
-      const filterBits: string[] = [];
-      if (statusFilter !== "active") filterBits.push(`Status: ${statusFilter}`);
-      if (debouncedSearch) filterBits.push(`Search: "${debouncedSearch}"`);
-      const subtitle = [
-        new Date().toLocaleString(),
-        `${data.length} product${data.length === 1 ? "" : "s"}`,
-        ...filterBits,
-      ].join("  •  ");
-      doc.setTextColor(120);
-      doc.text(subtitle, M, M + 24);
-      doc.setTextColor(0);
-
-      const body = data.map((p) => {
-        const desc = (p.description ?? "").replace(/\s+/g, " ").trim();
-        const descShort =
-          desc.length > 160 ? `${desc.slice(0, 157)}…` : desc;
-        return [
-          p.name,
-          p.sku ?? "",
-          p.unit,
-          formatMoney(p.costPrice, p.currency),
-          formatMoney(p.salePrice, p.currency),
-          p.currency,
-          p.isActive ? "Active" : "Inactive",
-          descShort,
-        ];
-      });
-
-      autoTable(doc, {
-        startY: M + 36,
-        head: [
-          [
-            "Name",
-            "SKU",
-            "Unit",
-            "Cost",
-            "Sale",
-            "Currency",
-            "Status",
-            "Description",
-          ],
-        ],
-        body,
-        styles: { font: "helvetica", fontSize: 8, cellPadding: 3 },
-        headStyles: {
-          fillColor: [243, 244, 246],
-          textColor: 20,
-          fontStyle: "bold",
-        },
-        alternateRowStyles: { fillColor: [250, 250, 251] },
-        columnStyles: {
-          0: { cellWidth: 130 },
-          1: { cellWidth: 72 },
-          2: { cellWidth: 36 },
-          3: { cellWidth: 72 },
-          4: { cellWidth: 72 },
-          5: { cellWidth: 48 },
-          6: { cellWidth: 52 },
-          7: { cellWidth: 160 },
-        },
-        margin: { left: M, right: M },
-        didDrawPage: () => {
-          const pageH = doc.internal.pageSize.getHeight();
-          const pageNumber = doc.getNumberOfPages();
-          doc.setFontSize(8);
-          doc.setTextColor(140);
-          doc.text(`Page ${pageNumber}`, pageW - M, pageH - 14, {
-            align: "right",
-          });
-          doc.setTextColor(0);
-        },
-      });
-
       const filename = `${exportFilenameStem}.pdf`;
       const pdfBlob = doc.output("blob");
       const pdfUrl = URL.createObjectURL(pdfBlob);

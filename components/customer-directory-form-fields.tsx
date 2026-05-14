@@ -1,17 +1,12 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
+import { useMemo } from "react";
 import { Building2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableDeliveryCitySelect } from "@/components/searchable-delivery-city-select";
 import type { CustomerPayload } from "@/lib/customers-service";
 import type { DeliveryCityRow } from "@/lib/delivery-zones-service";
 import { cn } from "@/lib/utils";
@@ -142,6 +137,11 @@ export function CustomerDirectoryFormFields({
   allowTypeChange = true,
   className,
 }: CustomerDirectoryFormFieldsProps) {
+  const activeCities = useMemo(
+    () => cities.filter((c) => c.isActive),
+    [cities],
+  );
+
   return (
     <div className={cn("space-y-4 py-2", className)}>
       {allowTypeChange ? (
@@ -233,31 +233,34 @@ export function CustomerDirectoryFormFields({
         <Label htmlFor="cityId" className="text-xs font-medium">
           City *
         </Label>
-        <Select
+        <SearchableDeliveryCitySelect
+          id="cityId"
+          cities={activeCities}
           value={formData.cityId}
-          onValueChange={(v) => setFormData({ ...formData, cityId: v })}
-        >
-          <SelectTrigger
-            id="cityId"
-            className={cn(
-              "h-8 text-xs",
-              errors.cityId ? "border-destructive" : "",
-            )}
-          >
-            <SelectValue placeholder="Select city" />
-          </SelectTrigger>
-          <SelectContent>
-            {cities
-              .filter((c) => c.isActive)
-              .map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-          </SelectContent>
-        </Select>
+          onChange={(cityId) => {
+            const row = cities.find((c) => c.id === cityId);
+            setFormData({
+              ...formData,
+              cityId,
+              city: row?.name ?? "",
+            });
+          }}
+          placeholder="Search or pick a city"
+          compact
+          aria-invalid={!!errors.cityId}
+          className={errors.cityId ? "border-destructive" : undefined}
+        />
         {errors.cityId ? <p className="text-xs text-destructive">{errors.cityId}</p> : null}
       </div>
+
+      <Field
+        label="Address line 1"
+        id="address_line_1"
+        value={formData.address_line_1}
+        onChange={(v) => setFormData({ ...formData, address_line_1: v })}
+        error={errors.address_line_1}
+        placeholder="Street, building, suite"
+      />
     </div>
   );
 }

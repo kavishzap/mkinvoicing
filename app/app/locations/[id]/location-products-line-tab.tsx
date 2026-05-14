@@ -232,9 +232,9 @@ export function LocationProductsLineTab({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted-foreground max-w-2xl">
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4">
+      <div className="flex min-w-0 w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="min-w-0 max-w-full text-sm text-muted-foreground sm:max-w-2xl">
           Read-only snapshot of stock held here and movements involving this location (transfers,
           refills, stock-outs). Use{" "}
           <span className="font-medium text-foreground">Inventory</span> to record changes.
@@ -264,21 +264,23 @@ export function LocationProductsLineTab({
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-start gap-2">
+      <Card className="min-w-0">
+        <CardHeader className="min-w-0 pb-3">
+          <div className="flex min-w-0 items-start gap-2">
             <Package className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
-            <div>
-              <CardTitle className="text-base">Products at this location</CardTitle>
+            <div className="min-w-0">
+              <CardTitle className="text-base leading-snug break-words">
+                Products at this location
+              </CardTitle>
               <CardDescription>
                 Quantities from live balances (products with zero on hand are hidden).
               </CardDescription>
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
+        <CardContent className="min-w-0">
+          <div className="min-w-0 overflow-x-auto rounded-md border">
+            <table className="w-full min-w-0 text-sm">
               <thead className="bg-muted/50 text-muted-foreground">
                 <tr>
                   <th className="p-3 text-left">Product</th>
@@ -318,25 +320,27 @@ export function LocationProductsLineTab({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Transfers, refills &amp; stock-outs</CardTitle>
-          <CardDescription>
+      <Card className="min-w-0">
+        <CardHeader className="min-w-0 pb-3">
+          <CardTitle className="text-base leading-snug break-words hyphens-auto">
+            Transfers, refills & stock-outs
+          </CardTitle>
+          <CardDescription className="break-words">
             History rows where stock moved in or out of this location.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm min-w-[720px]">
+        <CardContent className="min-w-0 space-y-4">
+          <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-md border">
+            <table className="w-max min-w-full text-sm">
               <thead className="bg-muted/50 text-muted-foreground">
                 <tr>
-                  <th className="p-3 text-left">When</th>
-                  <th className="p-3 text-left">Type</th>
-                  <th className="p-3 text-left">Product</th>
-                  <th className="p-3 text-right">Qty</th>
-                  <th className="p-3 text-left">Detail</th>
-                  <th className="p-3 text-left">Note</th>
-                  <th className="p-3 text-left">By</th>
+                  <th className="whitespace-nowrap p-3 text-left align-top">When</th>
+                  <th className="whitespace-nowrap p-3 text-left align-top">Type</th>
+                  <th className="p-3 text-left align-top">Product</th>
+                  <th className="whitespace-nowrap p-3 text-right align-top">Qty</th>
+                  <th className="p-3 text-left align-top">Detail</th>
+                  <th className="p-3 text-left align-top">Note</th>
+                  <th className="p-3 text-left align-top">By</th>
                 </tr>
               </thead>
               <tbody>
@@ -355,24 +359,30 @@ export function LocationProductsLineTab({
                 ) : (
                   movRows.map((m) => (
                     <tr key={m.id} className="border-t align-top">
-                      <td className="p-3 text-xs tabular-nums whitespace-nowrap">
+                      <td className="whitespace-nowrap p-3 text-xs tabular-nums text-muted-foreground">
                         {formatWhen(m.created_at)}
                       </td>
-                      <td className="p-3 whitespace-nowrap">{EVENT_LABELS[m.event_type]}</td>
-                      <td className="p-3">
+                      <td className="whitespace-nowrap p-3 text-xs">
+                        {EVENT_LABELS[m.event_type]}
+                      </td>
+                      <td className="max-w-[14rem] p-3 break-words sm:max-w-[18rem]">
                         <span className="font-medium">{m.product_name}</span>
                         {m.product_sku ? (
                           <span className="block text-xs text-muted-foreground">{m.product_sku}</span>
                         ) : null}
                       </td>
-                      <td className="p-3 text-right tabular-nums font-medium">{m.quantity}</td>
-                      <td className="p-3 text-xs text-muted-foreground max-w-[220px]">
+                      <td className="whitespace-nowrap p-3 text-right tabular-nums font-medium">
+                        {m.quantity}
+                      </td>
+                      <td className="max-w-[16rem] p-3 text-xs text-muted-foreground break-words sm:max-w-[22rem]">
                         {movementSummary(m)}
                       </td>
-                      <td className="p-3 text-xs text-muted-foreground max-w-[180px]">
+                      <td className="max-w-[16rem] p-3 text-xs text-muted-foreground break-words sm:max-w-[22rem]">
                         {m.note || "—"}
                       </td>
-                      <td className="p-3 text-xs">{m.recorded_by_label}</td>
+                      <td className="max-w-[10rem] p-3 text-xs break-words sm:max-w-[12rem]">
+                        {m.recorded_by_label}
+                      </td>
                     </tr>
                   ))
                 )}

@@ -26,6 +26,43 @@ export type TeamMemberRow = {
   profile: TeamMemberProfile | null;
 };
 
+function mapCompanyUserRowsToTeamMembers(
+  members: Record<string, unknown>[],
+  profileById: Map<string, Record<string, unknown>>,
+): TeamMemberRow[] {
+  return members.map((m) => {
+    const uid = m.user_id as string;
+    const p = profileById.get(uid);
+    const role = m.company_roles as unknown as { name: string } | null;
+    const prof = p
+      ? ({
+          full_name: (p.full_name as string | null) ?? null,
+          email: (p.email as string | null) ?? null,
+          phone: (p.phone as string | null) ?? null,
+          avatar_url: (p.avatar_url as string | null) ?? null,
+          is_active: Boolean(p.is_active),
+          system_role: String(p.system_role ?? "member"),
+          created_at: String(p.created_at ?? ""),
+          updated_at: String(p.updated_at ?? ""),
+        } satisfies TeamMemberProfile)
+      : null;
+
+    return {
+      membershipId: m.id as string,
+      userId: uid,
+      companyId: m.company_id as string,
+      roleId: m.role_id as string,
+      roleName: role?.name ?? "—",
+      isActive: Boolean(m.is_active),
+      isOwner: Boolean(m.is_owner),
+      invitedAt: (m.invited_at as string | null) ?? null,
+      joinedAt: (m.joined_at as string | null) ?? null,
+      driverRate: (m.driver_rate as number | null) ?? null,
+      profile: prof,
+    } satisfies TeamMemberRow;
+  });
+}
+
 export async function listTeamMembers(): Promise<TeamMemberRow[]> {
   const companyId = await requireActiveCompanyId();
 
@@ -67,37 +104,10 @@ export async function listTeamMembers(): Promise<TeamMemberRow[]> {
     (profiles ?? []).map((p) => [p.id as string, p as Record<string, unknown>])
   );
 
-  return members.map((m) => {
-    const uid = m.user_id as string;
-    const p = profileById.get(uid);
-    const role = m.company_roles as unknown as { name: string } | null;
-    const prof = p
-      ? ({
-          full_name: (p.full_name as string | null) ?? null,
-          email: (p.email as string | null) ?? null,
-          phone: (p.phone as string | null) ?? null,
-          avatar_url: (p.avatar_url as string | null) ?? null,
-          is_active: Boolean(p.is_active),
-          system_role: String(p.system_role ?? "member"),
-          created_at: String(p.created_at ?? ""),
-          updated_at: String(p.updated_at ?? ""),
-        } satisfies TeamMemberProfile)
-      : null;
-
-    return {
-      membershipId: m.id as string,
-      userId: uid,
-      companyId: m.company_id as string,
-      roleId: m.role_id as string,
-      roleName: role?.name ?? "—",
-      isActive: Boolean(m.is_active),
-      isOwner: Boolean(m.is_owner),
-      invitedAt: (m.invited_at as string | null) ?? null,
-      joinedAt: (m.joined_at as string | null) ?? null,
-      driverRate: (m.driver_rate as number | null) ?? null,
-      profile: prof,
-    } satisfies TeamMemberRow;
-  });
+  return mapCompanyUserRowsToTeamMembers(
+    members as Record<string, unknown>[],
+    profileById,
+  );
 }
 
 /**
@@ -109,6 +119,75 @@ export function isDriverRoleTeamMember(m: TeamMemberRow): boolean {
     m.isActive &&
     m.profile?.is_active !== false &&
     m.roleName.toLowerCase().includes("driver")
+  );
+}
+
+/**
+ * Active company users whose role name contains “driver” (case-insensitive).
+ * Fetches far fewer rows than {@link listTeamMembers} — use for delivery flows.
+ */
+export async function listDriverRoleTeamMembers(): Promise<TeamMemberRow[]> {
+  const companyId = await requireActiveCompanyId();
+
+  const { data: roles, error: roleErr } = await supabase
+    .from("company_roles")
+    .select("id")
+    .eq("company_id", companyId)
+    .ilike("name", "%driver%");
+
+  if (roleErr) throw new Error(roleErr.message);
+
+  const roleIds = [
+    ...new Set(
+      (roles ?? [])
+        .map((r) => String((r as { id?: unknown }).id ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (roleIds.length === 0) return [];
+
+  const { data: rows, error } = await supabase
+    .from("company_users")
+    .select(
+      `
+      id,
+      user_id,
+      company_id,
+      role_id,
+      is_active,
+      is_owner,
+      invited_at,
+      joined_at,
+      driver_rate,
+      company_roles ( name )
+    `
+    )
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("role_id", roleIds)
+    .order("joined_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  const members = rows ?? [];
+  const userIds = members.map((m) => m.user_id as string).filter(Boolean);
+  if (userIds.length === 0) return [];
+
+  const { data: profiles, error: pErr } = await supabase
+    .from("user_profiles")
+    .select(
+      "id, full_name, email, phone, avatar_url, is_active, system_role, created_at, updated_at"
+    )
+    .in("id", userIds);
+
+  if (pErr) throw new Error(pErr.message);
+
+  const profileById = new Map(
+    (profiles ?? []).map((p) => [p.id as string, p as Record<string, unknown>])
+  );
+
+  return mapCompanyUserRowsToTeamMembers(members as Record<string, unknown>[], profileById).filter(
+    isDriverRoleTeamMember,
   );
 }
 

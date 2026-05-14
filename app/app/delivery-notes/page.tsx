@@ -1,9 +1,9 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Eye, Plus, PackageOpen, Warehouse } from "lucide-react";
+import { Banknote, Download, Eye, MoreVertical, Plus, PackageOpen, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -27,29 +27,37 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { DeliveryNoteStatusBadge } from "@/components/delivery-note-status-badge";
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import {
+  DELIVERY_NOTE_STATUS_LABELS,
   getDelivery,
+  getDeliveryDriverSettlement,
   getDriverStockReturnContext,
+  insertDeliveryDriverSettlement,
+  deleteDeliveryDriverSettlement,
   listDeliveries,
+  listDriverTeamMembers,
   returnDriverStockToWarehouse,
   setDeliveryDriverStatus,
   type DeliveryListRow,
   type DriverStockReturnLine,
 } from "@/lib/deliveries-service";
-import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
-import { addExpense } from "@/lib/expenses-service";
+import type { TeamMemberRow } from "@/lib/company-team-service";
+import { addExpense, deleteExpense } from "@/lib/expenses-service";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+
+/** No date filter: include all matching sales orders on the delivery for stock return. */
+const DRIVER_STOCK_RETURN_P_DAYS_ALL = 0;
 
 function fmtWhen(iso: string) {
   try {
@@ -105,6 +113,49 @@ function fmtScheduleDay(yyyyMmDd: string | null) {
   }
 }
 
+function parseMoneyInput(s: string): number {
+  const t = String(s).trim().replace(/,/g, "");
+  if (t === "") return 0;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
+}
+
+function roundMoney2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Same dark header bar as store keeper PDF exports (MoLedger + title strip). */
+function drawMoLedgerExportPdfHeader(
+  doc: jsPDF,
+  opts: {
+    margin: number;
+    pageW: number;
+    rightTitle: string;
+    rightSubtitle?: string;
+    leftSubtitle?: string;
+  }
+) {
+  const { margin, pageW, rightTitle, rightSubtitle, leftSubtitle } = opts;
+  const rightX = pageW - margin;
+  const brandColor = "#0F172A";
+  doc.setFillColor(brandColor);
+  doc.rect(0, 0, pageW, 60, "F");
+  doc.setTextColor("#FFFFFF");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("MoLedger", margin, 30);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(leftSubtitle ?? "Operations export", margin, 46);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text(rightTitle, rightX, 30, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  if (rightSubtitle) doc.text(rightSubtitle, rightX, 46, { align: "right" });
+  doc.setTextColor("#000000");
+}
+
 export default function DeliveryNotesPage() {
   const { toast } = useToast();
   const [rows, setRows] = useState<DeliveryListRow[]>([]);
@@ -127,28 +178,23 @@ export default function DeliveryNotesPage() {
   const [stockLinesLoading, setStockLinesLoading] = useState(false);
   const [returnQtys, setReturnQtys] = useState<Record<string, string>>({});
   const [stockReturnBusy, setStockReturnBusy] = useState(false);
-  const [daysLookbackSelect, setDaysLookbackSelect] = useState<
-    "1" | "7" | "14" | "30" | "custom"
-  >("7");
-  const [daysLookbackCustom, setDaysLookbackCustom] = useState("21");
-
-  const effectiveStockReturnPDays = useMemo(() => {
-    if (daysLookbackSelect === "custom") {
-      const n = Math.floor(Number(daysLookbackCustom));
-      return Math.max(1, Math.min(366, Number.isFinite(n) ? n : 1));
-    }
-    return Number(daysLookbackSelect);
-  }, [daysLookbackSelect, daysLookbackCustom]);
+  const driverTeamLoadedRef = useRef(false);
+  const [driverBalanceModalStep, setDriverBalanceModalStep] = useState<
+    "preview" | "payment"
+  >("preview");
+  const [settlementCashInput, setSettlementCashInput] = useState("");
+  const [settlementBankInput, setSettlementBankInput] = useState("");
+  const [settlementBankReference, setSettlementBankReference] = useState("");
+  const [balanceSheetBusyId, setBalanceSheetBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        const [list, team] = await Promise.all([listDeliveries(), listTeamMembers()]);
+        const list = await listDeliveries();
         if (!cancelled) {
           setRows(list);
-          setDrivers(team.filter((m) => m.roleName.toLowerCase().includes("driver")));
         }
       } catch (e: unknown) {
         if (!cancelled) {
@@ -173,18 +219,42 @@ export default function DeliveryNotesPage() {
       setStockReturnLines([]);
       setDriverStockAvailable({});
       setReturnQtys({});
-      setDaysLookbackSelect("7");
-      setDaysLookbackCustom("21");
+      driverTeamLoadedRef.current = false;
       return;
     }
     let cancelled = false;
     (async () => {
       setStockLinesLoading(true);
       try {
-        const ctx = await getDriverStockReturnContext(driverBalanceRow.id, {
-          p_days: effectiveStockReturnPDays,
-        });
+        const fetchTeam = !driverTeamLoadedRef.current;
+        const settled = await Promise.allSettled([
+          getDriverStockReturnContext(driverBalanceRow.id, {
+            p_days: DRIVER_STOCK_RETURN_P_DAYS_ALL,
+          }),
+          fetchTeam ? listDriverTeamMembers() : Promise.resolve(null),
+        ]);
         if (cancelled) return;
+        const ctxResult = settled[0];
+        const teamResult = settled[1];
+        if (ctxResult.status === "rejected") {
+          throw ctxResult.reason;
+        }
+        const ctx = ctxResult.value;
+        if (
+          fetchTeam &&
+          teamResult.status === "fulfilled" &&
+          teamResult.value
+        ) {
+          setDrivers(teamResult.value);
+          driverTeamLoadedRef.current = true;
+        } else if (fetchTeam && teamResult.status === "rejected") {
+          const err = teamResult.reason as { message?: string };
+          toast({
+            title: "Could not load driver list",
+            description: err?.message ?? "Driver rate may be unavailable.",
+            variant: "destructive",
+          });
+        }
         setStockReturnLines(ctx.lines);
         setDriverStockAvailable(ctx.availableByProduct);
         const init: Record<string, string> = {};
@@ -213,7 +283,7 @@ export default function DeliveryNotesPage() {
     return () => {
       cancelled = true;
     };
-  }, [driverBalanceRow, effectiveStockReturnPDays, toast]);
+  }, [driverBalanceRow, toast]);
 
   const selectedDriverBalanceMember = useMemo(
     () =>
@@ -223,10 +293,54 @@ export default function DeliveryNotesPage() {
   );
   const selectedDriverRate = Number(selectedDriverBalanceMember?.driverRate ?? 0);
   const selectedDeliveryTotalAll = Number(driverBalanceRow?.totalAmount ?? 0);
-  const selectedPaidOrdersTotal = Number(
-    driverBalanceRow?.totalAmountDeliveredToCustomer ?? 0
+  const selectedSettlementCashTotal = Number(
+    driverBalanceRow?.totalAmountCashForSettlement ?? 0
   );
-  const amountToReturnOwner = selectedPaidOrdersTotal - selectedDriverRate;
+  const amountToReturnOwner = selectedSettlementCashTotal - selectedDriverRate;
+  const dueRounded = roundMoney2(amountToReturnOwner);
+
+  const settlementCashParsed = useMemo(
+    () => parseMoneyInput(settlementCashInput),
+    [settlementCashInput]
+  );
+  const settlementBankParsed = useMemo(
+    () => parseMoneyInput(settlementBankInput),
+    [settlementBankInput]
+  );
+  const settlementSplitSum = useMemo(() => {
+    if (!Number.isFinite(settlementCashParsed) || !Number.isFinite(settlementBankParsed)) {
+      return NaN;
+    }
+    return roundMoney2(settlementCashParsed + settlementBankParsed);
+  }, [settlementCashParsed, settlementBankParsed]);
+
+  const settlementPaymentReady = useMemo(() => {
+    if (!Number.isFinite(settlementCashParsed) || !Number.isFinite(settlementBankParsed)) {
+      return false;
+    }
+    if (dueRounded <= 0) {
+      return settlementCashParsed === 0 && settlementBankParsed === 0;
+    }
+    return (
+      settlementSplitSum === dueRounded &&
+      (settlementCashParsed > 0 || settlementBankParsed > 0)
+    );
+  }, [dueRounded, settlementBankParsed, settlementCashParsed, settlementSplitSum]);
+
+  useEffect(() => {
+    setDriverBalanceModalStep("preview");
+    setSettlementCashInput("");
+    setSettlementBankInput("");
+    setSettlementBankReference("");
+  }, [driverBalanceRow?.id]);
+
+  const closeDriverBalanceModal = useCallback(() => {
+    setDriverBalanceRow(null);
+    setDriverBalanceModalStep("preview");
+    setSettlementCashInput("");
+    setSettlementBankInput("");
+    setSettlementBankReference("");
+  }, []);
 
   async function submitDriverStockReturns() {
     if (!driverBalanceRow) return;
@@ -270,7 +384,7 @@ export default function DeliveryNotesPage() {
         description: `${entries.length} product line(s): transfer from driver to primary warehouse (return_driver_stock_to_warehouse).`,
       });
       const ctx = await getDriverStockReturnContext(driverBalanceRow.id, {
-        p_days: effectiveStockReturnPDays,
+        p_days: DRIVER_STOCK_RETURN_P_DAYS_ALL,
       });
       setStockReturnLines(ctx.lines);
       setDriverStockAvailable(ctx.availableByProduct);
@@ -293,8 +407,26 @@ export default function DeliveryNotesPage() {
     }
   }
 
-  async function confirmDriverBalance() {
+  async function completeDriverBalanceSettlement() {
     if (!driverBalanceRow) return;
+    if (!settlementPaymentReady) {
+      toast({
+        title: "Check payment split",
+        description:
+          dueRounded > 0
+            ? "Enter cash and/or bank amounts that add up to the amount due."
+            : "For this net amount, leave both cash and bank at zero.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const cashAmt = settlementCashParsed;
+    const bankAmt = settlementBankParsed;
+    const refTrim = settlementBankReference.trim();
+
+    let expenseId: string | null = null;
+    let settlementId: string | null = null;
     try {
       setConfirmingDriverBalance(true);
       const rate = Number(selectedDriverRate);
@@ -302,12 +434,23 @@ export default function DeliveryNotesPage() {
         throw new Error("Driver rate is missing or invalid. Set it in Company Team first.");
       }
 
-      await addExpense({
+      const parts: string[] = [];
+      if (cashAmt > 0) parts.push(`Cash ${fmtMoney(cashAmt)}`);
+      if (bankAmt > 0) parts.push(`Bank transfer ${fmtMoney(bankAmt)}`);
+      const paymentSummary =
+        parts.length > 0 ? parts.join(" · ") : "No cash movement (net ≤ 0)";
+      const refNote = refTrim ? ` Reference: ${refTrim}.` : "";
+
+      const expenseNotes =
+        `Settlement cash (orders): ${selectedSettlementCashTotal}. All linked orders: ${selectedDeliveryTotalAll}. Net to return to owner: ${amountToReturnOwner}. ` +
+        `Payment to owner: ${paymentSummary}.${refNote}`;
+
+      const expense = await addExpense({
         description: `Driver salary for delivery ${driverBalanceRow.id} (${driverBalanceRow.driverDisplay})`,
         amount: rate,
         currency: "MUR",
         expense_date: new Date().toISOString().slice(0, 10),
-        notes: `Paid orders total: ${selectedPaidOrdersTotal}. All linked orders: ${selectedDeliveryTotalAll}. Amount returned to owner: ${amountToReturnOwner}.`,
+        notes: expenseNotes,
         line_items: [
           {
             item: "Driver salary",
@@ -319,23 +462,59 @@ export default function DeliveryNotesPage() {
           },
         ],
       });
+      expenseId = expense.id;
+
+      const { id: sid } = await insertDeliveryDriverSettlement({
+        deliveryId: driverBalanceRow.id,
+        driverUserId: driverBalanceRow.driverUserId,
+        amountToOwner: dueRounded,
+        currency: "MUR",
+        settlementCashTotal: selectedSettlementCashTotal,
+        driverDailyRate: selectedDriverRate,
+        linkedOrdersTotal: selectedDeliveryTotalAll,
+        cashAmount: cashAmt,
+        bankTransferAmount: bankAmt,
+        bankReference: bankAmt > 0 && refTrim ? refTrim : null,
+        expenseId: expense.id,
+      });
+      settlementId = sid;
 
       await setDeliveryDriverStatus(driverBalanceRow.id, true);
 
       setRows((prev) =>
         prev.map((r) =>
-          r.id === driverBalanceRow.id ? { ...r, driverStatus: true } : r
+          r.id === driverBalanceRow.id
+            ? {
+                ...r,
+                driverStatus: true,
+                driverCollectedAmount: roundMoney2(cashAmt + bankAmt),
+              }
+            : r
         )
       );
       toast({
         title: "Driver balance recorded",
-        description: "Expense saved and driver status marked as completed.",
+        description: "Expense saved, payment logged, and driver status marked as completed.",
       });
-      setDriverBalanceRow(null);
+      closeDriverBalanceModal();
     } catch (e: unknown) {
       const err = e as { message?: string };
+      if (settlementId) {
+        try {
+          await deleteDeliveryDriverSettlement(settlementId);
+        } catch {
+          /* ignore rollback errors */
+        }
+      }
+      if (expenseId) {
+        try {
+          await deleteExpense(expenseId);
+        } catch {
+          /* ignore rollback errors */
+        }
+      }
       toast({
-        title: "Could not confirm driver balance",
+        title: "Could not settle driver balance",
         description: err?.message ?? "Please try again.",
         variant: "destructive",
       });
@@ -359,6 +538,11 @@ export default function DeliveryNotesPage() {
       return driverOk && dateOk && createdAtOk;
     });
   }, [rows, driverFilter, dateFilter, createdAtFilter]);
+
+  const storeKeeperModalRows = useMemo(
+    () => rows.filter((r) => r.status === "new"),
+    [rows],
+  );
 
   function toggleDeliverySelection(id: string, checked: boolean) {
     setSelectedDeliveryIds((prev) => {
@@ -413,26 +597,15 @@ export default function DeliveryNotesPage() {
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
       const margin = 40;
-      const rightX = pageW - margin;
       const generatedAt = new Date().toLocaleString("en-GB");
-      const brandColor = "#0F172A";
 
-      doc.setFillColor(brandColor);
-      doc.rect(0, 0, pageW, 60, "F");
-      doc.setTextColor("#FFFFFF");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.text("MoLedger", margin, 30);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.text("Store operations export", margin, 46);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(20);
-      doc.text("STORE KEEPER LIST", rightX, 30, { align: "right" });
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.text(`Ref count: ${selectedIds.length}`, rightX, 46, { align: "right" });
-      doc.setTextColor("#000000");
+      drawMoLedgerExportPdfHeader(doc, {
+        margin,
+        pageW,
+        leftSubtitle: "Store operations export",
+        rightTitle: "STORE KEEPER LIST",
+        rightSubtitle: `Ref count: ${selectedIds.length}`,
+      });
 
       let y = 88;
       doc.setFont("helvetica", "bold").setFontSize(11).text("List details", margin, y);
@@ -531,6 +704,211 @@ export default function DeliveryNotesPage() {
     }
   }
 
+  const downloadDriverBalanceSheet = useCallback(
+    async (listRow: DeliveryListRow) => {
+      setBalanceSheetBusyId(listRow.id);
+      try {
+        const [delivery, settlement, team] = await Promise.all([
+          getDelivery(listRow.id),
+          getDeliveryDriverSettlement(listRow.id),
+          listDriverTeamMembers(),
+        ]);
+        if (!delivery) {
+          toast({
+            title: "Not found",
+            description: "Could not load this delivery.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const teamRateRaw = team.find((t) => t.userId === listRow.driverUserId)?.driverRate;
+        const teamRateNum = Number(teamRateRaw);
+        const teamRate = Number.isFinite(teamRateNum) ? roundMoney2(teamRateNum) : null;
+        const driverRateForPending =
+          settlement?.driverDailyRate != null ? settlement.driverDailyRate : teamRate;
+        const settlementCash = listRow.totalAmountCashForSettlement;
+        const indicativeDue =
+          driverRateForPending != null
+            ? roundMoney2(settlementCash - driverRateForPending)
+            : null;
+
+        const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
+        const pageW = doc.internal.pageSize.getWidth();
+        const margin = 40;
+
+        drawMoLedgerExportPdfHeader(doc, {
+          margin,
+          pageW,
+          leftSubtitle: "Driver balance export",
+          rightTitle: "DRIVER BALANCE SHEET",
+          rightSubtitle: `Delivery ${listRow.id}`,
+        });
+
+        let y = 88;
+        doc.setFont("helvetica", "bold").setFontSize(11).text("Summary", margin, y);
+        y += 16;
+        doc.setFont("helvetica", "normal").setFontSize(10);
+        doc.text(`Generated: ${new Date().toLocaleString("en-GB")}`, margin, y);
+        y += 22;
+
+        const metaBody: string[][] = [
+          ["Delivery ID", listRow.id],
+          ["Delivery note status", DELIVERY_NOTE_STATUS_LABELS[delivery.status]],
+          ["Driver balance collected (flag)", delivery.driverStatus ? "Yes" : "No"],
+          ["Driver", delivery.driverDisplay],
+          ["Created", fmtWhen(delivery.createdAt)],
+          ["Created by", delivery.createdByDisplay || "—"],
+          ["Scheduled delivery date", fmtScheduleDay(delivery.deliveryDate)],
+          ["Sales orders on delivery", String(delivery.salesOrders.length)],
+          ["Sum of order totals (linked + pinned)", fmtMoney(listRow.totalAmount)],
+        ];
+
+        autoTable(doc, {
+          startY: y,
+          margin: { left: margin, right: margin },
+          head: [["Field", "Value"]],
+          body: metaBody,
+          styles: {
+            font: "helvetica",
+            fontSize: 9,
+            cellPadding: 5,
+            lineColor: 230,
+            lineWidth: 0.3,
+            valign: "top",
+          },
+          headStyles: {
+            fillColor: [15, 23, 42],
+            textColor: 255,
+            fontStyle: "bold",
+          },
+          columnStyles: { 0: { cellWidth: 220 }, 1: { cellWidth: "auto" } },
+        });
+
+        let y2 =
+          (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+          y + 40;
+        y2 += 20;
+
+        let payRows: string[][];
+        if (settlement) {
+          const ccy = settlement.currency || "MUR";
+          payRows = [
+            ["Collection status", "Recorded — driver balance settled in app"],
+            ["Settlement recorded at", fmtWhen(settlement.createdAt)],
+            [
+              "Driver daily rate (snapshot)",
+              settlement.driverDailyRate != null
+                ? fmtMoneyCurrency(settlement.driverDailyRate, ccy)
+                : "—",
+            ],
+            ["Paid to owner in cash", fmtMoneyCurrency(settlement.cashAmount, ccy)],
+            [
+              "Paid to owner by bank transfer",
+              fmtMoneyCurrency(settlement.bankTransferAmount, ccy),
+            ],
+            ["Bank reference", settlement.bankReference?.trim() || "—"],
+            [
+              "Cash + bank (paid to owner)",
+              fmtMoneyCurrency(
+                roundMoney2(settlement.cashAmount + settlement.bankTransferAmount),
+                ccy
+              ),
+            ],
+          ];
+        } else if (listRow.driverStatus) {
+          payRows = [
+            [
+              "Collection status",
+              "Marked collected — no settlement row found (legacy or incomplete data)",
+            ],
+            ["Paid in cash", "—"],
+            ["Paid by bank transfer", "—"],
+          ];
+        } else {
+          payRows = [
+            ["Collection status", "PENDING — driver balance not collected yet"],
+            [
+              "Driver daily rate (from company team)",
+              teamRate != null ? fmtMoney(teamRate) : "—",
+            ],
+            [
+              "Indicative amount due to owner (cash orders − driver rate)",
+              indicativeDue != null ? fmtMoney(indicativeDue) : "—",
+            ],
+            ["Paid in cash", "— (pending)"],
+            ["Paid by bank transfer", "— (pending)"],
+          ];
+        }
+
+        doc.setFont("helvetica", "bold").setFontSize(11).text("Payment & collection", margin, y2);
+        y2 += 14;
+
+        autoTable(doc, {
+          startY: y2,
+          margin: { left: margin, right: margin },
+          head: [["Item", "Detail"]],
+          body: payRows,
+          styles: {
+            font: "helvetica",
+            fontSize: 9,
+            cellPadding: 5,
+            lineColor: 230,
+            lineWidth: 0.3,
+            valign: "top",
+          },
+          headStyles: {
+            fillColor: [15, 23, 42],
+            textColor: 255,
+            fontStyle: "bold",
+          },
+          columnStyles: { 0: { cellWidth: 220 }, 1: { cellWidth: "auto" } },
+          didParseCell: (data) => {
+            if (
+              data.section === "body" &&
+              data.column.index === 1 &&
+              data.row.index === 0
+            ) {
+              const raw = data.cell.raw;
+              if (typeof raw === "string" && raw.includes("PENDING")) {
+                data.cell.styles.textColor = [220, 38, 38];
+              }
+            }
+          },
+        });
+
+        const lastH = doc.internal.pageSize.getHeight();
+        const lastW = doc.internal.pageSize.getWidth();
+        doc.setDrawColor(230);
+        doc.line(margin, lastH - 42, lastW - margin, lastH - 42);
+        doc.setFont("helvetica", "normal").setFontSize(8).setTextColor("#64748B");
+        doc.text("Powered by MoLedger", lastW / 2, lastH - 28, { align: "center" });
+        doc.text(`Page ${doc.getNumberOfPages()}`, lastW - margin, lastH - 28, {
+          align: "right",
+        });
+        doc.setTextColor(0);
+
+        const safeId = listRow.id.replace(/[^a-zA-Z0-9-_]+/g, "_").slice(0, 32);
+        const filename = `DriverBalanceSheet-${safeId}-${new Date().toISOString().slice(0, 10)}.pdf`;
+        doc.save(filename);
+        toast({
+          title: "Downloaded",
+          description: filename,
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Could not generate sheet",
+          description: msg,
+          variant: "destructive",
+        });
+      } finally {
+        setBalanceSheetBusyId(null);
+      }
+    },
+    [toast],
+  );
+
   return (
     <AppPageShell
       subtitle="Assign drivers to sales orders still on New, Pending, or Rescheduled fulfillment. Eligible orders leave this list once you save a delivery."
@@ -578,24 +956,26 @@ export default function DeliveryNotesPage() {
                 <TableRow>
                   <TableHead>Delivery ID</TableHead>
                   <TableHead>Created</TableHead>
+                  <TableHead>Created by</TableHead>
                   <TableHead>Delivery date</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Driver</TableHead>
                   <TableHead className="text-right">Orders</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="w-[220px] text-right">Actions</TableHead>
+                  <TableHead className="min-w-[140px] text-right">Driver balance</TableHead>
+                  <TableHead className="w-14 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
                       Loading…
                     </TableCell>
                   </TableRow>
                 ) : filteredRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="p-0">
+                    <TableCell colSpan={10} className="p-0">
                       <div className="flex flex-col items-center justify-center gap-3 py-14 px-4 text-center">
                         <PackageOpen className="h-10 w-10 text-muted-foreground" />
                         <p className="text-sm text-muted-foreground max-w-md">
@@ -618,6 +998,9 @@ export default function DeliveryNotesPage() {
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {fmtWhen(r.createdAt)}
                       </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {r.createdByDisplay || "—"}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
                         {fmtScheduleDay(r.deliveryDate)}
                       </TableCell>
@@ -631,29 +1014,70 @@ export default function DeliveryNotesPage() {
                       <TableCell className="text-right tabular-nums font-medium">
                         {fmtMoney(r.totalAmount)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex items-center gap-2">
-                          {!r.driverStatus ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-1.5"
-                              onClick={() => setDriverBalanceRow(r)}
-                            >
-                              Driver Balanced
-                            </Button>
+                      <TableCell className="text-right align-top">
+                        <div className="flex flex-col items-end gap-0.5 text-sm">
+                          {r.driverStatus ? (
+                            <>
+                              <span className="font-medium text-foreground">
+                                Money collected
+                                {r.driverCollectedAmount != null ? (
+                                  <span className="ml-1 tabular-nums text-muted-foreground">
+                                    {fmtMoney(r.driverCollectedAmount)}
+                                  </span>
+                                ) : null}
+                              </span>
+                              {r.driverCollectedAmount == null ? (
+                                <span className="text-xs font-medium text-emerald-700">Settled</span>
+                              ) : null}
+                            </>
                           ) : (
-                            <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                              Money collected from driver
-                            </span>
+                            <>
+                              <span className="text-xs text-muted-foreground">—</span>
+                              <span className="text-xs font-medium text-destructive">
+                                Collection pending
+                              </span>
+                            </>
                           )}
-                          <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                            <Link href={`/app/delivery-notes/${r.id}`}>
-                              <Eye className="h-4 w-4" aria-hidden />
-                              View
-                            </Link>
-                          </Button>
                         </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              aria-label={`Actions for delivery ${r.id}`}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                            <DropdownMenuItem asChild>
+                              <Link href={`/app/delivery-notes/${r.id}`}>
+                                <Eye className="mr-2 h-4 w-4" aria-hidden />
+                                View
+                              </Link>
+                            </DropdownMenuItem>
+                            {!r.driverStatus ? (
+                              <DropdownMenuItem onClick={() => setDriverBalanceRow(r)}>
+                                <Banknote className="mr-2 h-4 w-4" aria-hidden />
+                                Driver balance (not collected yet)
+                              </DropdownMenuItem>
+                            ) : null}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              disabled={balanceSheetBusyId === r.id}
+                              onClick={() => void downloadDriverBalanceSheet(r)}
+                            >
+                              <Download className="mr-2 h-4 w-4" aria-hidden />
+                              {balanceSheetBusyId === r.id
+                                ? "Preparing PDF…"
+                                : "Download driver balance sheet"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))
@@ -674,7 +1098,8 @@ export default function DeliveryNotesPage() {
           <DialogHeader>
             <DialogTitle>Prepare store keeper list</DialogTitle>
             <DialogDescription>
-              Select one or more delivery notes to generate a Product + Qty PDF.
+              Only delivery notes in <span className="font-medium text-foreground">New</span>{" "}
+              status are listed. Select one or more to generate a Product + Qty PDF.
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[420px] overflow-auto rounded-md border">
@@ -683,20 +1108,23 @@ export default function DeliveryNotesPage() {
                 <TableRow>
                   <TableHead className="w-10" />
                   <TableHead>Created</TableHead>
+                  <TableHead>Created by</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Driver</TableHead>
                   <TableHead className="text-right">Orders</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.length === 0 ? (
+                {storeKeeperModalRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                      No delivery notes available.
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      {rows.length === 0
+                        ? "No delivery notes available."
+                        : "No delivery notes in New status. Advance or complete other notes before they appear here."}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  rows.map((r) => (
+                  storeKeeperModalRows.map((r) => (
                     <TableRow key={`store-keeper-${r.id}`}>
                       <TableCell>
                         <Checkbox
@@ -709,6 +1137,9 @@ export default function DeliveryNotesPage() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {fmtWhen(r.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {r.createdByDisplay || "—"}
                       </TableCell>
                       <TableCell>
                         <DeliveryNoteStatusBadge status={r.status} />
@@ -735,7 +1166,7 @@ export default function DeliveryNotesPage() {
             <Button
               type="button"
               onClick={generateStoreKeeperList}
-              disabled={generatingStoreKeeperList || rows.length === 0}
+              disabled={generatingStoreKeeperList || storeKeeperModalRows.length === 0}
             >
               {generatingStoreKeeperList ? "Generating..." : "Generate list"}
             </Button>
@@ -746,230 +1177,320 @@ export default function DeliveryNotesPage() {
         open={!!driverBalanceRow}
         onOpenChange={(open) => {
           if (!open) {
-            setDriverBalanceRow(null);
+            closeDriverBalanceModal();
           }
         }}
       >
         <DialogContent className="flex max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-4 overflow-y-auto sm:w-[calc(100vw-2rem)]">
           <DialogHeader>
-            <DialogTitle>Driver Balance Preview</DialogTitle>
+            <DialogTitle>
+              {driverBalanceModalStep === "payment"
+                ? "Payment to owner"
+                : "Driver Balance Preview"}
+            </DialogTitle>
             <DialogDescription>
-              Return unsold stock to the primary warehouse, then review cash to return to the owner
-              before confirming.
+              {driverBalanceModalStep === "payment"
+                ? "Choose how the driver returned the net amount to you, then complete settlement."
+                : "Return unsold stock to the primary warehouse, then review cash to return to the owner before settling."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Driver</span>
-                <span className="font-medium">{driverBalanceRow?.driverDisplay ?? "—"}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Delivery ID</span>
-                <span className="font-mono text-xs">{driverBalanceRow?.id ?? "—"}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Paid orders total</span>
-                <span className="font-medium">{fmtMoney(selectedPaidOrdersTotal)}</span>
-              </div>
-              {driverBalanceRow &&
-              selectedDeliveryTotalAll !== selectedPaidOrdersTotal ? (
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>All linked orders (reference)</span>
-                  <span className="tabular-nums">{fmtMoney(selectedDeliveryTotalAll)}</span>
+          {driverBalanceModalStep === "preview" ? (
+            <div className="space-y-4">
+              <div className="rounded-md border bg-muted/30 p-3 space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Driver</span>
+                  <span className="font-medium">{driverBalanceRow?.driverDisplay ?? "—"}</span>
                 </div>
-              ) : null}
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Driver daily rate</span>
-                <span className="font-medium">{fmtMoney(selectedDriverRate)}</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Delivery ID</span>
+                  <span className="font-mono text-xs">{driverBalanceRow?.id ?? "—"}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Cash for settlement (orders)</span>
+                  <span className="font-medium">{fmtMoney(selectedSettlementCashTotal)}</span>
+                </div>
+                {driverBalanceRow &&
+                selectedDeliveryTotalAll !== selectedSettlementCashTotal ? (
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>All linked orders (reference)</span>
+                    <span className="tabular-nums">{fmtMoney(selectedDeliveryTotalAll)}</span>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Driver daily rate</span>
+                  <span className="font-medium">{fmtMoney(selectedDriverRate)}</span>
+                </div>
+                <div className="border-t pt-2 flex items-center justify-between text-base">
+                  <span className="font-semibold">Amount to return to owner</span>
+                  <span className="font-bold">{fmtMoney(amountToReturnOwner)}</span>
+                </div>
               </div>
-              <div className="border-t pt-2 flex items-center justify-between text-base">
-                <span className="font-semibold">Amount to return to owner</span>
-                <span className="font-bold">{fmtMoney(amountToReturnOwner)}</span>
-              </div>
-            </div>
 
-            <Separator />
+              <Separator />
 
-            <div className="space-y-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2">
-                  <Warehouse className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="space-y-3">
+                <div className="flex items-start gap-2">
+                  <Warehouse className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm font-medium">Return driver stock to warehouse</p>
+                    <p className="text-xs text-muted-foreground">
+                      All matching lines on this delivery (any order update date).
+                    </p>
                   </div>
                 </div>
-                <div className="flex flex-col gap-2 sm:items-end sm:min-w-[220px]">
-                  <Label htmlFor="driver-return-p-days" className="text-xs font-medium text-muted-foreground">
-                    Lookback window
-                  </Label>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <Select
-                      value={daysLookbackSelect}
-                      onValueChange={(v) => {
-                        if (v === "1" || v === "7" || v === "14" || v === "30" || v === "custom") {
-                          setDaysLookbackSelect(v);
-                        }
-                      }}
-                    >
-                      <SelectTrigger id="driver-return-p-days" className="w-full sm:w-[200px]">
-                        <SelectValue placeholder="Days" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1">1 day (today)</SelectItem>
-                        <SelectItem value="7">7 days</SelectItem>
-                        <SelectItem value="14">14 days</SelectItem>
-                        <SelectItem value="30">30 days</SelectItem>
-                        <SelectItem value="custom">Custom…</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {daysLookbackSelect === "custom" ? (
-                      <Input
-                        type="number"
-                        min={1}
-                        max={366}
-                        className="h-9 w-full sm:w-24 text-center tabular-nums"
-                        aria-label="Custom p_days"
-                        value={daysLookbackCustom}
-                        onChange={(e) => setDaysLookbackCustom(e.target.value)}
-                      />
-                    ) : null}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground max-sm:w-full sm:text-right">
-                    Active:{" "}
-                    <span className="font-medium tabular-nums text-foreground">
-                      {effectiveStockReturnPDays}
-                    </span>{" "}
-                    day{effectiveStockReturnPDays === 1 ? "" : "s"}
+
+                {stockLinesLoading ? (
+                  <p className="text-sm text-muted-foreground py-4">Loading products…</p>
+                ) : stockReturnLines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
+                    {driverBalanceRow && driverBalanceRow.orderCount > 0
+                      ? "No matching lines: need fulfillment Delivered to driver, Rescheduled, or Pending, with catalog-linked line items on this delivery."
+                      : "No products on this delivery."}
                   </p>
+                ) : (
+                  <div className="rounded-md border overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[120px]">Product</TableHead>
+                          <TableHead className="min-w-[220px]">Sales orders</TableHead>
+                          <TableHead className="text-right whitespace-nowrap">
+                            Line qty
+                          </TableHead>
+                          <TableHead className="text-right whitespace-nowrap">On driver</TableHead>
+                          <TableHead className="w-[120px] text-right">Return qty</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {stockReturnLines.map((l) => {
+                          const onDriver = driverStockAvailable[l.productId] ?? 0;
+                          return (
+                            <TableRow key={l.productId}>
+                              <TableCell className="font-medium max-w-[220px] align-top">
+                                <span className="line-clamp-3">{l.productName}</span>
+                              </TableCell>
+                              <TableCell className="align-top text-xs leading-snug">
+                                {l.salesOrders.length === 0 ? (
+                                  <span className="text-muted-foreground">—</span>
+                                ) : (
+                                  <ul className="space-y-2">
+                                    {l.salesOrders.map((so) => (
+                                      <li key={so.salesOrderId} className="space-y-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="font-medium text-foreground">
+                                            #{so.salesOrderNumber}
+                                          </span>
+                                          <SalesOrderFulfillmentStatusBadge
+                                            status={so.fulfillmentStatus}
+                                            className="h-5 shrink-0 px-1.5 text-[10px]"
+                                          />
+                                        </div>
+                                        <div className="text-xs">
+                                          <span className="tabular-nums">
+                                            {fmtMoneyCurrency(so.salesOrderTotal, so.currency)}
+                                          </span>
+                                          <span className="text-muted-foreground"> · qty </span>
+                                          <span className="tabular-nums font-medium text-foreground">
+                                            {so.qty}
+                                          </span>
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums align-top">
+                                {l.deliveryQty}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums align-top">{onDriver}</TableCell>
+                              <TableCell className="text-right align-top">
+                                <Label htmlFor={`ret-qty-${l.productId}`} className="sr-only">
+                                  Return quantity for {l.productName}
+                                </Label>
+                                <Input
+                                  id={`ret-qty-${l.productId}`}
+                                  type="number"
+                                  min={0}
+                                  step="any"
+                                  className="h-8 w-full text-right tabular-nums"
+                                  value={returnQtys[l.productId] ?? ""}
+                                  onChange={(e) =>
+                                    setReturnQtys((prev) => ({
+                                      ...prev,
+                                      [l.productId]: e.target.value,
+                                    }))
+                                  }
+                                  disabled={stockReturnBusy || confirmingDriverBalance}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="min-w-0 space-y-4">
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Amount to return to owner</span>
+                  <span className="font-semibold tabular-nums">{fmtMoney(amountToReturnOwner)}</span>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Split between cash and bank transfer; both can be used. The two amounts must add
+                  up to the figure above (when it is greater than zero).
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="settlement-cash-amt">Cash (MUR)</Label>
+                  <Input
+                    id="settlement-cash-amt"
+                    type="number"
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    className="tabular-nums"
+                    value={settlementCashInput}
+                    onChange={(e) => setSettlementCashInput(e.target.value)}
+                    disabled={confirmingDriverBalance}
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="settlement-bank-amt">Bank transfer (MUR)</Label>
+                  <Input
+                    id="settlement-bank-amt"
+                    type="number"
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    className="tabular-nums"
+                    value={settlementBankInput}
+                    onChange={(e) => setSettlementBankInput(e.target.value)}
+                    disabled={confirmingDriverBalance}
+                    placeholder="0"
+                  />
                 </div>
               </div>
 
-              {stockLinesLoading ? (
-                <p className="text-sm text-muted-foreground py-4">Loading products…</p>
-              ) : stockReturnLines.length === 0 ? (
-                <p className="text-sm text-muted-foreground rounded-md border border-dashed p-3">
-                  {driverBalanceRow && driverBalanceRow.orderCount > 0
-                    ? `No matching lines for p_days=${effectiveStockReturnPDays}: need fulfillment Delivered to driver, Rescheduled, or Pending; catalog-linked line items; and order updated_at within the window (missing updated_at is treated as included).`
-                    : "No products on this delivery."}
-                </p>
-              ) : (
-                <div className="rounded-md border overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[120px]">Product</TableHead>
-                        <TableHead className="min-w-[220px]">Sales orders</TableHead>
-                        <TableHead className="text-right whitespace-nowrap">
-                          Line qty
-                        </TableHead>
-                        <TableHead className="text-right whitespace-nowrap">On driver</TableHead>
-                        <TableHead className="w-[120px] text-right">Return qty</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {stockReturnLines.map((l) => {
-                        const onDriver = driverStockAvailable[l.productId] ?? 0;
-                        return (
-                          <TableRow key={l.productId}>
-                            <TableCell className="font-medium max-w-[220px] align-top">
-                              <span className="line-clamp-3">{l.productName}</span>
-                            </TableCell>
-                            <TableCell className="align-top text-xs leading-snug">
-                              {l.salesOrders.length === 0 ? (
-                                <span className="text-muted-foreground">—</span>
-                              ) : (
-                                <ul className="space-y-2">
-                                  {l.salesOrders.map((so) => (
-                                    <li key={so.salesOrderId} className="space-y-1">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <span className="font-medium text-foreground">
-                                          #{so.salesOrderNumber}
-                                        </span>
-                                        <SalesOrderFulfillmentStatusBadge
-                                          status={so.fulfillmentStatus}
-                                          className="h-5 shrink-0 px-1.5 text-[10px]"
-                                        />
-                                      </div>
-                                      <div className="text-xs">
-                                        <span className="tabular-nums">
-                                          {fmtMoneyCurrency(so.salesOrderTotal, so.currency)}
-                                        </span>
-                                        <span className="text-muted-foreground"> · qty </span>
-                                        <span className="tabular-nums font-medium text-foreground">
-                                          {so.qty}
-                                        </span>
-                                      </div>
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums align-top">
-                              {l.deliveryQty}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums align-top">{onDriver}</TableCell>
-                            <TableCell className="text-right align-top">
-                              <Label htmlFor={`ret-qty-${l.productId}`} className="sr-only">
-                                Return quantity for {l.productName}
-                              </Label>
-                              <Input
-                                id={`ret-qty-${l.productId}`}
-                                type="number"
-                                min={0}
-                                step="any"
-                                className="h-8 w-full text-right tabular-nums"
-                                value={returnQtys[l.productId] ?? ""}
-                                onChange={(e) =>
-                                  setReturnQtys((prev) => ({
-                                    ...prev,
-                                    [l.productId]: e.target.value,
-                                  }))
-                                }
-                                disabled={stockReturnBusy || confirmingDriverBalance}
-                              />
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+              {settlementBankParsed > 0 ? (
+                <div className="space-y-2">
+                  <Label htmlFor="settlement-bank-reference">Reference (optional)</Label>
+                  <Input
+                    id="settlement-bank-reference"
+                    placeholder="e.g. transfer ref, transaction ID"
+                    value={settlementBankReference}
+                    onChange={(e) => setSettlementBankReference(e.target.value)}
+                    disabled={confirmingDriverBalance}
+                    autoComplete="off"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Add a bank reference if you have one; it is not required to complete settlement.
+                  </p>
                 </div>
-              )}
+              ) : null}
 
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="gap-2"
-                disabled={
-                  stockReturnBusy ||
-                  confirmingDriverBalance ||
-                  stockLinesLoading ||
-                  stockReturnLines.length === 0
-                }
-                onClick={() => void submitDriverStockReturns()}
-              >
-                {stockReturnBusy ? "Returning…" : "Return stock to warehouse"}
-              </Button>
+              {dueRounded > 0 ? (
+                <div
+                  className={`rounded-md border px-3 py-2 text-sm ${
+                    Number.isFinite(settlementSplitSum) && settlementSplitSum === dueRounded
+                      ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
+                      : "border-border bg-muted/40"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-muted-foreground">Total allocated</span>
+                    <span className="font-medium tabular-nums">
+                      {Number.isFinite(settlementSplitSum) ? fmtMoney(settlementSplitSum) : "—"}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-muted-foreground">Must equal</span>
+                    <span className="font-medium tabular-nums">{fmtMoney(dueRounded)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                  Net to owner is zero or negative — leave cash and bank at zero and complete
+                  settlement.
+                </p>
+              )}
             </div>
-          </div>
+          )}
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setDriverBalanceRow(null)}
-              disabled={confirmingDriverBalance || stockReturnBusy}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void confirmDriverBalance()}
-              disabled={confirmingDriverBalance || stockReturnBusy}
-            >
-              {confirmingDriverBalance ? "Confirming..." : "Confirm"}
-            </Button>
+            {driverBalanceModalStep === "preview" ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => closeDriverBalanceModal()}
+                  disabled={confirmingDriverBalance || stockReturnBusy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="gap-2"
+                  disabled={
+                    stockReturnBusy ||
+                    confirmingDriverBalance ||
+                    stockLinesLoading ||
+                    stockReturnLines.length === 0
+                  }
+                  onClick={() => void submitDriverStockReturns()}
+                >
+                  {stockReturnBusy ? "Returning…" : "Return stock to warehouse"}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const due = roundMoney2(
+                      selectedSettlementCashTotal - selectedDriverRate
+                    );
+                    if (due > 0) {
+                      setSettlementCashInput(String(due));
+                      setSettlementBankInput("");
+                    } else {
+                      setSettlementCashInput("");
+                      setSettlementBankInput("");
+                    }
+                    setSettlementBankReference("");
+                    setDriverBalanceModalStep("payment");
+                  }}
+                  disabled={confirmingDriverBalance || stockReturnBusy}
+                >
+                  Settle
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setDriverBalanceModalStep("preview")}
+                  disabled={confirmingDriverBalance}
+                >
+                  Back
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void completeDriverBalanceSettlement()}
+                  disabled={
+                    confirmingDriverBalance ||
+                    stockReturnBusy ||
+                    !settlementPaymentReady
+                  }
+                >
+                  {confirmingDriverBalance ? "Settling…" : "Complete settlement"}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

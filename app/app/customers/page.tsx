@@ -461,8 +461,7 @@ export default function CustomersPage() {
         "Email",
         "Phone",
         "City",
-        "Country",
-        "Status",
+        "Address line 1",
       ];
       const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
       const lines = [headers.map(esc).join(",")];
@@ -478,8 +477,7 @@ export default function CustomersPage() {
             c.email ?? "",
             c.phone ?? "",
             c.cityName || c.city || "",
-            c.country ?? "",
-            c.isActive === false ? "Inactive" : "Active",
+            (c.address_line_1 ?? "").trim(),
           ]
             .map((v) => esc(String(v ?? "")))
             .join(","),
@@ -522,71 +520,11 @@ export default function CustomersPage() {
         });
         return;
       }
-      const [{ default: jsPDF }, autoTableMod] = await Promise.all([
-        import("jspdf"),
-        import("jspdf-autotable"),
-      ]);
-      const autoTable = autoTableMod.default;
-
-      const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
-      const pageW = doc.internal.pageSize.getWidth();
-      const M = 36;
-
-      doc.setFont("helvetica", "bold").setFontSize(16);
-      doc.text("Customers", M, M + 6);
-      doc.setFont("helvetica", "normal").setFontSize(10);
-      const filterBits: string[] = [];
-      if (typeFilter !== "all") filterBits.push(`Type: ${typeFilter}`);
-      if (debouncedSearch) filterBits.push(`Search: "${debouncedSearch}"`);
-      const subtitle = [
-        new Date().toLocaleString(),
-        `${data.length} customer${data.length === 1 ? "" : "s"}`,
-        ...filterBits,
-      ].join("  •  ");
-      doc.setTextColor(120);
-      doc.text(subtitle, M, M + 24);
-      doc.setTextColor(0);
-
-      const body = data.map((c) => {
-        const name =
-          (c.type === "company" ? c.companyName : c.fullName)?.trim() || "";
-        const contact = c.type === "company" ? c.contactName?.trim() || "" : "";
-        return [
-          c.type === "company" ? "Company" : "Individual",
-          name + (contact ? `\n${contact}` : ""),
-          c.email ?? "",
-          c.phone ?? "",
-          c.cityName || c.city || "",
-          c.country ?? "",
-          c.isActive === false ? "Inactive" : "Active",
-        ];
-      });
-
-      autoTable(doc, {
-        startY: M + 36,
-        head: [["Type", "Name", "Email", "Phone", "City", "Country", "Status"]],
-        body,
-        styles: { font: "helvetica", fontSize: 9, cellPadding: 4 },
-        headStyles: { fillColor: [243, 244, 246], textColor: 20, fontStyle: "bold" },
-        alternateRowStyles: { fillColor: [250, 250, 251] },
-        columnStyles: {
-          0: { cellWidth: 70 },
-          1: { cellWidth: 170 },
-          2: { cellWidth: 150 },
-          3: { cellWidth: 90 },
-          4: { cellWidth: 90 },
-          5: { cellWidth: 70 },
-          6: { cellWidth: 60 },
-        },
-        margin: { left: M, right: M },
-        didDrawPage: () => {
-          const pageH = doc.internal.pageSize.getHeight();
-          const pageNumber = doc.getNumberOfPages();
-          doc.setFontSize(8);
-          doc.setTextColor(140);
-          doc.text(`Page ${pageNumber}`, pageW - M, pageH - 14, { align: "right" });
-          doc.setTextColor(0);
-        },
+      const { buildCustomersListPdfDoc } = await import("@/lib/customers-list-pdf");
+      const doc = await buildCustomersListPdfDoc({
+        rows: data,
+        typeFilter,
+        searchQuery: debouncedSearch,
       });
 
       const filename = `${exportFilenameStem}.pdf`;

@@ -49,11 +49,10 @@ import {
 } from "@/components/ui/table";
 import { SearchableDeliveryCitySelect } from "@/components/searchable-delivery-city-select";
 import { useToast } from "@/hooks/use-toast";
-import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
+import type { TeamMemberRow } from "@/lib/company-team-service";
 import {
   assignCityToZone,
-  getDeliveryZone,
-  listDeliveryCities,
+  loadDeliveryZoneDetailData,
   listZoneCities,
   removeZoneCityAssignment,
   updateDeliveryZone,
@@ -183,12 +182,8 @@ export default function DeliveryZoneDetailPage() {
 
   const reload = useCallback(async () => {
     if (!id) return;
-    const [z, zc, cityRows, teamRows] = await Promise.all([
-      getDeliveryZone(id),
-      listZoneCities(id),
-      listDeliveryCities(),
-      listTeamMembers(),
-    ]);
+    const { zone: z, zoneCities: zc, cities: cityRows, teamMembers: teamRows } =
+      await loadDeliveryZoneDetailData(id);
     if (!z) {
       setZone(null);
       return;
@@ -454,7 +449,7 @@ export default function DeliveryZoneDetailPage() {
     );
   }
 
-  const activeCities = cities.filter((c) => c.isActive);
+  const activeCities = cities;
 
   return (
     <AppPageShell

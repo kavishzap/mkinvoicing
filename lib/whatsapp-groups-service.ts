@@ -12,6 +12,9 @@ export type WhatsAppGroupRow = {
   updated_at: string;
 };
 
+/** List row including member count (one query when PostgREST embed is available). */
+export type WhatsAppGroupListRow = WhatsAppGroupRow & { memberCount: number };
+
 export type WhatsAppGroupMemberRow = {
   id: string;
   customer_id: string;
@@ -22,6 +25,18 @@ export type WhatsAppGroupMemberRow = {
 
 const GROUP_COLUMNS =
   "id,company_id,user_id,name,description,is_active,created_at,updated_at";
+
+function parseGroupCustomerCount(field: unknown): number {
+  if (field == null) return 0;
+  if (Array.isArray(field)) {
+    const first = field[0] as { count?: unknown } | undefined;
+    return Number(first?.count ?? 0);
+  }
+  if (typeof field === "object" && "count" in (field as object)) {
+    return Number((field as { count: unknown }).count ?? 0);
+  }
+  return 0;
+}
 
 async function getUserId() {
   const { data, error } = await supabase.auth.getUser();
@@ -58,9 +73,80 @@ export async function listWhatsAppGroups(opts?: {
   page?: number;
   pageSize?: number;
 }): Promise<{ rows: WhatsAppGroupRow[]; total: number }> {
+  const { rows, total } = await listWhatsAppGroupsWithMemberCounts(opts);
+  return {
+    rows: rows.map(({ memberCount: _m, ...g }) => g),
+    total,
+  };
+}
+
+/**
+ * Groups for the table view with member counts. Prefers a single query
+ * (`whatsapp_group_customers(count)` embed); falls back to list + count map.
+ */
+export async function listWhatsAppGroupsWithMemberCounts(opts?: {
+  search?: string;
+  includeInactive?: boolean;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ rows: WhatsAppGroupListRow[]; total: number }> {
   const companyId = await requireCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const selectWithCount = `${GROUP_COLUMNS}, whatsapp_group_customers(count)`;
+
+  let q = supabase
+    .from("whatsapp_groups")
+    .select(selectWithCount, { count: "exact" })
+    .eq("company_id", companyId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (!opts?.includeInactive) {
+    q = q.eq("is_active", true);
+  }
+
+  const term = opts?.search?.trim();
+  if (term) {
+    const s = `%${term}%`;
+    q = q.or([`name.ilike.${s}`, `description.ilike.${s}`].join(","));
+  }
+
+  const { data, error, count } = await q;
+
+  if (error) {
+    const base = await listWhatsAppGroupsFallback(opts, companyId, page, pageSize);
+    const ids = base.rows.map((g) => g.id);
+    const counts = await countMembersForGroups(ids);
+    return {
+      rows: base.rows.map((g) => ({
+        ...g,
+        memberCount: counts.get(g.id) ?? 0,
+      })),
+      total: base.total,
+    };
+  }
+
+  return {
+    rows: (data ?? []).map((r) => ({
+      ...mapGroup(r as Record<string, unknown>),
+      memberCount: parseGroupCustomerCount(
+        (r as Record<string, unknown>).whatsapp_group_customers,
+      ),
+    })),
+    total: count ?? 0,
+  };
+}
+
+async function listWhatsAppGroupsFallback(
+  opts: { search?: string; includeInactive?: boolean } | undefined,
+  companyId: string,
+  page: number,
+  pageSize: number,
+): Promise<{ rows: WhatsAppGroupRow[]; total: number }> {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
@@ -326,4 +412,59 @@ export async function addGroupMember(
   });
 
   if (error) throw error;
+}
+
+const INVOICE_IDS_CHUNK = 120;
+
+/**
+ * Customers (ids) who appear on at least one non-cancelled sales invoice line
+ * for the given product (`invoice_items.product_id`), scoped to the active company
+ * the same way as invoice lists (`company_id` matches or is null on the invoice).
+ */
+export async function fetchCustomerIdsWhoBoughtProductOnInvoice(
+  productId: string
+): Promise<string[]> {
+  if (!productId?.trim()) return [];
+  const companyId = await requireCompanyId();
+  const pid = productId.trim();
+
+  const { data: lines, error: le } = await supabase
+    .from("invoice_items")
+    .select("invoice_id")
+    .eq("product_id", pid);
+
+  if (le) throw new Error(le.message);
+
+  const invoiceIds = [
+    ...new Set(
+      (lines ?? [])
+        .map((r) => String((r as { invoice_id?: unknown }).invoice_id ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+  if (invoiceIds.length === 0) return [];
+
+  const baseOr = `company_id.eq.${companyId},company_id.is.null`;
+  const out = new Set<string>();
+
+  for (let i = 0; i < invoiceIds.length; i += INVOICE_IDS_CHUNK) {
+    const chunk = invoiceIds.slice(i, i + INVOICE_IDS_CHUNK);
+    const { data: invs, error: ie } = await supabase
+      .from("invoices")
+      .select("customer_id, status")
+      .in("id", chunk)
+      .not("customer_id", "is", null)
+      .neq("status", "cancelled")
+      .or(baseOr);
+
+    if (ie) throw new Error(ie.message);
+    for (const r of invs ?? []) {
+      const row = r as { customer_id?: unknown; status?: unknown };
+      if (row.status === "cancelled") continue;
+      const cid = String(row.customer_id ?? "").trim();
+      if (cid) out.add(cid);
+    }
+  }
+
+  return [...out];
 }

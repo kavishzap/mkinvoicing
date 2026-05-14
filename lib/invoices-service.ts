@@ -3,6 +3,86 @@ import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
 import { ensureUserSettingsRow } from "@/lib/settings-service";
 
+/* ------------------------------------------------------------------ *
+ * In-memory caches (per browser tab) so navigating away and back to
+ * the invoices list does not refire the 7 facet COUNT(*) queries and
+ * the 1 list SELECT+COUNT each time. Entries are scoped by company
+ * and invalidated on any mutation (create / cancel / mark paid / pay
+ * update). UI content is unchanged: we always revalidate in the
+ * background when the page mounts (stale-while-revalidate).
+ * ------------------------------------------------------------------ */
+
+const FACET_TTL_MS = 30_000;
+const LIST_TTL_MS = 30_000;
+
+type FacetCacheEntry = {
+  companyId: string;
+  expires: number;
+  facets: InvoiceListFacets;
+};
+
+type ListCacheEntry = {
+  key: string;
+  expires: number;
+  rows: InvoiceListRow[];
+  total: number;
+};
+
+let facetCache: FacetCacheEntry | null = null;
+const listCache = new Map<string, ListCacheEntry>();
+
+function makeListCacheKey(
+  companyId: string,
+  opts: {
+    search?: string;
+    status?: InvoiceStatus | "all";
+    period?: "all" | "month" | "quarter" | "year";
+    customerId?: string;
+    page?: number;
+    pageSize?: number;
+    sortBy?: SortByKey;
+    sort?: SortDir;
+  } | undefined,
+) {
+  return [
+    companyId,
+    opts?.search ?? "",
+    opts?.status ?? "all",
+    opts?.period ?? "all",
+    opts?.customerId ?? "",
+    opts?.page ?? 1,
+    opts?.pageSize ?? 10,
+    opts?.sortBy ?? "issueDate",
+    opts?.sort ?? "desc",
+  ].join("|");
+}
+
+/** Synchronous cache reads so the UI can render immediately while revalidating. */
+export function getCachedInvoiceFacets(
+  companyId: string,
+): InvoiceListFacets | null {
+  if (!facetCache) return null;
+  if (facetCache.companyId !== companyId) return null;
+  if (facetCache.expires <= Date.now()) return null;
+  return facetCache.facets;
+}
+
+export function getCachedInvoiceList(
+  companyId: string,
+  opts?: Parameters<typeof makeListCacheKey>[1],
+): { rows: InvoiceListRow[]; total: number } | null {
+  const key = makeListCacheKey(companyId, opts);
+  const hit = listCache.get(key);
+  if (!hit || hit.expires <= Date.now()) return null;
+  return { rows: hit.rows, total: hit.total };
+}
+
+/** Clears all invoice caches; call from any mutation that may change rows. */
+export function invalidateInvoiceCaches() {
+  facetCache = null;
+  listCache.clear();
+}
+
 /* -------------------- Types -------------------- */
 
 /** Allowed values for `invoices.payment_method` in the UI (create / update). */
@@ -237,6 +317,7 @@ export async function createInvoice(
     console.warn("patchInvoiceItemsAfterCreate:", e);
   }
 
+  invalidateInvoiceCaches();
   return invoiceId;
 }
 
@@ -255,14 +336,9 @@ export type InvoiceListRow = {
   total: number;
 };
 
-function computeItemsTotal(
-  items: { quantity: number; unit_price: number; tax_percent: number }[]
-) {
-  return items.reduce((sum, it) => {
-    const line = Number(it.quantity) * Number(it.unit_price);
-    const tax = line * (Number(it.tax_percent) / 100);
-    return sum + line + tax;
-  }, 0);
+/** Same figure the list table showed when totals came from line items: subtotal + line taxes (no header discount). */
+function listRowLineAndTaxTotal(subtotal: number, taxTotal: number): number {
+  return Number(subtotal ?? 0) + Number(taxTotal ?? 0);
 }
 
 function nameFromBillTo(bill?: any) {
@@ -310,8 +386,42 @@ function invoiceFacetPeriodStarts(): {
  */
 export async function fetchInvoiceListFacets(): Promise<InvoiceListFacets> {
   const companyId = await requireActiveCompanyId();
-  const baseOr = `company_id.eq.${companyId},company_id.is.null`;
+  const cached = getCachedInvoiceFacets(companyId);
+  if (cached) return cached;
+
   const period = invoiceFacetPeriodStarts();
+
+  const { data: rpcData, error: rpcErr } = await supabase.rpc(
+    "get_invoice_nav_facets",
+    {
+      p_company_id: companyId,
+      p_month_start: period.month,
+      p_quarter_start: period.quarter,
+      p_year_start: period.year,
+    },
+  );
+
+  if (!rpcErr && rpcData && typeof rpcData === "object" && !Array.isArray(rpcData)) {
+    const d = rpcData as Record<string, unknown>;
+    const num = (k: string) => Number(d[k] ?? 0);
+    const facets: InvoiceListFacets = {
+      companyTotal: num("companyTotal"),
+      unpaidCount: num("unpaidCount"),
+      paidCount: num("paidCount"),
+      cancelledCount: num("cancelledCount"),
+      thisMonthCount: num("thisMonthCount"),
+      thisQuarterCount: num("thisQuarterCount"),
+      thisYearCount: num("thisYearCount"),
+    };
+    facetCache = {
+      companyId,
+      expires: Date.now() + FACET_TTL_MS,
+      facets,
+    };
+    return facets;
+  }
+
+  const baseOr = `company_id.eq.${companyId},company_id.is.null`;
 
   const head = () =>
     supabase
@@ -345,7 +455,7 @@ export async function fetchInvoiceListFacets(): Promise<InvoiceListFacets> {
     countOf(head().gte("issue_date", period.year)),
   ]);
 
-  return {
+  const facets: InvoiceListFacets = {
     companyTotal,
     unpaidCount,
     paidCount,
@@ -354,6 +464,12 @@ export async function fetchInvoiceListFacets(): Promise<InvoiceListFacets> {
     thisQuarterCount,
     thisYearCount,
   };
+  facetCache = {
+    companyId,
+    expires: Date.now() + FACET_TTL_MS,
+    facets,
+  };
+  return facets;
 }
 
 export async function listInvoices(opts?: {
@@ -389,11 +505,8 @@ export async function listInvoices(opts?: {
   let q = supabase
     .from("invoices")
     .select(
-      `
-      id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at,
-      invoice_items ( quantity, unit_price, tax_percent )
-    `,
-      { count: "exact" }
+      "id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at, subtotal, tax_total",
+      { count: "exact" },
     )
     .or(`company_id.eq.${companyId},company_id.is.null`);
 
@@ -453,10 +566,22 @@ export async function listInvoices(opts?: {
     status: r.status as InvoiceStatus,
     currency: r.currency,
     clientName: nameFromBillTo(r.bill_to_snapshot),
-    total: computeItemsTotal(r.invoice_items ?? []),
+    total: listRowLineAndTaxTotal(
+      Number(r.subtotal ?? 0),
+      Number(r.tax_total ?? 0),
+    ),
   }));
 
-  return { rows, total: count ?? 0 };
+  const total = count ?? 0;
+  const cacheKey = makeListCacheKey(companyId, opts);
+  listCache.set(cacheKey, {
+    key: cacheKey,
+    expires: Date.now() + LIST_TTL_MS,
+    rows,
+    total,
+  });
+
+  return { rows, total };
 }
 
 /* -------------------- Detail -------------------- */
@@ -519,7 +644,7 @@ export function computeTotals(inv: InvoiceDetail) {
 }
 
 const INVOICE_DETAIL_SELECT = `
-      id, number, issue_date, due_date, status, currency, customer_id,
+      id, company_id, number, issue_date, due_date, status, currency, customer_id,
       created_from_quotation_id, created_from_sales_order_id,
       from_snapshot, bill_to_snapshot,
       shipping_amount,
@@ -618,6 +743,7 @@ export async function markInvoicePaid(id: string): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) throw error;
+  invalidateInvoiceCaches();
 }
 
 /** Cancel invoice: sets status to cancelled and amount_paid to 0 so it does not count in total paid or overdue */
@@ -630,6 +756,7 @@ export async function cancelInvoice(id: string): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) throw error;
+  invalidateInvoiceCaches();
 }
 
 export async function updateInvoicePayment(
@@ -650,4 +777,5 @@ export async function updateInvoicePayment(
     .eq("company_id", companyId);
 
   if (error) throw error;
+  invalidateInvoiceCaches();
 }

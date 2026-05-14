@@ -1,7 +1,7 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
 import { getCurrentUserId } from "@/lib/settings-service";
-import { listTeamMembers } from "@/lib/company-team-service";
+import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 
 export type DeliveryCityRow = {
   id: string;
@@ -30,13 +30,149 @@ export type DeliveryZoneWithCityCount = DeliveryZoneRow & {
   cityCount: number;
 };
 
-export async function listDeliveryCities(): Promise<DeliveryCityRow[]> {
+type ZoneRowWithCount = {
+  id: string;
+  name: string;
+  description: string | null;
+  driverUserId: string | null;
+  isActive: boolean;
+  cityCount: number;
+};
+
+function parseEmbeddedZoneCityCount(zoneCitiesField: unknown): number {
+  if (zoneCitiesField == null) return 0;
+  if (Array.isArray(zoneCitiesField)) {
+    const first = zoneCitiesField[0] as { count?: unknown } | undefined;
+    return Number(first?.count ?? 0);
+  }
+  if (typeof zoneCitiesField === "object" && "count" in (zoneCitiesField as object)) {
+    return Number((zoneCitiesField as { count: unknown }).count ?? 0);
+  }
+  return 0;
+}
+
+function mapTeamMembersToDriverDisplay(
+  members: TeamMemberRow[],
+): Map<string, string> {
+  return new Map(
+    members.map((m) => [
+      m.userId,
+      m.profile?.full_name?.trim() ||
+        m.profile?.email?.trim() ||
+        m.userId.slice(0, 8),
+    ]),
+  );
+}
+
+/**
+ * Zones plus per-zone city counts in one or two DB round-trips (embedded count when PostgREST supports it).
+ */
+async function loadZoneRowsWithCityCounts(companyId: string): Promise<ZoneRowWithCount[]> {
+  const embedded = await supabase
+    .from("zones")
+    .select(
+      "id, name, description, driver_user_id, is_active, zone_cities(count)",
+    )
+    .eq("company_id", companyId)
+    .order("name", { ascending: true });
+
+  if (!embedded.error && embedded.data) {
+    return (embedded.data as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id ?? ""),
+      name: String(r.name ?? ""),
+      description: (r.description as string | null) ?? null,
+      driverUserId: (r.driver_user_id as string | null) ?? null,
+      isActive: Boolean(r.is_active),
+      cityCount: parseEmbeddedZoneCityCount(r.zone_cities),
+    }));
+  }
+
+  const { data: zoneRows, error: zErr } = await supabase
+    .from("zones")
+    .select("id, name, description, driver_user_id, is_active")
+    .eq("company_id", companyId)
+    .order("name", { ascending: true });
+  if (zErr) throw new Error(zErr.message);
+
+  const { data: linkRows, error: lErr } = await supabase
+    .from("zone_cities")
+    .select("zone_id")
+    .eq("company_id", companyId);
+  if (lErr) throw new Error(lErr.message);
+
+  const counts = new Map<string, number>();
+  for (const raw of linkRows ?? []) {
+    const zid = String((raw as { zone_id?: unknown }).zone_id ?? "");
+    if (!zid) continue;
+    counts.set(zid, (counts.get(zid) ?? 0) + 1);
+  }
+
+  return (zoneRows ?? []).map((r) => ({
+    id: String(r.id),
+    name: String(r.name ?? ""),
+    description: (r.description as string | null) ?? null,
+    driverUserId: (r.driver_user_id as string | null) ?? null,
+    isActive: Boolean(r.is_active),
+    cityCount: counts.get(String(r.id)) ?? 0,
+  }));
+}
+
+function zoneRowsToWithCityCount(
+  rows: ZoneRowWithCount[],
+  profileByUserId: Map<string, string>,
+): DeliveryZoneWithCityCount[] {
+  return rows.map((r) => {
+    const driverUserId = r.driverUserId;
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      driverUserId,
+      driverDisplay: driverUserId
+        ? profileByUserId.get(driverUserId) ?? driverUserId.slice(0, 8)
+        : "—",
+      isActive: r.isActive,
+      cityCount: r.cityCount,
+    };
+  });
+}
+
+/**
+ * Single coordinated load for the zone/cities directory page: one team fetch, zones+counts,
+ * and cities — all in parallel (no duplicate listTeamMembers).
+ */
+export async function loadDeliveryZoneCitiesPageData(): Promise<{
+  zones: DeliveryZoneWithCityCount[];
+  cities: DeliveryCityRow[];
+  teamMembers: TeamMemberRow[];
+}> {
   const companyId = await requireActiveCompanyId();
-  const { data, error } = await supabase
+  const [teamMembers, zoneRows, cities] = await Promise.all([
+    listTeamMembers(),
+    loadZoneRowsWithCityCounts(companyId),
+    listDeliveryCities(),
+  ]);
+  const profileByUserId = mapTeamMembersToDriverDisplay(teamMembers);
+  return {
+    zones: zoneRowsToWithCityCount(zoneRows, profileByUserId),
+    cities,
+    teamMembers,
+  };
+}
+
+export async function listDeliveryCities(opts?: {
+  activeOnly?: boolean;
+}): Promise<DeliveryCityRow[]> {
+  const companyId = await requireActiveCompanyId();
+  let q = supabase
     .from("cities")
     .select("id, name, is_active")
     .eq("company_id", companyId)
     .order("name", { ascending: true });
+  if (opts?.activeOnly) {
+    q = q.eq("is_active", true);
+  }
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []).map((r) => ({
     id: String(r.id),
@@ -59,55 +195,86 @@ export async function createDeliveryCity(name: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export async function listDeliveryZonesWithCityCounts(): Promise<
-  DeliveryZoneWithCityCount[]
-> {
-  const zones = await listDeliveryZones();
+/**
+ * Zones with city counts. Pass `teamMembers` when you already fetched the team (e.g. from
+ * `loadDeliveryZoneCitiesPageData`) to avoid a duplicate round-trip.
+ */
+export async function listDeliveryZonesWithCityCounts(
+  teamMembers?: TeamMemberRow[],
+): Promise<DeliveryZoneWithCityCount[]> {
   const companyId = await requireActiveCompanyId();
-  const { data, error } = await supabase
-    .from("zone_cities")
-    .select("zone_id")
-    .eq("company_id", companyId);
-  if (error) throw new Error(error.message);
-  const counts = new Map<string, number>();
-  for (const raw of data ?? []) {
-    const zid = String((raw as { zone_id: unknown }).zone_id ?? "");
-    if (!zid) continue;
-    counts.set(zid, (counts.get(zid) ?? 0) + 1);
+  if (teamMembers !== undefined) {
+    const zoneRows = await loadZoneRowsWithCityCounts(companyId);
+    return zoneRowsToWithCityCount(
+      zoneRows,
+      mapTeamMembersToDriverDisplay(teamMembers),
+    );
   }
-  return zones.map((z) => ({
-    ...z,
-    cityCount: counts.get(z.id) ?? 0,
-  }));
+  const [drivers, zoneRows] = await Promise.all([
+    listTeamMembers(),
+    loadZoneRowsWithCityCounts(companyId),
+  ]);
+  return zoneRowsToWithCityCount(
+    zoneRows,
+    mapTeamMembersToDriverDisplay(drivers),
+  );
 }
 
 export async function getDeliveryZone(
-  zoneId: string
+  zoneId: string,
 ): Promise<DeliveryZoneRow | null> {
   if (!zoneId?.trim()) return null;
-  const rows = await listDeliveryZones();
-  return rows.find((z) => z.id === zoneId) ?? null;
-}
-
-export async function listDeliveryZones(): Promise<DeliveryZoneRow[]> {
   const companyId = await requireActiveCompanyId();
-  const { data, error } = await supabase
+  const { data: row, error } = await supabase
     .from("zones")
     .select("id, name, description, driver_user_id, is_active")
     .eq("company_id", companyId)
-    .order("name", { ascending: true });
+    .eq("id", zoneId)
+    .maybeSingle();
   if (error) throw new Error(error.message);
+  if (!row) return null;
 
-  const drivers = await listTeamMembers();
-  const profileByUserId = new Map(
-    drivers.map((m) => [
-      m.userId,
-      m.profile?.full_name?.trim() ||
-        m.profile?.email?.trim() ||
-        m.userId.slice(0, 8),
-    ])
-  );
+  const driverUserId = (row.driver_user_id as string | null) ?? null;
+  let driverDisplay = "—";
+  if (driverUserId) {
+    const { data: prof, error: pErr } = await supabase
+      .from("user_profiles")
+      .select("full_name, email")
+      .eq("id", driverUserId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    driverDisplay =
+      (prof?.full_name as string | undefined)?.trim() ||
+      (prof?.email as string | undefined)?.trim() ||
+      driverUserId.slice(0, 8);
+  }
 
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    description: (row.description as string | null) ?? null,
+    driverUserId,
+    driverDisplay,
+    isActive: Boolean(row.is_active),
+  };
+}
+
+export async function listDeliveryZones(
+  teamMembers?: TeamMemberRow[],
+): Promise<DeliveryZoneRow[]> {
+  const companyId = await requireActiveCompanyId();
+  const [drivers, { data, error }] = await Promise.all([
+    teamMembers !== undefined
+      ? Promise.resolve(teamMembers)
+      : listTeamMembers(),
+    supabase
+      .from("zones")
+      .select("id, name, description, driver_user_id, is_active")
+      .eq("company_id", companyId)
+      .order("name", { ascending: true }),
+  ]);
+  if (error) throw new Error(error.message);
+  const profileByUserId = mapTeamMembersToDriverDisplay(drivers);
   return (data ?? []).map((r) => {
     const driverUserId = (r.driver_user_id as string | null) ?? null;
     return {
@@ -218,6 +385,66 @@ export async function listZoneCities(
       sortOrder: Number(r.sort_order ?? 0),
     };
   });
+}
+
+/**
+ * Parallel load for zone detail: zone row, route cities, active cities for pickers, and team —
+ * avoids loading every zone and full city list.
+ */
+export async function loadDeliveryZoneDetailData(zoneId: string): Promise<{
+  zone: DeliveryZoneRow | null;
+  zoneCities: DeliveryZoneCityRow[];
+  cities: DeliveryCityRow[];
+  teamMembers: TeamMemberRow[];
+}> {
+  if (!zoneId?.trim()) {
+    return {
+      zone: null,
+      zoneCities: [],
+      cities: [],
+      teamMembers: [],
+    };
+  }
+  const companyId = await requireActiveCompanyId();
+  const [zoneRes, zoneCities, cities, teamMembers] = await Promise.all([
+    supabase
+      .from("zones")
+      .select("id, name, description, driver_user_id, is_active")
+      .eq("company_id", companyId)
+      .eq("id", zoneId)
+      .maybeSingle(),
+    listZoneCities(zoneId),
+    listDeliveryCities({ activeOnly: true }),
+    listTeamMembers(),
+  ]);
+  if (zoneRes.error) throw new Error(zoneRes.error.message);
+  const row = zoneRes.data;
+  if (!row) {
+    return { zone: null, zoneCities, cities, teamMembers };
+  }
+  const driverUserId = (row.driver_user_id as string | null) ?? null;
+  let driverDisplay = "—";
+  if (driverUserId) {
+    const { data: prof, error: pErr } = await supabase
+      .from("user_profiles")
+      .select("full_name, email")
+      .eq("id", driverUserId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    driverDisplay =
+      (prof?.full_name as string | undefined)?.trim() ||
+      (prof?.email as string | undefined)?.trim() ||
+      driverUserId.slice(0, 8);
+  }
+  const zone: DeliveryZoneRow = {
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    description: (row.description as string | null) ?? null,
+    driverUserId,
+    driverDisplay,
+    isActive: Boolean(row.is_active),
+  };
+  return { zone, zoneCities, cities, teamMembers };
 }
 
 export async function assignCityToZone(input: {
