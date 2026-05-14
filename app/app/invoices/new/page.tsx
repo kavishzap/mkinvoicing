@@ -87,12 +87,12 @@ import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 const DEFAULT_TAX_PERCENT = 15;
 
 const fieldLabelClass =
-  "text-xs font-medium text-neutral-600 dark:text-neutral-400";
+  "text-sm font-medium text-neutral-700 dark:text-neutral-300";
 const sectionTitleClass =
-  "text-sm font-semibold leading-snug text-neutral-700 dark:text-neutral-300";
+  "text-base font-semibold leading-snug text-neutral-800 dark:text-neutral-200";
 const sectionIconBoxClass =
-  "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
-const sectionIconClass = "h-3.5 w-3.5 text-neutral-600 dark:text-neutral-400";
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-neutral-100/80 dark:border-neutral-700 dark:bg-neutral-800/50";
+const sectionIconClass = "h-4 w-4 text-neutral-600 dark:text-neutral-300";
 
 function SectionCard({
   icon: Icon,
@@ -105,13 +105,13 @@ function SectionCard({
 }) {
   return (
     <Card className="flex flex-col gap-0 rounded-lg py-0 shadow-sm">
-      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
+      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3.5">
         <div className={sectionIconBoxClass}>
           <Icon className={sectionIconClass} aria-hidden />
         </div>
         <CardTitle className={sectionTitleClass}>{title}</CardTitle>
       </CardHeader>
-      <CardContent className="field-controls flex flex-col space-y-4 px-4 py-5 [&_input]:h-9 [&_input]:text-sm [&_select]:text-sm [&_textarea]:text-sm">
+      <CardContent className="field-controls flex flex-col space-y-5 px-4 py-5 [&_input]:h-9 [&_input]:text-sm [&_select]:text-sm [&_textarea]:text-sm">
         {children}
       </CardContent>
     </Card>
@@ -840,9 +840,9 @@ function NewInvoicePageContent() {
       }
     >
       <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10">
           <SectionCard icon={Users} title="Customer">
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               Your business details on the invoice come from{" "}
               <Link href="/app/settings" className="text-primary underline">
                 Settings
@@ -958,7 +958,7 @@ function NewInvoicePageContent() {
                     setDueDate(d.toISOString().split("T")[0]);
                   }}
                 >
-                  <SelectTrigger id="paymentTerms" className="h-8 rounded-sm text-xs">
+                  <SelectTrigger id="paymentTerms" className="h-9 rounded-md text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1155,7 +1155,7 @@ function NewInvoicePageContent() {
           </Button>
           </SectionCard>
 
-          <div className="grid min-h-0 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10">
             <SectionCard icon={FileText} title="Notes & terms">
             <div className="space-y-2">
               <Label htmlFor="notes" className={fieldLabelClass}>
@@ -1166,7 +1166,7 @@ function NewInvoicePageContent() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Additional notes..."
-                rows={3}
+                rows={4}
               />
               <p className="text-xs text-muted-foreground">
                 {notes.length} characters
@@ -1181,7 +1181,7 @@ function NewInvoicePageContent() {
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
                 placeholder="Payment terms..."
-                rows={3}
+                rows={4}
               />
               <p className="text-xs text-muted-foreground">
                 {terms.length} characters
@@ -1222,7 +1222,7 @@ function NewInvoicePageContent() {
                         amount: Number(e.target.value),
                       })
                     }
-                    className="w-[100px] h-8"
+                    className="w-[120px] h-9"
                   />
                   <span className="text-sm min-w-[80px] text-right">
                     -{preferences?.currency} {discountAmount.toFixed(2)}
