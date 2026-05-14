@@ -3,7 +3,16 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Banknote, Download, Eye, MoreVertical, Plus, PackageOpen, Warehouse } from "lucide-react";
+import {
+  Banknote,
+  Download,
+  Eye,
+  MoreVertical,
+  Plus,
+  Printer,
+  PackageOpen,
+  Warehouse,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -553,7 +562,7 @@ export default function DeliveryNotesPage() {
     });
   }
 
-  async function generateStoreKeeperList() {
+  async function generateStoreKeeperList(mode: "download" | "print") {
     if (selectedDeliveryIds.size === 0) {
       toast({
         title: "Select delivery notes",
@@ -685,11 +694,28 @@ export default function DeliveryNotesPage() {
       doc.setTextColor(0);
 
       const filename = `StoreKeeperList-${new Date().toISOString().slice(0, 10)}.pdf`;
-      doc.save(filename);
+      if (mode === "print") {
+        const pdfBlob = doc.output("blob");
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+        const printWindow = window.open(pdfUrl, "_blank");
+        if (printWindow) {
+          printWindow.onload = () => {
+            setTimeout(() => printWindow.print(), 250);
+          };
+        } else {
+          doc.save(filename);
+          toast({
+            title: "Print blocked",
+            description: "Allow popups to print. PDF downloaded instead.",
+          });
+        }
+      } else {
+        doc.save(filename);
+      }
       setIsStoreKeeperModalOpen(false);
       setSelectedDeliveryIds(new Set());
       toast({
-        title: "List generated",
+        title: mode === "print" ? "Opening print dialog" : "List generated",
         description: filename,
       });
     } catch (e: unknown) {
@@ -705,7 +731,7 @@ export default function DeliveryNotesPage() {
   }
 
   const downloadDriverBalanceSheet = useCallback(
-    async (listRow: DeliveryListRow) => {
+    async (listRow: DeliveryListRow, mode: "download" | "print" = "download") => {
       setBalanceSheetBusyId(listRow.id);
       try {
         const [delivery, settlement, team] = await Promise.all([
@@ -890,9 +916,26 @@ export default function DeliveryNotesPage() {
 
         const safeId = listRow.id.replace(/[^a-zA-Z0-9-_]+/g, "_").slice(0, 32);
         const filename = `DriverBalanceSheet-${safeId}-${new Date().toISOString().slice(0, 10)}.pdf`;
-        doc.save(filename);
+        if (mode === "print") {
+          const pdfBlob = doc.output("blob");
+          const pdfUrl = URL.createObjectURL(pdfBlob);
+          const printWindow = window.open(pdfUrl, "_blank");
+          if (printWindow) {
+            printWindow.onload = () => {
+              setTimeout(() => printWindow.print(), 250);
+            };
+          } else {
+            doc.save(filename);
+            toast({
+              title: "Print blocked",
+              description: "Allow popups to print. PDF downloaded instead.",
+            });
+          }
+        } else {
+          doc.save(filename);
+        }
         toast({
-          title: "Downloaded",
+          title: mode === "print" ? "Opening print dialog" : "Downloaded",
           description: filename,
         });
       } catch (e: unknown) {
@@ -1076,6 +1119,15 @@ export default function DeliveryNotesPage() {
                                 ? "Preparing PDF…"
                                 : "Download driver balance sheet"}
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={balanceSheetBusyId === r.id}
+                              onClick={() => void downloadDriverBalanceSheet(r, "print")}
+                            >
+                              <Printer className="mr-2 h-4 w-4" aria-hidden />
+                              {balanceSheetBusyId === r.id
+                                ? "Preparing PDFâ€¦"
+                                : "Print driver balance sheet"}
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -1165,10 +1217,20 @@ export default function DeliveryNotesPage() {
             </Button>
             <Button
               type="button"
-              onClick={generateStoreKeeperList}
+              variant="outline"
+              onClick={() => generateStoreKeeperList("print")}
               disabled={generatingStoreKeeperList || storeKeeperModalRows.length === 0}
             >
-              {generatingStoreKeeperList ? "Generating..." : "Generate list"}
+              <Printer className="mr-2 h-4 w-4" aria-hidden />
+              {generatingStoreKeeperList ? "Generating..." : "Print"}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => generateStoreKeeperList("download")}
+              disabled={generatingStoreKeeperList || storeKeeperModalRows.length === 0}
+            >
+              <Download className="mr-2 h-4 w-4" aria-hidden />
+              {generatingStoreKeeperList ? "Generating..." : "Download PDF"}
             </Button>
           </DialogFooter>
         </DialogContent>

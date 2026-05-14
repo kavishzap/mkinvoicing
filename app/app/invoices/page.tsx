@@ -38,6 +38,7 @@ import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   listInvoices,
+  listAllInvoicesForExport,
   fetchInvoiceListFacets,
   getCachedInvoiceFacets,
   getCachedInvoiceList,
@@ -238,6 +239,7 @@ export default function InvoicesPage() {
 
   const [facetsLoading, setFacetsLoading] = useState(true);
   const [listLoading, setListLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const listRequestGen = useRef(0);
   const prevListDepsRef = useRef({
@@ -417,6 +419,60 @@ export default function InvoicesPage() {
       year: "numeric",
     });
 
+  const fetchExportRows = async () =>
+    listAllInvoicesForExport({
+      search: debouncedSearch || undefined,
+      status: statusFilter,
+      period: periodFilter,
+      sortBy: "issueDate",
+      sort: "desc",
+    });
+
+  const exportFilenameStem = useMemo(() => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `invoices-${yyyy}${mm}${dd}`;
+  }, []);
+
+  const handleExportPdf = async () => {
+    if (exportingPdf) return;
+    try {
+      setExportingPdf(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toast({
+          title: "Nothing to export",
+          description: "No invoices match the current filters.",
+        });
+        return;
+      }
+
+      const { buildInvoicesListPdfDoc } = await import("@/lib/invoices-list-pdf");
+      const doc = await buildInvoicesListPdfDoc({
+        rows: data,
+        statusFilter,
+        periodFilter,
+        searchQuery: debouncedSearch,
+      });
+      const filename = `${exportFilenameStem}.pdf`;
+      doc.save(filename);
+      toast({
+        title: "PDF exported",
+        description: `${data.length} invoice${data.length === 1 ? "" : "s"} exported.`,
+      });
+    } catch (e: unknown) {
+      toast({
+        title: "Export failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const columns = useMemo<ColumnDef<InvoiceListRow>[]>(
     () => [
       {
@@ -581,12 +637,23 @@ export default function InvoicesPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
-          <Link href="/app/invoices/new">
-            <Plus className="h-4 w-4" />
-            Create invoice
-          </Link>
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0"
+            disabled={companyReady !== true || exportingPdf}
+            onClick={handleExportPdf}
+          >
+            {exportingPdf ? "Exporting…" : "Export PDF"}
+          </Button>
+          <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+            <Link href="/app/invoices/new">
+              <Plus className="h-4 w-4" />
+              Create invoice
+            </Link>
+          </Button>
+        </div>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (

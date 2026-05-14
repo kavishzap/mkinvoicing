@@ -584,6 +584,42 @@ export async function listInvoices(opts?: {
   return { rows, total };
 }
 
+export async function listAllInvoicesForExport(opts?: {
+  search?: string;
+  status?: InvoiceStatus | "all";
+  period?: "all" | "month" | "quarter" | "year";
+  customerId?: string;
+  sortBy?: SortByKey;
+  sort?: SortDir;
+  /** Safety cap to avoid huge exports. Defaults to 10k. */
+  maxRows?: number;
+}): Promise<InvoiceListRow[]> {
+  const maxRows = Math.max(1, opts?.maxRows ?? 10_000);
+  const pageSize = 1000;
+  const pages = Math.ceil(maxRows / pageSize);
+
+  const out: InvoiceListRow[] = [];
+  for (let page = 1; page <= pages; page++) {
+    const { rows, total } = await listInvoices({
+      search: opts?.search,
+      status: opts?.status,
+      period: opts?.period,
+      customerId: opts?.customerId,
+      sortBy: opts?.sortBy,
+      sort: opts?.sort,
+      page,
+      pageSize,
+    });
+    out.push(...rows);
+
+    if (out.length >= total) break;
+    if (rows.length === 0) break;
+    if (out.length >= maxRows) break;
+  }
+
+  return out.slice(0, maxRows);
+}
+
 /* -------------------- Detail -------------------- */
 
 export type InvoiceItemRow = {

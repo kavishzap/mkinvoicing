@@ -484,6 +484,33 @@ export default function ExpensesPage() {
         });
         return;
       }
+
+      // Branded PDF (logo bar + company identity), consistent with other list exports.
+      {
+        const { buildExpensesListPdfDoc } = await import("@/lib/expenses-list-pdf");
+        const doc = await buildExpensesListPdfDoc({
+          rows: data,
+          periodFilter,
+          searchQuery: debouncedSearch,
+        });
+
+        const filename = `${exportFilenameStem}.pdf`;
+        const pdfBlob = doc.output("blob");
+        const pdfUrl = URL.createObjectURL(pdfBlob);
+        const printWindow = window.open(pdfUrl, "_blank");
+        if (printWindow) {
+          printWindow.onload = () => {
+            setTimeout(() => printWindow.print(), 250);
+          };
+        } else {
+          doc.save(filename);
+          toast({
+            title: "Print blocked",
+            description: "Allow popups to print. PDF downloaded instead.",
+          });
+        }
+        return;
+      }
       const [{ default: jsPDF }, autoTableMod] = await Promise.all([
         import("jspdf"),
         import("jspdf-autotable"),

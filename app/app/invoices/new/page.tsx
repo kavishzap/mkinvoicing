@@ -104,14 +104,14 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
+    <Card className="flex flex-col gap-0 rounded-lg py-0 shadow-sm">
       <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
         <div className={sectionIconBoxClass}>
           <Icon className={sectionIconClass} aria-hidden />
         </div>
         <CardTitle className={sectionTitleClass}>{title}</CardTitle>
       </CardHeader>
-      <CardContent className="field-controls flex min-h-0 flex-1 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs [&_textarea]:text-xs">
+      <CardContent className="field-controls flex flex-col space-y-4 px-4 py-5 [&_input]:h-9 [&_input]:text-sm [&_select]:text-sm [&_textarea]:text-sm">
         {children}
       </CardContent>
     </Card>
