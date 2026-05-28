@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ArrowLeft, Loader2, Plus, UserRound, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,7 +20,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { listCompanyRoles, type CompanyRole } from "@/lib/company-roles-service";
-import { createTeamMember } from "@/lib/company-team-service";
+import {
+  createTeamMember,
+  getCompanyTeamSeatUsage,
+  type CompanyTeamSeatUsage,
+} from "@/lib/company-team-service";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -81,6 +86,8 @@ export default function CompanyTeamInvitePage() {
   const [phone, setPhone] = useState("");
   const [roleId, setRoleId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [seatUsage, setSeatUsage] = useState<CompanyTeamSeatUsage | null>(null);
+  const [loadingSeats, setLoadingSeats] = useState(true);
 
   const loadRoles = useCallback(async () => {
     setLoadingRoles(true);
@@ -107,8 +114,38 @@ export default function CompanyTeamInvitePage() {
     void loadRoles();
   }, [loadRoles]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingSeats(true);
+      try {
+        const seats = await getCompanyTeamSeatUsage();
+        if (!cancelled) setSeatUsage(seats);
+      } catch {
+        if (!cancelled) setSeatUsage(null);
+      } finally {
+        if (!cancelled) setLoadingSeats(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const inviteBlocked = seatUsage?.canInvite === false;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (inviteBlocked) {
+      toast({
+        title: "Team limit reached",
+        description: seatUsage
+          ? `You are using ${seatUsage.currentCount} of ${seatUsage.effectiveLimit} seats.`
+          : "Cannot invite more members on your current plan.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!fullName.trim() || !email.trim() || !roleId) {
       toast({
         title: "Missing fields",
@@ -160,7 +197,9 @@ export default function CompanyTeamInvitePage() {
           disabled={
             saving ||
             loadingRoles ||
-            roles.length === 0
+            loadingSeats ||
+            roles.length === 0 ||
+            inviteBlocked
           }
           className="gap-2 rounded-md font-semibold shadow-sm"
         >
@@ -174,11 +213,15 @@ export default function CompanyTeamInvitePage() {
       }
     >
       <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        {inviteBlocked && seatUsage ? (
+          <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+            Team member limit reached ({seatUsage.currentCount} of{" "}
+            {seatUsage.effectiveLimit} seats). Remove a member from the team list
+            or upgrade your plan before sending new invites.
+          </p>
+        ) : null}
         {loadingRoles ? (
-          <div className="flex items-center gap-2 py-12 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Loading roles…
-          </div>
+          <FormTwoColumnPageSkeleton withLineItems={false} />
         ) : roles.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Add at least one company role under{" "}

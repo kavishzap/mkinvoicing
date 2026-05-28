@@ -1,6 +1,86 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
 
+const FACET_TTL_MS = 45_000;
+const LIST_TTL_MS = 45_000;
+const DETAIL_TTL_MS = 45_000;
+
+type CustomerFacetCacheEntry = {
+  companyId: string;
+  expires: number;
+  facets: CustomerListFacets;
+};
+
+type CustomerListCacheEntry = {
+  key: string;
+  expires: number;
+  rows: CustomerRow[];
+  total: number;
+};
+
+type CustomerDetailCacheEntry = {
+  companyId: string;
+  expires: number;
+  row: CustomerRow;
+};
+
+let facetCache: CustomerFacetCacheEntry | null = null;
+const listCache = new Map<string, CustomerListCacheEntry>();
+const detailCache = new Map<string, CustomerDetailCacheEntry>();
+
+function customerListCacheKey(
+  companyId: string,
+  opts?: {
+    search?: string;
+    statusFilter?: CustomerStatusFilter;
+    type?: "company" | "individual";
+    page?: number;
+    pageSize?: number;
+  },
+) {
+  return [
+    companyId,
+    opts?.search ?? "",
+    opts?.statusFilter ?? "active",
+    opts?.type ?? "",
+    opts?.page ?? 1,
+    opts?.pageSize ?? 10,
+  ].join("|");
+}
+
+export function getCachedCustomerListFacets(
+  companyId: string,
+): CustomerListFacets | null {
+  if (!facetCache || facetCache.companyId !== companyId) return null;
+  if (facetCache.expires <= Date.now()) return null;
+  return facetCache.facets;
+}
+
+export function getCachedCustomerList(
+  companyId: string,
+  opts?: Parameters<typeof customerListCacheKey>[1],
+): { rows: CustomerRow[]; total: number } | null {
+  const hit = listCache.get(customerListCacheKey(companyId, opts));
+  if (!hit || hit.expires <= Date.now()) return null;
+  return { rows: hit.rows, total: hit.total };
+}
+
+export function getCachedCustomer(
+  companyId: string,
+  id: string,
+): CustomerRow | null {
+  const hit = detailCache.get(`${companyId}|${id}`);
+  if (!hit || hit.companyId !== companyId) return null;
+  if (hit.expires <= Date.now()) return null;
+  return hit.row;
+}
+
+export function invalidateCustomerCaches() {
+  facetCache = null;
+  listCache.clear();
+  detailCache.clear();
+}
+
 export type CustomerPayload = {
   type: "company" | "individual";
   companyName?: string;
@@ -73,13 +153,21 @@ export async function fetchCustomerListFacets(): Promise<CustomerListFacets> {
 
   const t = total ?? 0;
   const a = active ?? 0;
-  return {
+  const facets: CustomerListFacets = {
     companyTotal: t,
     activeCount: a,
     inactiveCount: Math.max(0, t - a),
     companyTypeCount: companyType ?? 0,
     individualTypeCount: individualType ?? 0,
   };
+
+  facetCache = {
+    companyId,
+    expires: Date.now() + FACET_TTL_MS,
+    facets,
+  };
+
+  return facets;
 }
 
 /**
@@ -130,6 +218,7 @@ export async function listCustomers(opts?: {
     q = q.or(
       [
         `company_name.ilike.${s}`,
+        `contact_name.ilike.${s}`,
         `full_name.ilike.${s}`,
         `email.ilike.${s}`,
         `phone.ilike.${s}`,
@@ -140,10 +229,23 @@ export async function listCustomers(opts?: {
   const { data, error, count } = await q;
   if (error) throw error;
 
-  return {
-    rows: (data ?? []).map(mapRow),
-    total: count ?? 0,
-  };
+  const rows = (data ?? []).map(mapRow);
+  const total = count ?? 0;
+  const cacheKey = customerListCacheKey(companyId, {
+    search: opts?.search,
+    statusFilter,
+    type: opts?.type,
+    page: opts?.page,
+    pageSize: opts?.pageSize,
+  });
+  listCache.set(cacheKey, {
+    key: cacheKey,
+    expires: Date.now() + LIST_TTL_MS,
+    rows,
+    total,
+  });
+
+  return { rows, total };
 }
 
 /**
@@ -211,7 +313,13 @@ export async function getCustomer(id: string): Promise<CustomerRow | null> {
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return mapRow(data);
+  const row = mapRow(data);
+  detailCache.set(`${companyId}|${id}`, {
+    companyId,
+    expires: Date.now() + DETAIL_TTL_MS,
+    row,
+  });
+  return row;
 }
 
 /**
@@ -289,6 +397,7 @@ export async function addCustomer(
     .single();
 
   if (error) throw error;
+  invalidateCustomerCaches();
   return mapRow(data);
 }
 
@@ -324,6 +433,7 @@ export async function addCustomersBulk(
 
   const { error } = await supabase.from("customers").insert(rows);
   if (error) throw error;
+  invalidateCustomerCaches();
   return { inserted: rows.length };
 }
 
@@ -434,6 +544,7 @@ export async function updateCustomer(
 
   if (error) throw error;
   if (!data) throw new Error("Customer not found or not accessible");
+  invalidateCustomerCaches();
   return mapRow(data);
 }
 
@@ -454,6 +565,7 @@ export async function setCustomerActive(
 
   if (error) throw error;
   if (!data) throw new Error("Customer not found or not accessible");
+  invalidateCustomerCaches();
   return mapRow(data);
 }
 
@@ -568,6 +680,7 @@ export async function deleteCustomer(id: string): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) throw error;
+  invalidateCustomerCaches();
 }
 
 /** Delete many by id (scoped to the active company). */
@@ -583,6 +696,7 @@ export async function deleteCustomers(ids: string[]): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) throw error;
+  invalidateCustomerCaches();
 }
 
 function mapRow(r: any): CustomerRow {

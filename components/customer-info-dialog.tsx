@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { getCustomer, type CustomerRow } from "@/lib/customers-service";
 import { cn } from "@/lib/utils";
@@ -137,10 +138,10 @@ export function CustomerInfoDialog({
 
         {loading ? (
           <div className="space-y-3 py-2">
-            <div className="h-5 w-3/4 animate-pulse rounded bg-muted" />
-            <div className="h-5 w-2/3 animate-pulse rounded bg-muted" />
-            <div className="h-5 w-1/2 animate-pulse rounded bg-muted" />
-            <div className="h-5 w-3/5 animate-pulse rounded bg-muted" />
+            <Skeleton className="h-5 w-3/4" />
+            <Skeleton className="h-5 w-2/3" />
+            <Skeleton className="h-5 w-1/2" />
+            <Skeleton className="h-5 w-3/5" />
           </div>
         ) : error ? (
           <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">

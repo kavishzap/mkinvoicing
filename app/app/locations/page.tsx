@@ -1,5 +1,6 @@
 "use client";
 
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -726,6 +727,42 @@ export default function InventoryLocationsPage() {
         },
       },
       {
+        id: "assignedDrivers",
+        accessorFn: (r) => r.assignedDriversDisplay,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Driver assigned" />
+        ),
+        meta: { stopRowClick: true },
+        cell: ({ row }) => {
+          const drivers = row.original.assignedDrivers;
+          if (drivers.length === 0) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          return (
+            <div className="flex flex-wrap gap-x-1 text-sm">
+              {drivers.map((d, i) => (
+                <span key={d.driverUserId} className="inline-flex items-center">
+                  {i > 0 ? (
+                    <span className="mr-1 text-muted-foreground">,</span>
+                  ) : null}
+                  {d.membershipId ? (
+                    <Link
+                      href={`/app/company-team/${d.membershipId}`}
+                      className="font-medium text-primary underline-offset-4 hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {d.name}
+                    </Link>
+                  ) : (
+                    <span className="text-foreground">{d.name}</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          );
+        },
+      },
+      {
         id: "code",
         accessorFn: (r) => r.code ?? "",
         header: ({ column }) => (
@@ -864,7 +901,7 @@ export default function InventoryLocationsPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory ? (

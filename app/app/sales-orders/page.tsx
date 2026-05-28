@@ -1,8 +1,16 @@
 "use client";
 
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -28,6 +36,7 @@ import {
   StickyNote,
   Trash2,
   Truck,
+  Wallet,
   XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -68,12 +77,17 @@ import {
   listAllSalesOrdersForExport,
   deleteSalesOrder,
   expireStaleSalesOrders,
-  getSalesOrderKpiCounts,
+  getSalesOrderListFacets,
+  getCachedSalesOrderListFacets,
+  getCachedSalesOrderList,
+  invalidateSalesOrderCaches,
   updateSalesOrderPaymentStatus,
   salesOrderFulfillmentAllowsEditing,
-  SALES_ORDER_FULFILLMENT_LABELS,
-  SALES_ORDER_PAYMENT_LABELS,
+  salesOrderFulfillmentFilterLabel,
+  salesOrderPaymentFilterLabel,
   type SalesOrderFulfillmentStatus,
+  type SalesOrderPaymentStatusDb,
+  type SalesOrderListFacets,
   type SalesOrderListRow,
 } from "@/lib/sales-orders-service";
 import {
@@ -84,12 +98,9 @@ import {
 import { AppPageShell } from "@/components/app-page-shell";
 import { cn } from "@/lib/utils";
 
-type SalesOrderListFacets = {
-  companyTotal: number;
-  byFulfillment: Record<SalesOrderFulfillmentStatus, number>;
-};
-
-const FULFILLMENT_FILTER_ICONS: Record<SalesOrderFulfillmentStatus, LucideIcon> = {
+const FULFILLMENT_FILTER_ICONS: Partial<
+  Record<SalesOrderFulfillmentStatus, LucideIcon>
+> = {
   new: FilePlus2,
   pending: Clock,
   "delivery note created": FileText,
@@ -100,29 +111,52 @@ const FULFILLMENT_FILTER_ICONS: Record<SalesOrderFulfillmentStatus, LucideIcon> 
   rescheduled: CalendarClock,
 };
 
-const FULFILLMENT_FILTER_ORDER: SalesOrderFulfillmentStatus[] = [
-  "new",
-  "pending",
-  "delivery note created",
-  "delivered to driver",
-  "delivered to customer",
-  "completed",
-  "rescheduled",
-  "cancelled",
-];
+const PAYMENT_FILTER_ICONS: Partial<
+  Record<SalesOrderPaymentStatusDb, LucideIcon>
+> = {
+  unpaid: Clock,
+  "partial paid": StickyNote,
+  paid: BadgeCheck,
+};
 
-function SalesOrdersFilterSidebar({
+function fulfillmentFilterIcon(status: SalesOrderFulfillmentStatus): LucideIcon {
+  return FULFILLMENT_FILTER_ICONS[status] ?? ClipboardList;
+}
+
+function paymentFilterIcon(status: SalesOrderPaymentStatusDb): LucideIcon {
+  return PAYMENT_FILTER_ICONS[status] ?? Wallet;
+}
+
+function formatListCurrency(amount: number, currency: string) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
+    amount,
+  );
+}
+
+function formatListDate(dateString: string) {
+  return new Date(dateString).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+const SalesOrdersFilterSidebar = memo(function SalesOrdersFilterSidebar({
   id,
   facets,
   fulfillmentFilter,
   onFulfillmentChange,
+  paymentFilter,
+  onPaymentChange,
 }: {
   id?: string;
   facets: SalesOrderListFacets;
   fulfillmentFilter: SalesOrderFulfillmentStatus | "all";
   onFulfillmentChange: (v: SalesOrderFulfillmentStatus | "all") => void;
+  paymentFilter: SalesOrderPaymentStatusDb | "all";
+  onPaymentChange: (v: SalesOrderPaymentStatusDb | "all") => void;
 }) {
-  const rows: {
+  const fulfillmentRows: {
     id: SalesOrderFulfillmentStatus | "all";
     label: string;
     icon: LucideIcon;
@@ -132,13 +166,33 @@ function SalesOrdersFilterSidebar({
       id: "all",
       label: "All orders",
       icon: ClipboardList,
-      count: facets.companyTotal,
+      count: facets.total,
     },
-    ...FULFILLMENT_FILTER_ORDER.map((s) => ({
+    ...facets.fulfillmentEnum.map((s) => ({
       id: s,
-      label: SALES_ORDER_FULFILLMENT_LABELS[s] ?? s,
-      icon: FULFILLMENT_FILTER_ICONS[s],
+      label: salesOrderFulfillmentFilterLabel(s),
+      icon: fulfillmentFilterIcon(s),
       count: facets.byFulfillment[s] ?? 0,
+    })),
+  ];
+
+  const paymentRows: {
+    id: SalesOrderPaymentStatusDb | "all";
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All payments",
+      icon: Wallet,
+      count: facets.total,
+    },
+    ...facets.paymentEnum.map((s) => ({
+      id: s,
+      label: salesOrderPaymentFilterLabel(s),
+      icon: paymentFilterIcon(s),
+      count: facets.byPayment[s] ?? 0,
     })),
   ];
 
@@ -156,7 +210,7 @@ function SalesOrdersFilterSidebar({
             className="flex flex-col gap-px"
             aria-label="Filter by fulfillment status"
           >
-            {rows.map((item) => {
+            {fulfillmentRows.map((item) => {
               const Icon = item.icon;
               const selected = fulfillmentFilter === item.id;
               return (
@@ -188,14 +242,56 @@ function SalesOrdersFilterSidebar({
             })}
           </nav>
         </div>
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            By payment
+          </h3>
+          <nav
+            className="flex flex-col gap-px"
+            aria-label="Filter by payment status"
+          >
+            {paymentRows.map((item) => {
+              const Icon = item.icon;
+              const selected = paymentFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onPaymentChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
       </div>
     </aside>
   );
-}
+});
 
 export default function SalesOrdersPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [rows, setRows] = useState<SalesOrderListRow[]>([]);
@@ -204,6 +300,9 @@ export default function SalesOrdersPage() {
 
   const [fulfillmentFilter, setFulfillmentFilter] = useState<
     SalesOrderFulfillmentStatus | "all"
+  >("all");
+  const [paymentFilter, setPaymentFilter] = useState<
+    SalesOrderPaymentStatusDb | "all"
   >("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -218,6 +317,7 @@ export default function SalesOrdersPage() {
   const prevListDepsRef = useRef({
     debouncedSearch: "",
     fulfillmentFilter: "all" as SalesOrderFulfillmentStatus | "all",
+    paymentFilter: "all" as SalesOrderPaymentStatusDb | "all",
     pageSize: 10,
     activeCompanyScope: 0,
   });
@@ -233,13 +333,16 @@ export default function SalesOrdersPage() {
   useEffect(() => {
     const t = window.setTimeout(
       () => setDebouncedSearch(searchQuery.trim()),
-      220,
+      350,
     );
     return () => window.clearTimeout(t);
   }, [searchQuery]);
 
   useEffect(() => {
-    const bump = () => setActiveCompanyScope((n) => n + 1);
+    const bump = () => {
+      invalidateSalesOrderCaches();
+      setActiveCompanyScope((n) => n + 1);
+    };
     window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
     const onStorage = (e: StorageEvent) => {
       if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
@@ -255,7 +358,6 @@ export default function SalesOrdersPage() {
     let cancelled = false;
 
     (async () => {
-      setFacetsLoading(true);
       const id = await getActiveCompanyId();
       if (cancelled) return;
 
@@ -265,28 +367,48 @@ export default function SalesOrdersPage() {
         setTotal(0);
         setFacets(null);
         setFacetsLoading(false);
-        return;
+        setListLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCompanyScope]);
+
+  useEffect(() => {
+    if (companyReady !== true) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const companyId = await getActiveCompanyId();
+      if (cancelled) return;
+
+      const cachedFacets = companyId
+        ? getCachedSalesOrderListFacets(companyId)
+        : null;
+      if (cachedFacets) {
+        setFacets(cachedFacets);
+        setFacetsLoading(false);
+      } else {
+        setFacetsLoading(true);
       }
 
       try {
-        const [, kpis] = await Promise.all([
-          expireStaleSalesOrders(),
-          getSalesOrderKpiCounts(),
-        ]);
+        await expireStaleSalesOrders();
+        const facetData = await getSalesOrderListFacets();
         if (cancelled) return;
-        setFacets({
-          companyTotal: kpis.total,
-          byFulfillment: kpis.byFulfillment,
-        });
+        setFacets(facetData);
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load filters",
             description: msg,
             variant: "destructive",
           });
-          setFacets(null);
+          if (!cachedFacets) setFacets(null);
         }
       } finally {
         if (!cancelled) setFacetsLoading(false);
@@ -297,7 +419,7 @@ export default function SalesOrdersPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
-  }, [activeCompanyScope]);
+  }, [activeCompanyScope, companyReady]);
 
   useEffect(() => {
     if (companyReady !== true) return;
@@ -306,6 +428,7 @@ export default function SalesOrdersPage() {
     const depsChanged =
       prev.debouncedSearch !== debouncedSearch ||
       prev.fulfillmentFilter !== fulfillmentFilter ||
+      prev.paymentFilter !== paymentFilter ||
       prev.pageSize !== pageSize ||
       prev.activeCompanyScope !== activeCompanyScope;
 
@@ -317,6 +440,7 @@ export default function SalesOrdersPage() {
     prevListDepsRef.current = {
       debouncedSearch,
       fulfillmentFilter,
+      paymentFilter,
       pageSize,
       activeCompanyScope,
     };
@@ -325,13 +449,31 @@ export default function SalesOrdersPage() {
     let cancelled = false;
 
     (async () => {
-      setListLoading(true);
+      const companyId = await getActiveCompanyId();
+      if (cancelled || gen !== listRequestGen.current) return;
+
+      const listOpts = {
+        search: debouncedSearch || undefined,
+        fulfillmentStatus: fulfillmentFilter,
+        paymentStatus: paymentFilter,
+        page,
+        pageSize,
+      };
+
+      const cachedList = companyId
+        ? getCachedSalesOrderList(companyId, listOpts)
+        : null;
+      if (cachedList) {
+        setRows(cachedList.rows);
+        setTotal(cachedList.total);
+        setListLoading(false);
+      } else {
+        setListLoading(true);
+      }
+
       try {
         const listRes = await listSalesOrders({
-          search: debouncedSearch || undefined,
-          fulfillmentStatus: fulfillmentFilter,
-          page,
-          pageSize,
+          ...listOpts,
           skipExpireStale: true,
         });
         if (cancelled || gen !== listRequestGen.current) return;
@@ -340,7 +482,7 @@ export default function SalesOrdersPage() {
       } catch (e: unknown) {
         if (cancelled || gen !== listRequestGen.current) return;
         const msg = e instanceof Error ? e.message : "Please try again.";
-        toast({
+        toastRef.current({
           title: "Failed to load sales orders",
           description: msg,
           variant: "destructive",
@@ -360,6 +502,7 @@ export default function SalesOrdersPage() {
     companyReady,
     debouncedSearch,
     fulfillmentFilter,
+    paymentFilter,
     page,
     pageSize,
     activeCompanyScope,
@@ -370,75 +513,64 @@ export default function SalesOrdersPage() {
     listRequestGen.current += 1;
     const gen = listRequestGen.current;
     setListLoading(true);
+    setFacetsLoading(true);
     try {
-      const [, kpis, listRes] = await Promise.all([
-        expireStaleSalesOrders(),
-        getSalesOrderKpiCounts(),
+      await expireStaleSalesOrders();
+      const [facetData, listRes] = await Promise.all([
+        getSalesOrderListFacets({ force: true }),
         listSalesOrders({
           search: debouncedSearch || undefined,
           fulfillmentStatus: fulfillmentFilter,
+          paymentStatus: paymentFilter,
           page,
           pageSize,
           skipExpireStale: true,
         }),
       ]);
       if (gen !== listRequestGen.current) return;
-      setFacets({
-        companyTotal: kpis.total,
-        byFulfillment: kpis.byFulfillment,
-      });
+      setFacets(facetData);
       setRows(listRes.rows);
       setTotal(listRes.total);
       prevListDepsRef.current = {
         debouncedSearch,
         fulfillmentFilter,
+        paymentFilter,
         pageSize,
         activeCompanyScope,
       };
     } catch (e: unknown) {
       if (gen === listRequestGen.current) {
-        toast({
+        toastRef.current({
           title: "Failed to refresh sales orders",
           description: e instanceof Error ? e.message : "Please try again.",
           variant: "destructive",
         });
       }
     } finally {
-      if (gen === listRequestGen.current) setListLoading(false);
+      if (gen === listRequestGen.current) {
+        setListLoading(false);
+        setFacetsLoading(false);
+      }
     }
   }, [
     companyReady,
     debouncedSearch,
     fulfillmentFilter,
+    paymentFilter,
     page,
     pageSize,
     activeCompanyScope,
-    toast,
   ]);
-
-  const formatCurrency = useCallback(
-    (amount: number, currency: string) =>
-      new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
-        amount,
-      ),
-    [],
-  );
-
-  const formatDate = useCallback((dateString: string) =>
-    new Date(dateString).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }), []);
 
   const fetchExportRows = useCallback(async () => {
     await expireStaleSalesOrders();
     return listAllSalesOrdersForExport({
       search: debouncedSearch || undefined,
       fulfillmentStatus: fulfillmentFilter,
+      paymentStatus: paymentFilter,
       skipExpireStale: true,
     });
-  }, [debouncedSearch, fulfillmentFilter]);
+  }, [debouncedSearch, fulfillmentFilter, paymentFilter]);
 
   const exportFilenameStem = useMemo(() => {
     const d = new Date();
@@ -454,7 +586,7 @@ export default function SalesOrdersPage() {
       setExportingCsv(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to export",
           description: "No sales orders match the current filters.",
         });
@@ -462,7 +594,7 @@ export default function SalesOrdersPage() {
       }
       const headers = [
         "Order #",
-        "Client",
+        "Customer",
         "City",
         "Created by",
         "Delivery date",
@@ -479,11 +611,10 @@ export default function SalesOrdersPage() {
             r.clientName || "",
             r.cityName || "",
             r.createdByName || "",
-            r.deliveryDate ? formatDate(r.deliveryDate) : "",
-            SALES_ORDER_FULFILLMENT_LABELS[r.fulfillmentStatus] ??
-              r.fulfillmentStatus,
-            SALES_ORDER_PAYMENT_LABELS[r.paymentStatus] ?? r.paymentStatus,
-            formatCurrency(r.total, r.currency),
+            r.deliveryDate ? formatListDate(r.deliveryDate) : "",
+            salesOrderFulfillmentFilterLabel(r.fulfillmentStatus),
+            salesOrderPaymentFilterLabel(r.paymentStatus),
+            formatListCurrency(r.total, r.currency),
           ]
             .map((v) => esc(String(v ?? "")))
             .join(","),
@@ -499,12 +630,12 @@ export default function SalesOrdersPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast({
+      toastRef.current({
         title: "CSV exported",
         description: `${data.length} sales order${data.length === 1 ? "" : "s"} exported.`,
       });
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Export failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -512,7 +643,7 @@ export default function SalesOrdersPage() {
     } finally {
       setExportingCsv(false);
     }
-  }, [exportingCsv, fetchExportRows, exportFilenameStem, formatDate, formatCurrency, toast]);
+  }, [exportingCsv, fetchExportRows, exportFilenameStem]);
 
   const handlePrint = useCallback(async () => {
     if (printing) return;
@@ -520,7 +651,7 @@ export default function SalesOrdersPage() {
       setPrinting(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to print",
           description: "No sales orders match the current filters.",
         });
@@ -532,6 +663,7 @@ export default function SalesOrdersPage() {
       const doc = await buildSalesOrdersListPdfDoc({
         rows: data,
         fulfillmentFilter,
+        paymentFilter,
         searchQuery: debouncedSearch,
       });
       const filename = `${exportFilenameStem}.pdf`;
@@ -544,13 +676,13 @@ export default function SalesOrdersPage() {
         };
       } else {
         doc.save(filename);
-        toast({
+        toastRef.current({
           title: "Print blocked",
           description: "Allow popups to print. PDF downloaded instead.",
         });
       }
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Print failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -562,9 +694,9 @@ export default function SalesOrdersPage() {
     printing,
     fetchExportRows,
     fulfillmentFilter,
+    paymentFilter,
     debouncedSearch,
     exportFilenameStem,
-    toast,
   ]);
 
   const handleDuplicate = useCallback(
@@ -585,19 +717,19 @@ export default function SalesOrdersPage() {
             r.id === idParam ? { ...r, paymentStatus: "paid" } : r,
           ),
         );
-        toast({
+        toastRef.current({
           title: "Sales order updated",
           description: "Payment status set to Paid.",
         });
       } catch (e: unknown) {
-        toast({
+        toastRef.current({
           title: "Could not mark as paid",
           description: e instanceof Error ? e.message : "Please try again.",
           variant: "destructive",
         });
       }
     },
-    [toast],
+    [],
   );
 
   const columns = useMemo<ColumnDef<SalesOrderListRow>[]>(
@@ -615,13 +747,28 @@ export default function SalesOrdersPage() {
         ),
       },
       {
-        id: "clientName",
+        id: "customer",
         accessorFn: (r) => r.clientName ?? "",
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Client" />
+          <DataTableColumnHeader column={column} title="Customer" />
         ),
-        cell: ({ row }) => row.original.clientName || "—",
-        meta: { tdClassName: "text-muted-foreground" },
+        meta: {
+          stopRowClick: true,
+          tdClassName: "text-muted-foreground",
+        },
+        cell: ({ row }) => {
+          const { customerId, clientName } = row.original;
+          if (!customerId) return clientName || "—";
+          return (
+            <Link
+              href={`/app/customers/${customerId}/edit`}
+              className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {clientName || "View customer"}
+            </Link>
+          );
+        },
       },
       {
         id: "city",
@@ -650,7 +797,7 @@ export default function SalesOrdersPage() {
         ),
         cell: ({ row }) =>
           row.original.deliveryDate
-            ? formatDate(row.original.deliveryDate)
+            ? formatListDate(row.original.deliveryDate)
             : "—",
         meta: { tdClassName: "text-muted-foreground" },
       },
@@ -705,8 +852,7 @@ export default function SalesOrdersPage() {
         meta: {
           tdClassName: "text-muted-foreground",
           searchValue: (row: SalesOrderListRow) =>
-            SALES_ORDER_FULFILLMENT_LABELS[row.fulfillmentStatus] ??
-            row.fulfillmentStatus,
+            salesOrderFulfillmentFilterLabel(row.fulfillmentStatus),
         },
       },
       {
@@ -732,7 +878,7 @@ export default function SalesOrdersPage() {
           tdClassName: "text-right font-medium tabular-nums",
         },
         cell: ({ row }) =>
-          formatCurrency(row.original.total, row.original.currency),
+          formatListCurrency(row.original.total, row.original.currency),
       },
       {
         id: "actions",
@@ -799,7 +945,7 @@ export default function SalesOrdersPage() {
         },
       },
     ],
-    [router, handleDuplicate, handleMarkAsPaid, formatDate, formatCurrency],
+    [router, handleDuplicate, handleMarkAsPaid],
   );
 
   const confirmDelete = async () => {
@@ -807,11 +953,11 @@ export default function SalesOrdersPage() {
     setDeleting(true);
     try {
       await deleteSalesOrder(deleteId);
-      toast({ title: "Sales order deleted" });
+      toastRef.current({ title: "Sales order deleted" });
       setDeleteId(null);
       await reload();
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -822,8 +968,11 @@ export default function SalesOrdersPage() {
   };
 
   const hasActiveFilters = useMemo(
-    () => debouncedSearch !== "" || fulfillmentFilter !== "all",
-    [debouncedSearch, fulfillmentFilter],
+    () =>
+      debouncedSearch !== "" ||
+      fulfillmentFilter !== "all" ||
+      paymentFilter !== "all",
+    [debouncedSearch, fulfillmentFilter, paymentFilter],
   );
 
   const listRangeLabel = useMemo(() => {
@@ -925,7 +1074,7 @@ export default function SalesOrdersPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory && facets ? (
@@ -954,6 +1103,11 @@ export default function SalesOrdersPage() {
                 onFulfillmentChange={(v) => {
                   setPage(1);
                   setFulfillmentFilter(v);
+                }}
+                paymentFilter={paymentFilter}
+                onPaymentChange={(v) => {
+                  setPage(1);
+                  setPaymentFilter(v);
                 }}
               />
             </div>
@@ -1003,7 +1157,7 @@ export default function SalesOrdersPage() {
                   hasActiveFilters ? (
                     <FeatureEmptyState
                       title="No sales orders match your filters"
-                      description="Try clearing search or adjusting fulfillment filters."
+                      description="Try clearing search or adjusting filters."
                       action={
                         <Button
                           variant="outline"
@@ -1012,6 +1166,7 @@ export default function SalesOrdersPage() {
                             setPage(1);
                             setSearchQuery("");
                             setFulfillmentFilter("all");
+                            setPaymentFilter("all");
                           }}
                         >
                           Clear filters
@@ -1019,7 +1174,7 @@ export default function SalesOrdersPage() {
                       }
                       className="border-0 bg-transparent py-8"
                     />
-                  ) : facets.companyTotal === 0 ? (
+                  ) : facets.total === 0 ? (
                     <FeatureEmptyState
                       icon={ClipboardList}
                       title="No sales orders yet"

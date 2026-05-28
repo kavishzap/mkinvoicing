@@ -1,4 +1,5 @@
 "use client";
+import { TableBodyRowsSkeleton, InlineTableRowsSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
@@ -155,25 +156,7 @@ export default function CustomerCreditPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from({ length: 5 }).map((_, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="p-3">
-                        <div className="h-4 w-40 rounded bg-muted animate-pulse" />
-                      </td>
-                      <td className="p-3">
-                        <div className="h-4 w-40 rounded bg-muted animate-pulse" />
-                      </td>
-                      <td className="p-3">
-                        <div className="h-4 w-28 rounded bg-muted animate-pulse" />
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="h-4 w-20 rounded bg-muted animate-pulse ml-auto" />
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="h-8 w-28 rounded bg-muted animate-pulse ml-auto" />
-                      </td>
-                    </tr>
-                  ))}
+                  <TableBodyRowsSkeleton rowCount={5} colCount={5} />
                 </tbody>
               </table>
             </div>
@@ -423,11 +406,7 @@ export default function CustomerCreditPage() {
               </p>
             </div>
             {historyLoading ? (
-              <div className="space-y-2">
-                <div className="h-5 w-full rounded bg-muted animate-pulse" />
-                <div className="h-5 w-full rounded bg-muted animate-pulse" />
-                <div className="h-5 w-full rounded bg-muted animate-pulse" />
-              </div>
+              <InlineTableRowsSkeleton rowCount={4} />
             ) : history.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No settlements recorded yet for this customer.

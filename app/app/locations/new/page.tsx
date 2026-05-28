@@ -1,5 +1,6 @@
 "use client";
 
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -235,6 +236,9 @@ export default function NewLocationPage() {
         </Button>
       }
     >
+      {locationTypesLoading ? (
+        <FormTwoColumnPageSkeleton withLineItems={false} />
+      ) : (
       <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
           <SectionCard icon={Building2} title="Location basics">
@@ -416,6 +420,7 @@ export default function NewLocationPage() {
           </SectionCard>
         </div>
       </div>
+      )}
     </AppPageShell>
   );
 }

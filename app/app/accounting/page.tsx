@@ -1,80 +1,102 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { BookOpen, Users, Lock } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { BookOpen, FileDown, Loader2, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppPageShell } from "@/components/app-page-shell";
+import { BasicLedgerTab } from "@/components/basic-ledger-tab";
+import { CustomerSupplierLedgerTab } from "@/components/customer-supplier-ledger-tab";
+import type { ReportTabExportApi } from "@/components/report-tab-export";
 
-const accountingCards = [
-  {
-    title: "Basic Accounting Ledger",
-    description: "Track debits, credits, and general ledger entries.",
-    icon: BookOpen,
-    href: "/app/accounting/basic-ledger",
-    locked: false,
-  },
-  {
-    title: "Customer/Supplier Ledger",
-    description: "View ledger balances by customer and supplier.",
-    icon: Users,
-    href: "/app/accounting/customer-supplier-ledger",
-    locked: false,
-  },
-];
+type AccountingTab = "basic" | "contacts";
+
+function parseTab(raw: string | null): AccountingTab {
+  if (raw === "contacts" || raw === "customer-supplier") return "contacts";
+  return "basic";
+}
 
 export default function AccountingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [mainTab, setMainTab] = useState<AccountingTab>(() =>
+    parseTab(searchParams.get("tab")),
+  );
+  const [basicExport, setBasicExport] = useState<ReportTabExportApi | null>(null);
+  const [contactsExport, setContactsExport] = useState<ReportTabExportApi | null>(
+    null,
+  );
+
+  useEffect(() => {
+    setMainTab(parseTab(searchParams.get("tab")));
+  }, [searchParams]);
+
+  const activeExport = useMemo(() => {
+    if (mainTab === "contacts") return contactsExport;
+    return basicExport;
+  }, [mainTab, basicExport, contactsExport]);
 
   return (
-    <AppPageShell subtitle="Jump into the ledger that matches what you’re reconciling—general entries or balances by contact.">
-      <div className="grid grid-cols-1 gap-6">
-        {accountingCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Card
-              key={card.title}
-              className={cn(
-                "transition-colors",
-                card.locked
-                  ? "opacity-60 cursor-not-allowed"
-                  : "hover:bg-accent/50 cursor-pointer"
-              )}
-              onClick={() => !card.locked && card.href && router.push(card.href)}
-            >
-              <CardHeader className="flex flex-row items-start justify-between space-y-0">
-                <div className="space-y-1.5">
-                  <CardTitle className="flex items-center gap-2">
-                    {card.title}
-                    {card.locked && (
-                      <Lock className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </CardTitle>
-                  <CardDescription>{card.description}</CardDescription>
-                </div>
-                <div
-                  className={cn(
-                    "rounded-lg p-2",
-                    card.locked ? "bg-muted" : "bg-primary/10"
-                  )}
-                >
-                  <Icon
-                    className={cn(
-                      "h-5 w-5",
-                      card.locked ? "text-muted-foreground" : "text-primary"
-                    )}
-                  />
-                </div>
-              </CardHeader>
-              {card.locked && (
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">Coming soon</p>
-                </CardContent>
-              )}
-            </Card>
-          );
-        })}
-      </div>
+    <AppPageShell
+      fillHeight
+      compact
+      className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
+      actions={
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={() => void activeExport?.exportPdf()}
+          disabled={!activeExport?.canExport || activeExport.exporting}
+        >
+          {activeExport?.exporting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Exporting…
+            </>
+          ) : (
+            <>
+              <FileDown className="h-4 w-4" />
+              Export PDF
+            </>
+          )}
+        </Button>
+      }
+    >
+      <Tabs
+        value={mainTab}
+        onValueChange={(v) => {
+          const tab = parseTab(v);
+          setMainTab(tab);
+          router.replace(`/app/accounting?tab=${tab}`, { scroll: false });
+        }}
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
+        <TabsList className="grid h-auto w-full shrink-0 grid-cols-2 gap-1 p-1 sm:inline-flex sm:w-auto">
+          <TabsTrigger value="basic" className="gap-1.5 text-xs sm:text-sm">
+            <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Basic ledger
+          </TabsTrigger>
+          <TabsTrigger value="contacts" className="gap-1.5 text-xs sm:text-sm">
+            <Users className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Customer / supplier
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="basic"
+          className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        >
+          <BasicLedgerTab onExportReady={setBasicExport} />
+        </TabsContent>
+        <TabsContent
+          value="contacts"
+          className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        >
+          <CustomerSupplierLedgerTab onExportReady={setContactsExport} />
+        </TabsContent>
+      </Tabs>
     </AppPageShell>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -46,7 +47,6 @@ import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -65,6 +65,8 @@ import {
 } from "@/lib/products-service";
 import {
   getSalesOrder,
+  resolveDiscountAmount,
+  computeSalesOrderValidUntil,
   updateSalesOrder,
   buildFromSnapshotForSalesOrder,
   buildBillToSnapshot,
@@ -75,8 +77,6 @@ import {
   type SalesOrderLinePayload,
   type SalesOrderStatus,
   type SalesOrderFulfillmentStatus,
-  SALES_ORDER_FULFILLMENT_STATUSES,
-  SALES_ORDER_FULFILLMENT_LABELS,
   type SalesOrderItemRow,
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
@@ -87,7 +87,6 @@ import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
 import { cn } from "@/lib/utils";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
-import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
 const DEFAULT_TAX_PERCENT = 15;
@@ -227,18 +226,13 @@ function fmtMoney(n: number, currency: string) {
   }
 }
 
-function daysBetweenIssueAndValid(issue: string, valid: string) {
-  const a = new Date(issue).getTime();
-  const b = new Date(valid).getTime();
-  const d = Math.round((b - a) / 86400000);
-  return Number.isFinite(d) && d > 0 ? d : 14;
-}
-
 export default function EditSalesOrderPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const salesOrderId = params.id;
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -271,12 +265,8 @@ export default function EditSalesOrderPage() {
 
   const [salesOrderNumber, setSalesOrderNumber] = useState("");
   const [issueDate, setIssueDate] = useState(
-    new Date().toISOString().split("T")[0]
+    new Date().toISOString().split("T")[0],
   );
-  const [validUntil, setValidUntil] = useState(
-    new Date().toISOString().split("T")[0]
-  );
-  const [validForDays, setValidForDays] = useState("14");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [lifecycleStatus, setLifecycleStatus] =
     useState<SalesOrderStatus>("active");
@@ -299,10 +289,7 @@ export default function EditSalesOrderPage() {
       tax: DEFAULT_TAX_PERCENT,
     },
   ]);
-  const [discount, setDiscount] = useState({
-    type: "value" as "value" | "percent",
-    amount: 0,
-  });
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState("");
 
@@ -342,7 +329,7 @@ export default function EditSalesOrderPage() {
         ]);
         if (cancelled) return;
         if (!q) {
-          toast({
+          toastRef.current({
             title: "Sales order not found",
             variant: "destructive",
           });
@@ -355,7 +342,7 @@ export default function EditSalesOrderPage() {
             normalizeSalesOrderFulfillmentStatus(q.fulfillment_status)
           )
         ) {
-          toast({
+          toastRef.current({
             title: "Editing not available",
             description:
               "Sales orders can only be edited when fulfillment status is New or Pending.",
@@ -371,10 +358,6 @@ export default function EditSalesOrderPage() {
         setCities(cityRows);
         setSalesOrderNumber(q.number);
         setIssueDate(q.issue_date);
-        setValidUntil(q.valid_until);
-        setValidForDays(
-          String(daysBetweenIssueAndValid(q.issue_date, q.valid_until))
-        );
         setDeliveryDate(
           q.delivery_date ? String(q.delivery_date).slice(0, 10) : "",
         );
@@ -382,10 +365,6 @@ export default function EditSalesOrderPage() {
         setFulfillmentStatus(q.fulfillment_status);
         setPaymentStatus(q.payment_status);
         setCreatedFromQuotationId(q.created_from_quotation_id);
-        setDiscount({
-          type: q.discount_type,
-          amount: q.discount_amount,
-        });
         setNotes(q.notes ?? "");
         setTerms(q.terms ?? "");
 
@@ -409,22 +388,32 @@ export default function EditSalesOrderPage() {
           address_line_2: ci.address_line_2,
         });
 
-        setLineItems(
-          [...q.items]
-            .sort(
-              (a, b) =>
-                Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-            )
-            .map((it, i) => ({
-              id: `ln-${i}-${it.item?.slice(0, 8) || "row"}`,
-              productId: (it as SalesOrderItemRow).product_id ?? null,
-              item: it.item,
-              description: it.description ?? "",
-              quantity: Number(it.quantity),
-              unitPrice: Number(it.unit_price),
-              tax: Number(it.tax_percent),
-            }))
+        const loadedLines = [...q.items]
+          .sort(
+            (a, b) =>
+              Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+          )
+          .map((it, i) => ({
+            id: `ln-${i}-${it.item?.slice(0, 8) || "row"}`,
+            productId: (it as SalesOrderItemRow).product_id ?? null,
+            item: it.item,
+            description: it.description ?? "",
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unit_price),
+            tax: Number(it.tax_percent),
+          }));
+        const loadedSubtotal = loadedLines.reduce(
+          (sum, it) => sum + it.quantity * it.unitPrice,
+          0,
         );
+        setDiscountAmount(
+          resolveDiscountAmount(
+            q.discount_type,
+            q.discount_amount,
+            loadedSubtotal,
+          ),
+        );
+        setLineItems(loadedLines);
 
         setCustomers(customerList.rows);
         if (q.customer_id) {
@@ -434,7 +423,7 @@ export default function EditSalesOrderPage() {
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load sales order",
             description: msg,
             variant: "destructive",
@@ -447,7 +436,7 @@ export default function EditSalesOrderPage() {
     return () => {
       cancelled = true;
     };
-  }, [salesOrderId, router, toast]);
+  }, [salesOrderId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -474,24 +463,9 @@ export default function EditSalesOrderPage() {
       lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
     [lineItems]
   );
-  const taxTotal = useMemo(
-    () =>
-      lineItems.reduce(
-        (sum, item) => sum + (item.quantity * item.unitPrice * item.tax) / 100,
-        0
-      ),
-    [lineItems]
-  );
-  const discountAmount = useMemo(
-    () =>
-      discount.type === "percent"
-        ? (subtotal * discount.amount) / 100
-        : discount.amount,
-    [discount, subtotal]
-  );
   const total = useMemo(
-    () => subtotal + taxTotal - discountAmount,
-    [subtotal, taxTotal, discountAmount]
+    () => subtotal - discountAmount,
+    [subtotal, discountAmount]
   );
 
   const currency = preferences?.currency ?? "USD";
@@ -614,7 +588,7 @@ export default function EditSalesOrderPage() {
       postal: c.postal ?? "",
       country: c.country ?? "",
       address_line_1: c.address_line_1 ?? "",
-      address_line_2: c.address_line_2 ?? "",
+      address_line_2: "",
     });
     setIsCustomerDialogOpen(false);
     setErrors((e) => {
@@ -627,7 +601,7 @@ export default function EditSalesOrderPage() {
       delete next.address_line_1;
       return next;
     });
-    toast({
+    toastRef.current({
       title: "Customer selected",
       description: `${
         c.type === "company" ? c.companyName : c.fullName
@@ -683,7 +657,7 @@ export default function EditSalesOrderPage() {
       const firstMsg = Object.values(validation).find(
         (v): v is string => typeof v === "string" && v.length > 0
       );
-      toast({
+      toastRef.current({
         title: "Please fix the highlighted fields.",
         description: firstMsg,
         variant: "destructive",
@@ -701,7 +675,7 @@ export default function EditSalesOrderPage() {
         description: li.description || undefined,
         quantity: li.quantity,
         unit_price: li.unitPrice,
-        tax_percent: li.tax,
+        tax_percent: 0,
         sort_order: i,
         product_id: li.productId,
       }));
@@ -723,17 +697,20 @@ export default function EditSalesOrderPage() {
             postal: clientInfo.postal || null,
             country: clientInfo.country || null,
             address_line_1: clientInfo.address_line_1 || null,
-            address_line_2: clientInfo.address_line_2 || null,
+            address_line_2: null,
           };
 
       await updateSalesOrder(salesOrderId, {
         issue_date: issueDate,
-        valid_until: validUntil,
+        valid_until: computeSalesOrderValidUntil(
+          issueDate,
+          preferences?.paymentTerms ?? 14,
+        ),
         status: lifecycleStatus,
         fulfillment_status: fulfillmentStatus,
         currency: preferences.currency,
-        discount_type: discount.type,
-        discount_amount: discount.amount,
+        discount_type: "value",
+        discount_amount: discountAmount,
         shipping_amount: 0,
         notes,
         terms,
@@ -746,14 +723,14 @@ export default function EditSalesOrderPage() {
         delivery_date: deliveryDate.trim() || null,
       });
 
-      toast({
+      toastRef.current({
         title: "Sales order updated",
         description: "Your changes were saved.",
       });
       router.push(`/app/sales-orders/${salesOrderId}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
+      toastRef.current({
         title: "Failed to save sales order",
         description: msg,
         variant: "destructive",
@@ -771,14 +748,7 @@ export default function EditSalesOrderPage() {
         fillHeight
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       >
-        <div className="flex min-w-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-          <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-          </div>
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        </div>
+        <FormTwoColumnPageSkeleton withLineItems />
       </AppPageShell>
     );
   }
@@ -1113,21 +1083,6 @@ export default function EditSalesOrderPage() {
                     </p>
                   )}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="clientAddress2">Address Line 2</Label>
-                  <Input
-                    id="clientAddress2"
-                    value={clientInfo.address_line_2}
-                    onChange={(e) =>
-                      setClientInfo({
-                        ...clientInfo,
-                        address_line_2: e.target.value,
-                      })
-                    }
-                    placeholder="Apartment, suite, building, etc."
-                  />
-                </div>
-
                 {createdFromQuotationId ? (
                   <InfoRow label="Created from quotation">
                     <Link
@@ -1165,57 +1120,9 @@ export default function EditSalesOrderPage() {
                       id="issueDate"
                       type="date"
                       value={issueDate}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setIssueDate(v);
-                        const base = new Date(v);
-                        const days = Number(validForDays) || 14;
-                        base.setDate(base.getDate() + days);
-                        setValidUntil(base.toISOString().split("T")[0]);
-                      }}
+                      disabled
+                      className="bg-muted/50"
                     />
-                  </div>
-                  <div className="min-w-0 space-y-2">
-                    <Label htmlFor="validUntil" className={fieldLabelClass}>
-                      Valid until
-                    </Label>
-                    <Input
-                      id="validUntil"
-                      type="date"
-                      value={validUntil}
-                      onChange={(e) => setValidUntil(e.target.value)}
-                    />
-                  </div>
-                  <div className="min-w-0 space-y-2">
-                    <Label htmlFor="validForDays" className={fieldLabelClass}>
-                      Valid for (days)
-                    </Label>
-                    <Select
-                      value={validForDays}
-                      onValueChange={(v) => {
-                        setValidForDays(v);
-                        const days = Number(v) || 14;
-                        const base = new Date(
-                          issueDate || new Date().toISOString().split("T")[0]
-                        );
-                        base.setDate(base.getDate() + days);
-                        setValidUntil(base.toISOString().split("T")[0]);
-                      }}
-                    >
-                      <SelectTrigger
-                        id="validForDays"
-                        className="h-8 w-full rounded-sm text-xs"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="7">7 days</SelectItem>
-                        <SelectItem value="14">14 days</SelectItem>
-                        <SelectItem value="30">30 days</SelectItem>
-                        <SelectItem value="60">60 days</SelectItem>
-                        <SelectItem value="90">90 days</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                   <div className="min-w-0 space-y-2">
                     <Label htmlFor="soDeliveryDate" className={fieldLabelClass}>
@@ -1225,36 +1132,17 @@ export default function EditSalesOrderPage() {
                       id="soDeliveryDate"
                       type="date"
                       value={deliveryDate}
-                      onChange={(e) => setDeliveryDate(e.target.value)}
+                      disabled
+                      className="bg-muted/50"
                     />
-                    <p className="text-[11px] leading-snug text-muted-foreground">
-                      Optional. Read-only on the sales order view.
-                    </p>
                   </div>
                   <div className="min-w-0 space-y-2 sm:col-span-2">
-                    <Label htmlFor="soFulfillment" className={fieldLabelClass}>
-                      Fulfillment status
-                    </Label>
-                    <Select
-                      value={fulfillmentStatus}
-                      onValueChange={(v) =>
-                        setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
-                      }
-                    >
-                      <SelectTrigger
-                        id="soFulfillment"
-                        className="h-8 w-full max-w-md rounded-sm text-xs"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
-                          <SelectItem key={v} value={v}>
-                            {SALES_ORDER_FULFILLMENT_LABELS[v]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label className={fieldLabelClass}>Fulfillment status</Label>
+                    <div className="flex h-8 items-center">
+                      <SalesOrderFulfillmentStatusBadge
+                        status={fulfillmentStatus}
+                      />
+                    </div>
                   </div>
                 </div>
               </EditSectionCard>
@@ -1270,32 +1158,18 @@ export default function EditSalesOrderPage() {
                       {fmtMoney(subtotal, currency)}
                     </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax</span>
-                    <span className="tabular-nums font-medium">
-                      {fmtMoney(taxTotal, currency)}
-                    </span>
-                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <span className="text-sm text-muted-foreground">
                       Discount
                     </span>
                     <div className="flex flex-wrap items-center gap-2">
-                      <DiscountTypeToggle
-                        value={discount.type}
-                        onChange={(t) => setDiscount({ ...discount, type: t })}
-                        currencyLabel={currency}
-                      />
                       <Input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={discount.amount}
+                        value={discountAmount}
                         onChange={(e) =>
-                          setDiscount({
-                            ...discount,
-                            amount: Number(e.target.value),
-                          })
+                          setDiscountAmount(Number(e.target.value))
                         }
                         className="h-8 w-[100px]"
                       />
@@ -1395,10 +1269,7 @@ export default function EditSalesOrderPage() {
                         Order
                       </TableHead>
                       <TableHead className="min-w-[9rem] text-xs font-semibold">
-                        Product *
-                      </TableHead>
-                      <TableHead className="min-w-[7rem] text-xs font-semibold">
-                        Item
+                        Item *
                       </TableHead>
                       <TableHead className="min-w-[10rem] text-xs font-semibold">
                         Description
@@ -1408,9 +1279,6 @@ export default function EditSalesOrderPage() {
                       </TableHead>
                       <TableHead className="min-w-[5.5rem] text-xs font-semibold">
                         Unit price *
-                      </TableHead>
-                      <TableHead className="min-w-[4.5rem] text-xs font-semibold">
-                        Tax %
                       </TableHead>
                       <TableHead className="min-w-[5.5rem] text-right text-xs font-semibold">
                         Total
@@ -1426,8 +1294,7 @@ export default function EditSalesOrderPage() {
                     errors[`qty_${item.id}` as keyof FieldErrors];
                   const lineErrPrice =
                     errors[`price_${item.id}` as keyof FieldErrors];
-                  const lineTotal =
-                    item.quantity * item.unitPrice * (1 + item.tax / 100);
+                  const lineTotal = item.quantity * item.unitPrice;
 
                   return (
                     <TableRow key={item.id} className="align-middle">
@@ -1490,16 +1357,6 @@ export default function EditSalesOrderPage() {
                           ) : null}
                         </div>
                       </TableCell>
-                      <TableCell className="align-middle py-2">
-                        <Input
-                          readOnly
-                          tabIndex={-1}
-                          value={item.item}
-                          placeholder="—"
-                          title={item.item || undefined}
-                          className="h-9 bg-muted/40 pointer-events-none"
-                        />
-                      </TableCell>
                       <TableCell className="max-w-[18rem] whitespace-normal align-middle py-2">
                         <Input
                           value={item.description}
@@ -1558,25 +1415,6 @@ export default function EditSalesOrderPage() {
                             {String(lineErrPrice)}
                           </p>
                         )}
-                      </TableCell>
-                      <TableCell className="align-middle py-2">
-                        <Select
-                          value={item.tax.toString()}
-                          onValueChange={(v) =>
-                            updateLineItem(item.id, "tax", Number(v))
-                          }
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="0">0%</SelectItem>
-                            <SelectItem value="5">5%</SelectItem>
-                            <SelectItem value="10">10%</SelectItem>
-                            <SelectItem value="15">15%</SelectItem>
-                            <SelectItem value="20">20%</SelectItem>
-                          </SelectContent>
-                        </Select>
                       </TableCell>
                       <TableCell className="py-2 text-right align-middle font-medium tabular-nums">
                         {fmtMoney(lineTotal, currency)}
@@ -1642,9 +1480,6 @@ export default function EditSalesOrderPage() {
           <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Select Customer</DialogTitle>
-              <DialogDescription>
-                Choose a customer from your database
-              </DialogDescription>
             </DialogHeader>
 
             <div className="flex flex-1 flex-col space-y-4 overflow-hidden">

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/src/types/supabase";
 import { FEATURE_CODES } from "@/lib/app-nav";
+import {
+  buildCompanyTeamSeatUsage,
+  formatTeamInviteLimitMessage,
+} from "@/lib/company-team-limit";
 import type { TeamMemberRow } from "@/lib/company-team-service";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -84,6 +88,45 @@ async function assertCanManageCompany(
     .maybeSingle();
 
   return !!rf;
+}
+
+type PlanMaxUsersEmbed = { max_users: number };
+
+async function fetchTeamSeatUsage(
+  admin: ReturnType<typeof createAdminClient>,
+  companyId: string,
+) {
+  const { data: company, error: cErr } = await admin
+    .from("companies")
+    .select("max_users_override, plans ( max_users )")
+    .eq("id", companyId)
+    .maybeSingle();
+
+  if (cErr || !company) {
+    return { error: cErr?.message ?? "Company not found." } as const;
+  }
+
+  const rawPlans = (company as { plans?: PlanMaxUsersEmbed | PlanMaxUsersEmbed[] | null })
+    .plans;
+  const planRow = Array.isArray(rawPlans) ? rawPlans[0] ?? null : rawPlans ?? null;
+
+  const { count, error: countErr } = await admin
+    .from("company_users")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId);
+
+  if (countErr) {
+    return { error: countErr.message } as const;
+  }
+
+  return {
+    usage: buildCompanyTeamSeatUsage({
+      planMaxUsers: planRow ? Number(planRow.max_users) : 0,
+      maxUsersOverride: (company as { max_users_override: number | null })
+        .max_users_override,
+      currentMemberCount: count ?? 0,
+    }),
+  } as const;
 }
 
 function mapCompanyUsersToTeamRows(
@@ -217,7 +260,12 @@ export async function GET(req: NextRequest) {
   );
 
   const teamRows = mapCompanyUsersToTeamRows(members, profileById);
-  return NextResponse.json({ members: teamRows });
+
+  const seatResult = await fetchTeamSeatUsage(admin, company_id);
+  const seatUsage =
+    "usage" in seatResult && seatResult.usage ? seatResult.usage : undefined;
+
+  return NextResponse.json({ members: teamRows, seatUsage });
 }
 
 export async function POST(req: NextRequest) {
@@ -286,6 +334,20 @@ export async function POST(req: NextRequest) {
 
   if (!roleRow) {
     return NextResponse.json({ error: "Invalid role for this company." }, { status: 400 });
+  }
+
+  const seatResult = await fetchTeamSeatUsage(admin, company_id);
+  if ("error" in seatResult && seatResult.error) {
+    return NextResponse.json(
+      { error: seatResult.error },
+      { status: 400 },
+    );
+  }
+  if ("usage" in seatResult && seatResult.usage && !seatResult.usage.canInvite) {
+    return NextResponse.json(
+      { error: formatTeamInviteLimitMessage(seatResult.usage) },
+      { status: 403 },
+    );
   }
 
   const siteUrl = getSiteUrl(req);

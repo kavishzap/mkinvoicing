@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -121,12 +123,18 @@ export function CompanyRolesSettings() {
       <div className="space-y-4">
         <div className="flex flex-col gap-4 border-b border-border/60 pb-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-2">
-            <div className="h-5 w-48 max-w-full animate-pulse rounded bg-muted" />
-            <div className="h-4 w-72 max-w-full animate-pulse rounded bg-muted" />
+            <Skeleton className="h-5 w-48 max-w-full" />
+            <Skeleton className="h-4 w-72 max-w-full" />
           </div>
-          <div className="h-9 w-36 shrink-0 animate-pulse rounded-md bg-muted" />
+          <Skeleton className="h-9 w-36 shrink-0" />
         </div>
-        <div className="h-44 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
+        <Card>
+          <CardContent className="space-y-3 pt-6">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-4/5" />
+          </CardContent>
+        </Card>
       </div>
     );
   }

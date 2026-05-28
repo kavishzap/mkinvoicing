@@ -12,6 +12,7 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -147,9 +148,7 @@ export default function PayrollRunDetailPage() {
   if (loading) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="flex min-h-[200px] items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
+        <DetailDocumentPageSkeleton />
       </AppPageShell>
     );
   }

@@ -2,7 +2,8 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import nextDynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -28,20 +29,47 @@ import {
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-status-badge";
 import { SalesOrderStatusBadge } from "@/components/sales-order-status-badge";
-import { SalesOrderViewActions } from "@/components/sales-order-view-actions";
 import { CustomerInfoDialog } from "@/components/customer-info-dialog";
 import {
   getSalesOrder,
+  getCachedSalesOrder,
   computeSalesOrderTotals,
+  invalidateSalesOrderCaches,
+  clientInfoFromBillSnapshot,
   normalizeSalesOrderFulfillmentStatus,
   salesOrderFulfillmentAllowsEditing,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
+import { useToast } from "@/hooks/use-toast";
+import { getCustomer } from "@/lib/customers-service";
 import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
+import {
+  getInvoiceForSalesOrder,
+  type InvoiceLinkForSalesOrder,
+} from "@/lib/invoices-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { cn } from "@/lib/utils";
+
+const SalesOrderViewActions = nextDynamic(
+  () =>
+    import("@/components/sales-order-view-actions").then(
+      (m) => m.SalesOrderViewActions,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-9 w-48 animate-pulse rounded-md bg-muted/70" />
+    ),
+  },
+);
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -119,13 +147,22 @@ export default function SalesOrderViewPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = params.id;
+  const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [salesOrder, setSalesOrder] = useState<SalesOrderDetail | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deliveryCities, setDeliveryCities] = useState<DeliveryCityRow[]>([]);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
+  const [linkedInvoice, setLinkedInvoice] =
+    useState<InvoiceLinkForSalesOrder | null>(null);
+  const [customerRecordName, setCustomerRecordName] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -135,41 +172,119 @@ export default function SalesOrderViewPage() {
   }, [id, router, searchParams]);
 
   useEffect(() => {
+    const bump = () => {
+      invalidateSalesOrderCaches();
+      setRefreshKey((n) => n + 1);
+    };
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!id) return;
     let cancelled = false;
+
     (async () => {
-      setLoading(true);
       setError(null);
-      setSalesOrder(null);
-      setProfile(null);
+      setLinkedInvoice(null);
+      setCustomerRecordName(null);
+
+      const companyId = await getActiveCompanyId();
+      const cached = companyId
+        ? getCachedSalesOrder(companyId, id, "view")
+        : null;
+      if (cancelled) return;
+
+      if (cached) {
+        setSalesOrder(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+        setSalesOrder(null);
+      }
+
+      const citiesPromise = listDeliveryCities().catch(
+        () => [] as DeliveryCityRow[],
+      );
+      const profilePromise = fetchProfile().catch(() => null);
+
       try {
-        const [q, cityRows, prof] = await Promise.all([
-          getSalesOrder(id, { mode: "view" }),
-          listDeliveryCities().catch(() => [] as DeliveryCityRow[]),
-          fetchProfile().catch(() => null),
+        const q = await getSalesOrder(id, { mode: "view" });
+        if (cancelled) return;
+
+        if (!q) {
+          setSalesOrder(null);
+          setError("Sales order not found.");
+          setLoading(false);
+          return;
+        }
+
+        setSalesOrder(q);
+        setLoading(false);
+
+        const [cityRows, prof] = await Promise.all([
+          citiesPromise,
+          profilePromise,
         ]);
         if (cancelled) return;
         setDeliveryCities(cityRows);
         if (prof) setProfile(prof);
-        if (!q) {
-          setSalesOrder(null);
-          setError("Sales order not found.");
-        } else {
-          setSalesOrder(q);
+
+        const billSnap = q.bill_to_snapshot as {
+          type?: string;
+          company_name?: string;
+          full_name?: string;
+        };
+        const snapshotName =
+          billSnap?.type === "company"
+            ? billSnap.company_name
+            : billSnap?.full_name;
+        const needsCustomerFetch =
+          Boolean(q.customer_id) && !String(snapshotName ?? "").trim();
+
+        const [invoiceLink, customerRow] = await Promise.all([
+          getInvoiceForSalesOrder(id).catch(() => null),
+          needsCustomerFetch && q.customer_id
+            ? getCustomer(q.customer_id).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        setLinkedInvoice(invoiceLink);
+        if (customerRow) {
+          const name =
+            customerRow.type === "company"
+              ? customerRow.companyName?.trim() ||
+                customerRow.contactName?.trim() ||
+                ""
+              : customerRow.fullName?.trim() || "";
+          setCustomerRecordName(name || null);
         }
       } catch (e: unknown) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : "Failed to load.");
           setSalesOrder(null);
+          setLoading(false);
+          toastRef.current({
+            title: "Failed to load sales order",
+            description:
+              e instanceof Error ? e.message : "Please try again.",
+            variant: "destructive",
+          });
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, refreshKey]);
 
   const orderedItems = useMemo(
     () =>
@@ -198,10 +313,28 @@ export default function SalesOrderViewPage() {
       const n = deliveryCities.find((c) => c.id === cid)?.name;
       if (n) return n;
     }
-    const snap = salesOrder.bill_to_snapshot as { city?: string } | undefined;
-    const raw = snap?.city;
-    return raw ? String(raw) : "";
+    const ci = clientInfoFromBillSnapshot(salesOrder.bill_to_snapshot);
+    return ci.city.trim();
   }, [salesOrder, deliveryCities]);
+
+  const billAddressDisplay = useMemo(() => {
+    if (!salesOrder) return "";
+    const ci = clientInfoFromBillSnapshot(salesOrder.bill_to_snapshot);
+    return ci.address_line_1.trim() || ci.street.trim();
+  }, [salesOrder]);
+
+  const customerShortcutLabel = useMemo(() => {
+    if (!salesOrder) return "View customer";
+    const snap = salesOrder.bill_to_snapshot as {
+      type?: string;
+      company_name?: string;
+      full_name?: string;
+    };
+    const snapshotName =
+      snap?.type === "company" ? snap.company_name : snap.full_name;
+    const name = String(snapshotName ?? "").trim() || customerRecordName?.trim();
+    return name || "View customer";
+  }, [salesOrder, customerRecordName]);
 
   if (!loading && !salesOrder) {
     return (
@@ -227,19 +360,12 @@ export default function SalesOrderViewPage() {
   if (loading || !salesOrder) {
     return (
       <AppPageShell fillHeight className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm">
-          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-          </div>
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        </div>
+        <DetailDocumentPageSkeleton />
       </AppPageShell>
     );
   }
 
-  const { subtotal, taxTotal, discount, shipping, total } =
+  const { subtotal, discount, shipping, total } =
     computeSalesOrderTotals(salesOrder);
   const ccy = salesOrder.currency;
 
@@ -252,10 +378,6 @@ export default function SalesOrderViewPage() {
     full_name?: string;
     email?: string;
     phone?: string;
-    street?: string;
-    city?: string;
-    postal?: string;
-    country?: string;
   };
 
   const billName =
@@ -277,8 +399,6 @@ export default function SalesOrderViewPage() {
           </Link>
         </Button>
       }
-      subtitle={`${salesOrder.number}${billName ? ` · ${billName}` : ""}`}
-      subtitleClassName="w-full min-w-0 max-w-none"
       actions={
         canEditSalesOrder ? (
           <Button asChild className="gap-2 rounded-md font-semibold shadow-sm">
@@ -349,27 +469,31 @@ export default function SalesOrderViewPage() {
           <SectionCard icon={billToIcon} title="Bill to">
             <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
               <div className="space-y-3">
-                <InfoRow label="Customer">{billName || "—"}</InfoRow>
+                <InfoRow label="Customer">
+                  {salesOrder.customer_id ? (
+                    <button
+                      type="button"
+                      onClick={() => setCustomerDialogOpen(true)}
+                      className="font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
+                    >
+                      {customerShortcutLabel}
+                    </button>
+                  ) : (
+                    billName || "—"
+                  )}
+                </InfoRow>
                 {bill?.email ? <InfoRow label="Email">{bill.email}</InfoRow> : null}
                 {bill?.phone ? <InfoRow label="Phone">{bill.phone}</InfoRow> : null}
-                {(bill?.street ||
-                  billCityDisplay ||
-                  bill?.postal ||
-                  bill?.country) && (
+                {billCityDisplay ? (
+                  <InfoRow label="City">{billCityDisplay}</InfoRow>
+                ) : null}
+                {billAddressDisplay ? (
                   <InfoRow label="Address">
-                    <span className="block font-normal leading-relaxed">
-                      {bill?.street ? <>{bill.street}</> : null}
-                      {bill?.street && (billCityDisplay || bill?.postal) ? <br /> : null}
-                      {[billCityDisplay, bill?.postal].filter(Boolean).join(", ")}
-                      {bill?.country ? (
-                        <>
-                          {(billCityDisplay || bill?.postal) ? <br /> : null}
-                          {bill.country}
-                        </>
-                      ) : null}
+                    <span className="font-normal leading-relaxed">
+                      {billAddressDisplay}
                     </span>
                   </InfoRow>
-                )}
+                ) : null}
               </div>
 
               <div className="space-y-3 sm:border-l sm:border-border/60 sm:pl-6">
@@ -392,15 +516,14 @@ export default function SalesOrderViewPage() {
                     </Link>
                   </InfoRow>
                 ) : null}
-                {salesOrder.customer_id ? (
-                  <InfoRow label="Linked customer">
-                    <button
-                      type="button"
-                      onClick={() => setCustomerDialogOpen(true)}
-                      className="font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
+                {linkedInvoice ? (
+                  <InfoRow label="Invoice">
+                    <Link
+                      href={`/app/invoices/${linkedInvoice.id}`}
+                      className="font-medium text-primary underline underline-offset-2"
                     >
-                      View customer
-                    </button>
+                      {linkedInvoice.number}
+                    </Link>
                   </InfoRow>
                 ) : null}
               </div>
@@ -413,12 +536,6 @@ export default function SalesOrderViewPage() {
                 <span className="text-muted-foreground">Subtotal</span>
                 <span className="tabular-nums font-medium">
                   {fmtMoney(subtotal, ccy)}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Tax</span>
-                <span className="tabular-nums font-medium">
-                  {fmtMoney(taxTotal, ccy)}
                 </span>
               </div>
               {discount > 0 ? (
@@ -451,47 +568,45 @@ export default function SalesOrderViewPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="text-xs font-semibold">Catalog</TableHead>
-                  <TableHead className="text-xs font-semibold">SKU</TableHead>
                   <TableHead className="text-xs font-semibold">Item</TableHead>
+                  <TableHead className="text-xs font-semibold">SKU</TableHead>
                   <TableHead className="text-xs font-semibold">Description</TableHead>
                   <TableHead className="text-right text-xs font-semibold">Qty</TableHead>
                   <TableHead className="text-right text-xs font-semibold">Price</TableHead>
-                  <TableHead className="text-right text-xs font-semibold">Tax</TableHead>
                   <TableHead className="text-right text-xs font-semibold">Line total</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {orderedItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                       No line items.
                     </TableCell>
                   </TableRow>
                 ) : (
                   orderedItems.map((it, idx) => {
-                    const line = Number(it.quantity) * Number(it.unit_price);
-                    const taxAmt = line * (Number(it.tax_percent) / 100);
-                    const lineTotal = line + taxAmt;
+                    const lineTotal =
+                      Number(it.quantity) * Number(it.unit_price);
                     const pid = it.product_id?.trim();
+                    const itemLabel =
+                      it.product_name?.trim() || it.item?.trim() || "—";
                     return (
                       <TableRow key={`${it.item}-${idx}`}>
-                        <TableCell className="max-w-[160px]">
+                        <TableCell className="max-w-[200px]">
                           {pid ? (
                             <Link
                               href={`/app/products/${pid}`}
                               className="font-medium text-primary underline-offset-2 hover:underline line-clamp-2"
                             >
-                              {it.product_name?.trim() || it.item}
+                              {itemLabel}
                             </Link>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="font-medium">{itemLabel}</span>
                           )}
                         </TableCell>
                         <TableCell className="tabular-nums text-muted-foreground">
                           {it.product_sku?.trim() || "—"}
                         </TableCell>
-                        <TableCell className="font-medium">{it.item}</TableCell>
                         <TableCell className="max-w-[220px] text-muted-foreground">
                           {it.description || "—"}
                         </TableCell>
@@ -500,9 +615,6 @@ export default function SalesOrderViewPage() {
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {fmtMoney(Number(it.unit_price), ccy)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {it.tax_percent}%
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-medium">
                           {fmtMoney(lineTotal, ccy)}
@@ -530,9 +642,6 @@ export default function SalesOrderViewPage() {
               {salesOrder.terms ? (
                 <div>
                   <p className={fieldLabelClass}>Terms &amp; conditions</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                    {salesOrder.terms}
-                  </p>
                 </div>
               ) : null}
             </div>

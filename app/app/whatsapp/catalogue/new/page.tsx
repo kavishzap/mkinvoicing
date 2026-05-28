@@ -75,7 +75,7 @@ export default function NewWhatsAppCataloguePostPage() {
         imageMimeType: imageMime,
       });
       toast({ title: "Post created" });
-      router.push("/app/whatsapp/catalogue");
+      router.push("/app/whatsapp?tab=catalogue");
     } catch (err: unknown) {
       toast({
         title: "Save failed",
@@ -92,7 +92,7 @@ export default function NewWhatsAppCataloguePostPage() {
       subtitle="Image is stored as Base64 (optional). You can share the post from the catalogue list."
       leading={
         <Button variant="ghost" size="icon" asChild aria-label="Back">
-          <Link href="/app/whatsapp/catalogue">
+          <Link href="/app/whatsapp?tab=catalogue">
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
@@ -100,7 +100,7 @@ export default function NewWhatsAppCataloguePostPage() {
       actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" type="button" asChild>
-            <Link href="/app/whatsapp/catalogue">Cancel</Link>
+            <Link href="/app/whatsapp?tab=catalogue">Cancel</Link>
           </Button>
           <Button type="submit" form="wa-catalogue-new" disabled={saving}>
             {saving ? "Saving…" : "Create post"}

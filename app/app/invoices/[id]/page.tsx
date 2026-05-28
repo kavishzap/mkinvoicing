@@ -1,31 +1,68 @@
 "use client";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import nextDynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
-import { InvoiceViewActions } from "@/components/invoice-view-actions";
 import { CompactBillToSummary } from "@/components/compact-bill-to-summary";
 import { useToast } from "@/hooks/use-toast";
 
 import {
   getInvoice,
+  getCachedInvoice,
   computeTotals,
+  invalidateInvoiceCaches,
   type InvoiceDetail,
+  type InvoiceItemRow,
 } from "@/lib/invoices-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 
+const InvoiceViewActions = nextDynamic(
+  () =>
+    import("@/components/invoice-view-actions").then((m) => m.InvoiceViewActions),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-9 w-48 animate-pulse rounded-md bg-muted/70" />
+    ),
+  },
+);
+
+function formatInvoiceDate(d: string) {
+  return new Date(d).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function formatInvoiceMoney(amt: number, currency: string) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  }).format(amt);
+}
+
 export default function InvoiceViewPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState<InvoiceDetail | null>(null);
@@ -34,65 +71,114 @@ export default function InvoiceViewPage() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
+    const bump = () => {
+      invalidateInvoiceCaches();
+      setRefreshKey((n) => n + 1);
+    };
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!id) return;
     let cancelled = false;
 
     setError(null);
-    setLoading(true);
 
-    /*
-     * Kick off both requests in parallel but render the page as soon as the
-     * invoice resolves — the profile is only used for fallback fields (logo,
-     * sender name/email) and doesn't need to block the main view. Profile
-     * fills in moments later if it lags behind. `fetchProfile` is also cached
-     * for the session, so subsequent navigations resolve it instantly.
-     */
-    const invoicePromise = getInvoice(id);
-    const profilePromise = fetchProfile();
+    (async () => {
+      const companyId = await getActiveCompanyId();
+      const cached = companyId ? getCachedInvoice(companyId, id) : null;
+      if (cancelled) return;
 
-    invoicePromise
-      .then((inv) => {
-        if (cancelled) return;
-        setInvoice(inv);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setInvoice(null);
-        setError(e instanceof Error ? e.message : "Failed to load invoice.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      if (cached) {
+        setInvoice(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
 
-    profilePromise
-      .then((prof) => {
-        if (!cancelled) setProfile(prof);
-      })
-      .catch(() => {
-        if (!cancelled) setProfile(null);
-      });
+      /*
+       * Kick off both requests in parallel but render the page as soon as the
+       * invoice resolves — the profile is only used for fallback fields (logo,
+       * sender name/email) and doesn't need to block the main view. Profile
+       * fills in moments later if it lags behind. `fetchProfile` is also cached
+       * for the session, so subsequent navigations resolve it instantly.
+       */
+      const invoicePromise = getInvoice(id);
+      const profilePromise = fetchProfile();
+
+      invoicePromise
+        .then((inv) => {
+          if (cancelled) return;
+          setInvoice(inv);
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          setInvoice(null);
+          setError(
+            e instanceof Error ? e.message : "Failed to load invoice.",
+          );
+          toastRef.current({
+            title: "Failed to load invoice",
+            description:
+              e instanceof Error ? e.message : "Please try again.",
+            variant: "destructive",
+          });
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+
+      profilePromise
+        .then((prof) => {
+          if (!cancelled) setProfile(prof);
+        })
+        .catch(() => {
+          if (!cancelled) setProfile(null);
+        });
+    })();
 
     return () => {
       cancelled = true;
     };
   }, [id, refreshKey]);
 
-  const fmtDate = (d: string) =>
-    new Date(d).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
+  const totals = useMemo(
+    () => (invoice ? computeTotals(invoice) : null),
+    [invoice],
+  );
 
-  const fmtMoney = (amt: number, ccy: string) =>
-    new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(
-      amt
-    );
+  const display = useMemo(() => {
+    if (!invoice || !totals) return null;
+    const bill = (invoice.bill_to_snapshot || {}) as Record<string, unknown>;
+    const from = invoice.from_snapshot || {};
+    const amountPaid = invoice.amount_paid || 0;
+    const amountDue = Math.max(0, totals.total - amountPaid);
+    const billName =
+      bill.type === "company"
+        ? String(bill.company_name ?? "")
+        : String(bill.full_name ?? "");
+    return { bill, from, amountPaid, amountDue, billName };
+  }, [invoice, totals]);
+
+  const moneyFmt = useMemo(
+    () =>
+      invoice
+        ? (amt: number) => formatInvoiceMoney(amt, invoice.currency)
+        : null,
+    [invoice],
+  );
 
   if (!loading && !invoice) {
     return (
       <AppPageShell
-        fillHeight
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
         titleBefore={
           <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
@@ -103,8 +189,8 @@ export default function InvoiceViewPage() {
         }
         subtitle="We couldn’t find that invoice."
       >
-        <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-          <div className="flex flex-1 flex-col items-center justify-center py-16 text-center">
+        <div className="rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+          <div className="flex flex-col items-center justify-center py-16 text-center">
             <h2 className="text-xl font-semibold">Invoice not found</h2>
             {error ? (
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
@@ -124,7 +210,6 @@ export default function InvoiceViewPage() {
   if (loading || !invoice) {
     return (
       <AppPageShell
-        fillHeight
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
         titleBefore={
           <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
@@ -135,26 +220,13 @@ export default function InvoiceViewPage() {
         }
         subtitle="Loading invoice…"
       >
-        <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-          <div className="mt-6 h-96 flex-1 animate-pulse rounded-lg bg-muted" />
-        </div>
+        <DetailDocumentPageSkeleton />
       </AppPageShell>
     );
   }
 
-  const { subtotal, taxTotal, discount, total } = computeTotals(invoice);
-  const bill = (invoice.bill_to_snapshot || {}) as Record<string, unknown>;
-  const from = invoice.from_snapshot || {};
-  
-  // Calculate amount due: always calculate from total - amount_paid to ensure accuracy
-  const amountPaid = invoice.amount_paid || 0;
-  const amountDue = Math.max(0, total - amountPaid);
-
-  const billName =
-    bill.type === "company"
-      ? String(bill.company_name ?? "")
-      : String(bill.full_name ?? "");
+  const { subtotal, taxTotal, discount, total } = totals!;
+  const { bill, from, amountPaid, amountDue, billName } = display!;
 
   const safeProfile = {
     accountType: profile?.accountType ?? "individual",
@@ -179,7 +251,6 @@ export default function InvoiceViewPage() {
 
   return (
     <AppPageShell
-      fillHeight
       className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       titleBefore={
         <Button variant="ghost" size="icon" asChild aria-label="Back to invoices">
@@ -188,7 +259,6 @@ export default function InvoiceViewPage() {
           </Link>
         </Button>
       }
-      subtitle={`${invoice.number}${billName ? ` · ${billName}` : ""} — Review lines and totals below.`}
       belowSubtitle={
         <InvoiceViewActions
           invoiceId={invoice.id}
@@ -213,8 +283,8 @@ export default function InvoiceViewPage() {
         />
       }
     >
-      <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-        <div className="min-h-0 flex-1 space-y-6 sm:space-y-8">
+      <div className="h-auto w-full rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+        <div className="space-y-6 sm:space-y-8">
           <Card className="border-0 shadow-none">
             <CardContent className="space-y-6 p-0 sm:space-y-8">
               {/* Header */}
@@ -275,13 +345,17 @@ export default function InvoiceViewPage() {
                     <p className="text-sm font-semibold text-muted-foreground">
                       Issue Date
                     </p>
-                    <p className="font-medium">{fmtDate(invoice.issue_date)}</p>
+                    <p className="font-medium">
+                      {formatInvoiceDate(invoice.issue_date)}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-muted-foreground">
                       Due Date
                     </p>
-                    <p className="font-medium">{fmtDate(invoice.due_date)}</p>
+                    <p className="font-medium">
+                      {formatInvoiceDate(invoice.due_date)}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-muted-foreground">
@@ -317,7 +391,8 @@ export default function InvoiceViewPage() {
                           href={`/app/sales-orders/${invoice.created_from_sales_order_id}`}
                           className="block text-sm font-medium text-primary underline"
                         >
-                          Open sales order
+                          {invoice.createdFromSalesOrderNumber ||
+                            "View sales order"}
                         </Link>
                       )}
                     </div>
@@ -368,44 +443,18 @@ export default function InvoiceViewPage() {
                           Price
                         </th>
                         <th className="text-right py-3 text-sm font-semibold text-muted-foreground">
-                          Tax
-                        </th>
-                        <th className="text-right py-3 text-sm font-semibold text-muted-foreground">
                           Total
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {invoice.items.map((it, idx) => {
-                        const line =
-                          Number(it.quantity) * Number(it.unit_price);
-                        const taxAmt = line * (Number(it.tax_percent) / 100);
-                        const lineTotal = line + taxAmt;
-                        return (
-                          <tr key={idx} className="border-b">
-                            <td className="py-4 font-medium">{it.item}</td>
-                            <td className="py-4 text-sm text-muted-foreground">
-                              {it.description || ""}
-                            </td>
-                            <td className="py-4 text-right">{it.quantity}</td>
-                            <td className="py-4 text-right">
-                              {new Intl.NumberFormat("en-US", {
-                                style: "currency",
-                                currency: invoice.currency,
-                              }).format(Number(it.unit_price))}
-                            </td>
-                            <td className="py-4 text-right">
-                              {it.tax_percent}%
-                            </td>
-                            <td className="py-4 text-right font-medium">
-                              {new Intl.NumberFormat("en-US", {
-                                style: "currency",
-                                currency: invoice.currency,
-                              }).format(lineTotal)}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {invoice.items.map((it, idx) => (
+                        <InvoiceLineRow
+                          key={idx}
+                          item={it}
+                          formatMoney={moneyFmt!}
+                        />
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -415,64 +464,39 @@ export default function InvoiceViewPage() {
                   <div className="w-full max-w-xs space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Subtotal</span>
-                      <span>
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: invoice.currency,
-                        }).format(subtotal)}
-                      </span>
+                      <span>{moneyFmt!(subtotal)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Tax</span>
-                      <span>
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: invoice.currency,
-                        }).format(taxTotal)}
-                      </span>
+                      <span>{moneyFmt!(taxTotal)}</span>
                     </div>
                     {discount > 0 && (
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Discount</span>
-                        <span>
-                          -
-                          {new Intl.NumberFormat("en-US", {
-                            style: "currency",
-                            currency: invoice.currency,
-                          }).format(discount)}
-                        </span>
+                        <span>-{moneyFmt!(discount)}</span>
                       </div>
                     )}
                     <Separator />
                     <div className="flex justify-between text-base font-bold">
                       <span>Total</span>
-                      <span>
-                        {new Intl.NumberFormat("en-US", {
-                          style: "currency",
-                          currency: invoice.currency,
-                        }).format(total)}
-                      </span>
+                      <span>{moneyFmt!(total)}</span>
                     </div>
                     <Separator />
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">Amount Paid</span>
-                        <span className="font-medium">
-                          {new Intl.NumberFormat("en-US", {
-                            style: "currency",
-                            currency: invoice.currency,
-                          }).format(amountPaid)}
-                        </span>
+                        <span className="font-medium">{moneyFmt!(amountPaid)}</span>
                       </div>
                       <div className="flex justify-between text-sm font-semibold">
                         <span className={amountDue > 0 ? "text-destructive" : "text-green-600"}>
                           Amount Due
                         </span>
-                        <span className={amountDue > 0 ? "text-destructive" : "text-green-600"}>
-                          {new Intl.NumberFormat("en-US", {
-                            style: "currency",
-                            currency: invoice.currency,
-                          }).format(amountDue)}
+                        <span
+                          className={
+                            amountDue > 0 ? "text-destructive" : "text-green-600"
+                          }
+                        >
+                          {moneyFmt!(amountDue)}
                         </span>
                       </div>
                     </div>
@@ -519,5 +543,30 @@ export default function InvoiceViewPage() {
         </div>
       </div>
     </AppPageShell>
+  );
+}
+
+function InvoiceLineRow({
+  item,
+  formatMoney,
+}: {
+  item: InvoiceItemRow;
+  formatMoney: (amt: number) => string;
+}) {
+  const line = Number(item.quantity) * Number(item.unit_price);
+  const taxAmt = line * (Number(item.tax_percent) / 100);
+  const lineTotal = line + taxAmt;
+  return (
+    <tr className="border-b">
+      <td className="py-4 font-medium">{item.item}</td>
+      <td className="py-4 text-sm text-muted-foreground">
+        {item.description || ""}
+      </td>
+      <td className="py-4 text-right">{item.quantity}</td>
+      <td className="py-4 text-right">
+        {formatMoney(Number(item.unit_price))}
+      </td>
+      <td className="py-4 text-right font-medium">{formatMoney(lineTotal)}</td>
+    </tr>
   );
 }

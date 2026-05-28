@@ -1,5 +1,6 @@
 "use client";
 
+import { SettingsTwoColumnSkeleton, FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -165,8 +166,7 @@ export default function EditCompanyRolePage() {
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       >
         <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-          <div className="h-9 w-48 max-w-full animate-pulse rounded-lg bg-muted" />
-          <div className="h-64 animate-pulse rounded-lg bg-muted" />
+          <FormTwoColumnPageSkeleton withLineItems={false} />
         </div>
       </AppPageShell>
     );

@@ -1,4 +1,5 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -138,6 +139,20 @@ function arrayMove<T>(arr: T[], fromIndex: number, toIndex: number): T[] {
   return next;
 }
 
+function sameZoneCityOrder(
+  a: DeliveryZoneCityRow[],
+  b: DeliveryZoneCityRow[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((row, i) => row.id === b[i]?.id);
+}
+
+function withSequentialSortOrder(
+  rows: DeliveryZoneCityRow[],
+): DeliveryZoneCityRow[] {
+  return rows.map((r, idx) => ({ ...r, sortOrder: idx + 1 }));
+}
+
 export default function DeliveryZoneDetailPage() {
   const params = useParams<{ id: string }>();
   const { toast } = useToast();
@@ -178,7 +193,15 @@ export default function DeliveryZoneDetailPage() {
   const [draggingAssignmentId, setDraggingAssignmentId] = useState<
     string | null
   >(null);
+  const [pendingZoneCityOrder, setPendingZoneCityOrder] = useState<
+    DeliveryZoneCityRow[] | null
+  >(null);
   const [savingReorder, setSavingReorder] = useState(false);
+
+  const displayedZoneCities = pendingZoneCityOrder ?? zoneCities;
+  const hasUnsavedOrderChanges =
+    pendingZoneCityOrder !== null &&
+    !sameZoneCityOrder(pendingZoneCityOrder, zoneCities);
 
   const reload = useCallback(async () => {
     if (!id) return;
@@ -190,6 +213,7 @@ export default function DeliveryZoneDetailPage() {
     }
     setZone(z);
     setZoneCities(zc);
+    setPendingZoneCityOrder(null);
     setCities(cityRows);
     setDrivers(teamDriverMembers(teamRows));
     setForm({
@@ -299,6 +323,7 @@ export default function DeliveryZoneDetailPage() {
       setAssignCityId("");
       const rows = await listZoneCities(id);
       setZoneCities(rows);
+      setPendingZoneCityOrder(null);
       toast({ title: "City assigned" });
     } catch (e: unknown) {
       toast({
@@ -334,6 +359,7 @@ export default function DeliveryZoneDetailPage() {
       });
       const rows = await listZoneCities(id);
       setZoneCities(rows);
+      setPendingZoneCityOrder(null);
       toast({ title: "Assignment updated" });
       cancelEdit();
     } catch (e: unknown) {
@@ -347,19 +373,21 @@ export default function DeliveryZoneDetailPage() {
     }
   }
 
+  function cancelPendingRouteOrder() {
+    setPendingZoneCityOrder(null);
+  }
+
   async function persistZoneCityOrder(ordered: DeliveryZoneCityRow[]) {
     const n = ordered.length;
     if (n === 0) return;
     const TEMP_BASE = 100_000;
-    const optimistic = ordered.map((r, idx) => ({
-      ...r,
-      sortOrder: idx + 1,
-    }));
-    setZoneCities(optimistic);
+    const sequential = withSequentialSortOrder(ordered);
+    setZoneCities(sequential);
+    setPendingZoneCityOrder(null);
     try {
       setSavingReorder(true);
       for (let i = 0; i < n; i++) {
-        const row = ordered[i];
+        const row = sequential[i];
         await updateZoneCityAssignment({
           assignmentId: row.id,
           cityId: row.cityId,
@@ -367,7 +395,7 @@ export default function DeliveryZoneDetailPage() {
         });
       }
       for (let i = 0; i < n; i++) {
-        const row = ordered[i];
+        const row = sequential[i];
         await updateZoneCityAssignment({
           assignmentId: row.id,
           cityId: row.cityId,
@@ -387,6 +415,11 @@ export default function DeliveryZoneDetailPage() {
     }
   }
 
+  async function handleSaveRouteOrder() {
+    if (!hasUnsavedOrderChanges || !pendingZoneCityOrder) return;
+    await persistZoneCityOrder(pendingZoneCityOrder);
+  }
+
   async function confirmRemove() {
     if (!removeTarget) return;
     try {
@@ -394,6 +427,7 @@ export default function DeliveryZoneDetailPage() {
       await removeZoneCityAssignment(removeTarget.id);
       const rows = await listZoneCities(id);
       setZoneCities(rows);
+      setPendingZoneCityOrder(null);
       toast({ title: "City removed from zone" });
       setRemoveTarget(null);
     } catch (e: unknown) {
@@ -410,13 +444,7 @@ export default function DeliveryZoneDetailPage() {
   if (loading) {
     return (
       <AppPageShell fillHeight className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
-        <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm">
-          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-          <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
-          </div>
-        </div>
+        <FormTwoColumnPageSkeleton withLineItems={false} />
       </AppPageShell>
     );
   }
@@ -596,9 +624,36 @@ export default function DeliveryZoneDetailPage() {
 
           <SectionCard icon={MapPinned} title="Assigned cities">
             <p className="text-xs text-muted-foreground">
-              Route order controls stop sequence for this zone. Each city can only
-              appear once per zone.
+              Drag cities to set route order, then click Update order to save.
+              Each city can only appear once per zone.
             </p>
+
+            {hasUnsavedOrderChanges ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200/90 bg-amber-50/80 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/30">
+                <p className="text-xs text-amber-950 dark:text-amber-100">
+                  Route order changed — save when you are done reordering.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={savingReorder}
+                    onClick={() => void handleSaveRouteOrder()}
+                  >
+                    {savingReorder ? "Saving…" : "Update order"}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={savingReorder}
+                    onClick={cancelPendingRouteOrder}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
               <div className="space-y-2">
@@ -656,7 +711,7 @@ export default function DeliveryZoneDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {zoneCities.length === 0 ? (
+                  {displayedZoneCities.length === 0 ? (
                     <TableRow>
                       <TableCell
                         colSpan={4}
@@ -666,7 +721,7 @@ export default function DeliveryZoneDetailPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    zoneCities.map((zc) => {
+                    displayedZoneCities.map((zc) => {
                       const canDrag =
                         editingAssignmentId === null && !savingReorder;
                       return (
@@ -688,20 +743,26 @@ export default function DeliveryZoneDetailPage() {
                               "application/x-zone-city-assignment",
                             );
                             if (!dragId || dragId === zc.id) return;
-                            const fromIndex = zoneCities.findIndex(
+                            const fromIndex = displayedZoneCities.findIndex(
                               (r) => r.id === dragId,
                             );
-                            const toIndex = zoneCities.findIndex(
+                            const toIndex = displayedZoneCities.findIndex(
                               (r) => r.id === zc.id,
                             );
                             if (fromIndex < 0 || toIndex < 0) return;
                             if (fromIndex === toIndex) return;
-                            const newOrder = arrayMove(
-                              zoneCities,
-                              fromIndex,
-                              toIndex,
+                            const newOrder = withSequentialSortOrder(
+                              arrayMove(
+                                displayedZoneCities,
+                                fromIndex,
+                                toIndex,
+                              ),
                             );
-                            void persistZoneCityOrder(newOrder);
+                            if (sameZoneCityOrder(newOrder, zoneCities)) {
+                              setPendingZoneCityOrder(null);
+                            } else {
+                              setPendingZoneCityOrder(newOrder);
+                            }
                           }}
                         >
                           <TableCell className="w-10 px-2 align-middle">

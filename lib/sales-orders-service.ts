@@ -13,9 +13,350 @@ import type { Database } from "@/src/types/supabase";
 /** Only `active` (current) and `expired` (past valid_until or manual). */
 export type SalesOrderStatus = "active" | "expired";
 
+/** Default validity window when valid-until is not shown on the form. */
+export function computeSalesOrderValidUntil(
+  issueDate: string,
+  validForDays = 14,
+): string {
+  const base = new Date(issueDate || new Date().toISOString().split("T")[0]);
+  base.setDate(base.getDate() + (Number(validForDays) || 14));
+  return base.toISOString().split("T")[0];
+}
+
+/** Normalize stored discount to a fixed currency amount (sales orders use amount only). */
+export function resolveDiscountAmount(
+  discountType: "value" | "percent",
+  discountAmount: number,
+  subtotal: number,
+): number {
+  if (discountType === "percent") {
+    return (subtotal * Number(discountAmount || 0)) / 100;
+  }
+  return Number(discountAmount || 0);
+}
+
 /** Fulfillment pipeline; stored as `sales_orders.fulfillment_status`. */
 export type SalesOrderFulfillmentStatus =
   Database["public"]["Enums"]["sales_order_fulfillment_status"];
+
+/** Raw Postgres enum label on `sales_orders.payment_status`. */
+export type SalesOrderPaymentStatusDb =
+  Database["public"]["Enums"]["sales_order_payment_status"];
+
+let cachedFulfillmentEnumLabels: SalesOrderFulfillmentStatus[] | null = null;
+let cachedFulfillmentEnumAt = 0;
+let cachedPaymentEnumLabels: SalesOrderPaymentStatusDb[] | null = null;
+let cachedPaymentEnumAt = 0;
+const SALES_ORDER_ENUM_CACHE_MS = 5 * 60 * 1000;
+
+let cachedDeliveryCitiesByCompany: {
+  companyId: string;
+  at: number;
+  byId: Map<string, string>;
+} | null = null;
+const DELIVERY_CITIES_CACHE_MS = 5 * 60 * 1000;
+
+/** List table projection — embed city name to avoid a separate cities fetch per list request. */
+const SALES_ORDER_LIST_SELECT =
+  "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, cities(name), user_id, notes, customer_id, customers!sales_orders_customer_id_fkey(type, company_name, full_name, contact_name)";
+
+const userDisplayLabelCache = new Map<string, string>();
+
+function escapeIlikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function appendBillToPhoneFilters(
+  filters: string[],
+  trimmed: string,
+  escaped: string,
+) {
+  const pattern = `%${escaped}%`;
+  filters.push(`bill_to_snapshot->>phone.ilike.${pattern}`);
+
+  const digitsOnly = trimmed.replace(/\D/g, "");
+  if (digitsOnly.length >= 2) {
+    const digitPattern = `%${escapeIlikePattern(digitsOnly)}%`;
+    if (digitPattern !== pattern) {
+      filters.push(`bill_to_snapshot->>phone.ilike.${digitPattern}`);
+    }
+  }
+}
+
+const MAX_CUSTOMER_IDS_FOR_SALES_ORDER_SEARCH = 100;
+
+/** Linked customer phones live on `customers`; resolved separately for `.or()`. */
+async function findCustomerIdsForSalesOrderPhoneSearch(
+  companyId: string,
+  raw: string,
+): Promise<string[]> {
+  const trimmed = raw.trim();
+  const digitsOnly = trimmed.replace(/\D/g, "");
+  if (digitsOnly.length < 2 && !/\d/.test(trimmed)) return [];
+
+  const patterns: string[] = [];
+  const escaped = escapeIlikePattern(trimmed);
+  patterns.push(`%${escaped}%`);
+  if (digitsOnly.length >= 2) {
+    const digitPattern = `%${escapeIlikePattern(digitsOnly)}%`;
+    if (!patterns.includes(digitPattern)) patterns.push(digitPattern);
+  }
+
+  const phoneOr = patterns.map((p) => `phone.ilike.${p}`).join(",");
+  const { data, error } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("company_id", companyId)
+    .or(phoneOr)
+    .limit(MAX_CUSTOMER_IDS_FOR_SALES_ORDER_SEARCH);
+
+  if (error) throw error;
+  return (data ?? [])
+    .map((row) => String((row as { id: string }).id ?? ""))
+    .filter(Boolean);
+}
+
+/** Returns a PostgREST `or()` filter string, or null when search should be skipped. */
+function buildSalesOrderSearchOrFilter(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const escaped = escapeIlikePattern(trimmed);
+  const pattern = `%${escaped}%`;
+  const digitsOnly = trimmed.replace(/\D/g, "");
+
+  /** Order refs (e.g. SO-123), not bare phone numbers. */
+  const orderNumberLike =
+    trimmed.length <= 40 &&
+    /^[\w\-/#.]+$/i.test(trimmed) &&
+    /\d/.test(trimmed) &&
+    /[a-z]/i.test(trimmed);
+
+  if (orderNumberLike) {
+    return `number.ilike.${pattern}`;
+  }
+
+  if (trimmed.length < 2 && digitsOnly.length < 2) return null;
+
+  const filters = [
+    `number.ilike.${pattern}`,
+    `bill_to_snapshot->>company_name.ilike.${pattern}`,
+    `bill_to_snapshot->>full_name.ilike.${pattern}`,
+    `bill_to_snapshot->>contact_name.ilike.${pattern}`,
+  ];
+
+  if (digitsOnly.length >= 2 || /\d/.test(trimmed)) {
+    appendBillToPhoneFilters(filters, trimmed, escaped);
+  }
+
+  return filters.join(",");
+}
+
+/** PostgREST `or()` clause for list/export queries (sales_orders columns + customer_id.in). */
+async function buildSalesOrderListSearchOrClause(
+  companyId: string,
+  search?: string,
+): Promise<string | null> {
+  const trimmed = search?.trim();
+  if (!trimmed) return null;
+
+  const baseOr = buildSalesOrderSearchOrFilter(trimmed);
+  const customerIds = await findCustomerIdsForSalesOrderPhoneSearch(
+    companyId,
+    trimmed,
+  );
+
+  const customerIn =
+    customerIds.length > 0
+      ? `customer_id.in.(${customerIds.join(",")})`
+      : null;
+
+  if (baseOr && customerIn) return `${baseOr},${customerIn}`;
+  if (baseOr) return baseOr;
+  if (customerIn) return customerIn;
+  return null;
+}
+
+type SalesOrderListQueryOpts = {
+  search?: string;
+  status?: SalesOrderStatus | "all";
+  fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
+  paymentStatus?: SalesOrderPaymentStatusDb | "all";
+  customerId?: string;
+};
+
+function applySalesOrderListFilters<Q extends {
+  eq: (col: string, val: string) => Q;
+  or: (filters: string) => Q;
+}>(q: Q, opts?: SalesOrderListQueryOpts): Q {
+  if (opts?.status && opts.status !== "all") {
+    q = q.eq("status", opts.status);
+  }
+  if (opts?.fulfillmentStatus && opts.fulfillmentStatus !== "all") {
+    q = q.eq("fulfillment_status", opts.fulfillmentStatus);
+  }
+  if (opts?.paymentStatus && opts.paymentStatus !== "all") {
+    q = q.eq("payment_status", opts.paymentStatus);
+  }
+  const cid = opts?.customerId?.trim();
+  if (cid) {
+    q = q.eq("customer_id", cid);
+  }
+  return q;
+}
+
+async function deliveryCityNameMapForCompany(
+  companyId: string,
+): Promise<Map<string, string>> {
+  if (
+    cachedDeliveryCitiesByCompany &&
+    cachedDeliveryCitiesByCompany.companyId === companyId &&
+    Date.now() - cachedDeliveryCitiesByCompany.at < DELIVERY_CITIES_CACHE_MS
+  ) {
+    return cachedDeliveryCitiesByCompany.byId;
+  }
+
+  const cityRows = await listDeliveryCities();
+  const byId = new Map(cityRows.map((c) => [c.id, c.name] as const));
+  cachedDeliveryCitiesByCompany = {
+    companyId,
+    at: Date.now(),
+    byId,
+  };
+  return byId;
+}
+
+function parseFulfillmentEnumLabel(v: string): SalesOrderFulfillmentStatus | null {
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  return trimmed as SalesOrderFulfillmentStatus;
+}
+
+function dedupeOrderedEnumLabels<T extends string>(labels: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const label of labels) {
+    if (seen.has(label)) continue;
+    seen.add(label);
+    out.push(label);
+  }
+  return out;
+}
+
+function parsePaymentEnumLabel(v: string): SalesOrderPaymentStatusDb | null {
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  if (trimmed === "partial" || trimmed === "partially_paid") return "partial paid";
+  if (
+    trimmed === "unpaid" ||
+    trimmed === "partial paid" ||
+    trimmed === "paid"
+  ) {
+    return trimmed as SalesOrderPaymentStatusDb;
+  }
+  return null;
+}
+
+/** Map stored `payment_status` to the Postgres enum label for filters and counts. */
+export function paymentStatusDbFromRaw(
+  raw: string | null | undefined,
+): SalesOrderPaymentStatusDb {
+  const parsed = parsePaymentEnumLabel(String(raw ?? "unpaid"));
+  if (parsed) return parsed;
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "paid") return "paid";
+  if (v === "partial" || v === "partially_paid") return "partial paid";
+  return "unpaid";
+}
+
+/**
+ * Ordered labels for `public.sales_order_fulfillment_status` from Postgres (`pg_enum`).
+ * Requires RPC `sales_order_fulfillment_status_enum_values` — see `sql/patch_sales_order_status_enum_rpc.sql`.
+ */
+export async function fetchSalesOrderFulfillmentStatusEnumValues(): Promise<
+  SalesOrderFulfillmentStatus[]
+> {
+  if (
+    cachedFulfillmentEnumLabels &&
+    Date.now() - cachedFulfillmentEnumAt < SALES_ORDER_ENUM_CACHE_MS
+  ) {
+    return cachedFulfillmentEnumLabels;
+  }
+
+  const { data, error } = await supabase.rpc(
+    "sales_order_fulfillment_status_enum_values",
+  );
+  if (error) {
+    throw new Error(
+      `${error.message} — apply sql/patch_sales_order_status_enum_rpc.sql in Supabase.`,
+    );
+  }
+  if (!data || !Array.isArray(data)) return [];
+
+  const labels = dedupeOrderedEnumLabels(
+    data
+      .filter((x): x is string => typeof x === "string")
+      .map(parseFulfillmentEnumLabel)
+      .filter((x): x is SalesOrderFulfillmentStatus => x != null),
+  );
+
+  cachedFulfillmentEnumLabels = labels;
+  cachedFulfillmentEnumAt = Date.now();
+  return labels;
+}
+
+/**
+ * Ordered labels for `public.sales_order_payment_status` from Postgres (`pg_enum`).
+ * Requires RPC `sales_order_payment_status_enum_values` — see `sql/patch_sales_order_status_enum_rpc.sql`.
+ */
+export async function fetchSalesOrderPaymentStatusEnumValues(): Promise<
+  SalesOrderPaymentStatusDb[]
+> {
+  if (
+    cachedPaymentEnumLabels &&
+    Date.now() - cachedPaymentEnumAt < SALES_ORDER_ENUM_CACHE_MS
+  ) {
+    return cachedPaymentEnumLabels;
+  }
+
+  const { data, error } = await supabase.rpc(
+    "sales_order_payment_status_enum_values",
+  );
+  if (error) {
+    throw new Error(
+      `${error.message} — apply sql/patch_sales_order_status_enum_rpc.sql in Supabase.`,
+    );
+  }
+  if (!data || !Array.isArray(data)) return [];
+
+  const labels = dedupeOrderedEnumLabels(
+    data
+      .filter((x): x is string => typeof x === "string")
+      .map(parsePaymentEnumLabel)
+      .filter((x): x is SalesOrderPaymentStatusDb => x != null),
+  );
+
+  cachedPaymentEnumLabels = labels;
+  cachedPaymentEnumAt = Date.now();
+  return labels;
+}
+
+export function salesOrderFulfillmentFilterLabel(status: string): string {
+  return salesOrderFulfillmentDisplayLabel(status);
+}
+
+export function salesOrderPaymentFilterLabel(status: string): string {
+  return formatEnumLabel(status);
+}
+
+function formatEnumLabel(enumLabel: string): string {
+  if (!enumLabel.trim()) return "";
+  return enumLabel
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
 
 export const SALES_ORDER_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] = [
   "new",
@@ -45,23 +386,27 @@ const FULFILLMENT_LEGACY: Record<string, SalesOrderFulfillmentStatus> = {
   delivered_to_customer: "delivered to customer",
 };
 
+export function salesOrderFulfillmentDisplayLabel(status: string): string {
+  const v = String(status ?? "").trim();
+  if (!v) return SALES_ORDER_FULFILLMENT_LABELS.new;
+  const normalized = normalizeSalesOrderFulfillmentStatus(v);
+  return (
+    SALES_ORDER_FULFILLMENT_LABELS[
+      normalized as keyof typeof SALES_ORDER_FULFILLMENT_LABELS
+    ] ?? formatEnumLabel(v)
+  );
+}
+
 export function normalizeSalesOrderFulfillmentStatus(
   raw: string | null | undefined
 ): SalesOrderFulfillmentStatus {
   const v = String(raw ?? "").trim();
+  if (!v) return "new";
   const fromLegacy =
     FULFILLMENT_LEGACY[v] ?? FULFILLMENT_LEGACY[v.toLowerCase()];
   if (fromLegacy) return fromLegacy;
-  /** DB enum is lowercase `rescheduled`; accept legacy capital-R from older snapshots. */
-  if (v.toLowerCase() === "rescheduled") return "rescheduled";
-  if (v.toLowerCase() === "pending") return "pending";
-  if (v.toLowerCase() === "completed") return "completed";
-  if (
-    SALES_ORDER_FULFILLMENT_STATUSES.includes(v as SalesOrderFulfillmentStatus)
-  ) {
-    return v as SalesOrderFulfillmentStatus;
-  }
-  return "new";
+  /** Preserve Postgres enum labels (including values added after app codegen). */
+  return v as SalesOrderFulfillmentStatus;
 }
 
 export const SALES_ORDER_FULFILLMENT_LABELS: Record<
@@ -192,7 +537,9 @@ export type SalesOrderListRow = {
   fulfillmentStatus: SalesOrderFulfillmentStatus;
   paymentStatus: SalesOrderPaymentStatus;
   currency: string;
+  /** Bill-to / linked customer display name. */
   clientName: string;
+  customerId: string | null;
   total: number;
   /** Display label for the user who created the order (full name → email → short id). */
   createdByName: string;
@@ -209,6 +556,45 @@ function nameFromBillTo(bill?: Record<string, unknown>) {
   return String(bill.full_name ?? bill.name ?? "");
 }
 
+function nameFromCustomerRecord(
+  c?: {
+    type?: string;
+    company_name?: string | null;
+    full_name?: string | null;
+    contact_name?: string | null;
+  } | null,
+): string {
+  if (!c) return "";
+  if (c.type === "company") {
+    return String(c.company_name ?? c.contact_name ?? "").trim();
+  }
+  return String(c.full_name ?? "").trim();
+}
+
+function customerLinkFromSalesOrderRow(r: Record<string, unknown>): {
+  customerId: string | null;
+  clientName: string;
+} {
+  const customerId =
+    r.customer_id != null && String(r.customer_id).trim()
+      ? String(r.customer_id)
+      : null;
+  const billName = nameFromBillTo(
+    r.bill_to_snapshot as Record<string, unknown>,
+  ).trim();
+  const rel = r.customers;
+  const row = Array.isArray(rel) ? rel[0] : rel;
+  const recordName = nameFromCustomerRecord(
+    row as {
+      type?: string;
+      company_name?: string | null;
+      full_name?: string | null;
+      contact_name?: string | null;
+    } | null,
+  );
+  return { customerId, clientName: billName || recordName };
+}
+
 async function userDisplayMap(
   userIds: string[]
 ): Promise<Map<string, string>> {
@@ -216,37 +602,60 @@ async function userDisplayMap(
   const map = new Map<string, string>();
   if (uniq.length === 0) return map;
 
-  const { data, error } = await supabase
-    .from("user_profiles")
-    .select("id, full_name, email")
-    .in("id", uniq);
+  const missing = uniq.filter((id) => !userDisplayLabelCache.has(id));
+  if (missing.length > 0) {
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("id, full_name, email")
+      .in("id", missing);
 
-  if (error) throw new Error(error.message);
+    if (error) throw new Error(error.message);
 
-  for (const row of data ?? []) {
-    const r = row as {
-      id: string;
-      full_name: string | null;
-      email: string | null;
-    };
-    const label =
-      (r.full_name && r.full_name.trim()) ||
-      (r.email && r.email.trim()) ||
-      r.id.slice(0, 8);
-    map.set(r.id, label);
+    for (const row of data ?? []) {
+      const r = row as {
+        id: string;
+        full_name: string | null;
+        email: string | null;
+      };
+      const label =
+        (r.full_name && r.full_name.trim()) ||
+        (r.email && r.email.trim()) ||
+        r.id.slice(0, 8);
+      userDisplayLabelCache.set(r.id, label);
+    }
+  }
+
+  for (const id of uniq) {
+    map.set(id, userDisplayLabelCache.get(id) ?? id.slice(0, 8));
   }
   return map;
 }
 
+function embeddedCityName(citiesField: unknown): string {
+  if (citiesField == null) return "";
+  if (Array.isArray(citiesField)) {
+    const first = citiesField[0] as { name?: unknown } | undefined;
+    return String(first?.name ?? "").trim();
+  }
+  if (typeof citiesField === "object" && "name" in (citiesField as object)) {
+    return String((citiesField as { name: unknown }).name ?? "").trim();
+  }
+  return "";
+}
+
 function cityLabelFromListRow(
-  r: { city_id?: unknown; bill_to_snapshot?: unknown },
-  cityById: Map<string, string>,
+  r: { city_id?: unknown; bill_to_snapshot?: unknown; cities?: unknown },
+  cityById?: Map<string, string>,
 ): string {
+  const embedded = embeddedCityName(r.cities);
+  if (embedded) return embedded;
+
   const cid =
     r.city_id != null && String(r.city_id).trim()
       ? String(r.city_id)
       : "";
-  if (cid && cityById.has(cid)) return cityById.get(cid)!;
+  if (cid && cityById?.has(cid)) return cityById.get(cid)!;
+
   const bill = r.bill_to_snapshot as Record<string, unknown> | undefined;
   if (!bill) return "";
   return String(bill.city ?? "").trim();
@@ -254,8 +663,10 @@ function cityLabelFromListRow(
 
 async function finishSalesOrderListRows(
   rawRows: Array<Record<string, unknown>>,
-  cityById: Map<string, string>,
+  cityById?: Map<string, string>,
 ): Promise<SalesOrderListRow[]> {
+  if (rawRows.length === 0) return [];
+
   const creatorIds = rawRows
     .map((r) => (r.user_id != null ? String(r.user_id) : ""))
     .filter(Boolean);
@@ -266,6 +677,7 @@ async function finishSalesOrderListRows(
     const createdByName = creatorId
       ? creatorNames.get(creatorId) ?? creatorId.slice(0, 8)
       : "";
+    const { customerId, clientName } = customerLinkFromSalesOrderRow(r);
     return {
       id: String(r.id),
       number: String(r.number ?? ""),
@@ -285,7 +697,8 @@ async function finishSalesOrderListRows(
         r.payment_status as string | null | undefined,
       ),
       currency: String(r.currency ?? ""),
-      clientName: nameFromBillTo(r.bill_to_snapshot as Record<string, unknown>),
+      clientName,
+      customerId,
       total: Number(r.total ?? 0),
       createdByName,
       notes: r.notes != null ? String(r.notes).trim() : "",
@@ -397,8 +810,7 @@ export async function expireStaleSalesOrders(): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) {
-    // eslint-disable-next-line no-console
-    console.warn("expireStaleSalesOrders:", error.message);
+    /* non-fatal: list still loads */
   }
 }
 
@@ -560,10 +972,10 @@ export async function createSalesOrder(
       .eq("user_id", userId)
       .eq("company_id", companyId);
     if (bumpErr) {
-      // eslint-disable-next-line no-console
-      console.warn("createSalesOrder: could not bump sales_order_next_number:", bumpErr.message);
+      /* number bump is best-effort */
     }
 
+    invalidateSalesOrderCaches();
     return salesOrderId;
   }
 
@@ -574,40 +986,185 @@ export async function createSalesOrder(
 }
 
 /**
- * Counts for the sales order directory sidebar: total + per-fulfillment-status.
- * Single query that projects only `fulfillment_status`; grouping is done in JS.
+ * Sidebar facet counts and ordered enum labels from Postgres (`pg_enum` RPCs).
  * Does not run `expireStaleSalesOrders` — call that once before this when loading the list.
  */
+export type SalesOrderListFacets = {
+  total: number;
+  fulfillmentEnum: SalesOrderFulfillmentStatus[];
+  paymentEnum: SalesOrderPaymentStatusDb[];
+  byFulfillment: Record<string, number>;
+  byPayment: Record<string, number>;
+};
+
+let cachedListFacets:
+  | { companyId: string; at: number; data: SalesOrderListFacets }
+  | null = null;
+const LIST_FACETS_CACHE_MS = 45 * 1000;
+const LIST_CACHE_MS = 45 * 1000;
+const DETAIL_CACHE_MS = 45 * 1000;
+
+type SalesOrderListCacheEntry = {
+  key: string;
+  expires: number;
+  rows: SalesOrderListRow[];
+  total: number;
+};
+
+type SalesOrderDetailCacheEntry = {
+  companyId: string;
+  expires: number;
+  detail: SalesOrderDetail;
+};
+
+const listCache = new Map<string, SalesOrderListCacheEntry>();
+const detailCache = new Map<string, SalesOrderDetailCacheEntry>();
+
+function salesOrderListCacheKey(
+  companyId: string,
+  opts?: {
+    search?: string;
+    status?: SalesOrderStatus | "all";
+    fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
+    paymentStatus?: SalesOrderPaymentStatusDb | "all";
+    customerId?: string;
+    page?: number;
+    pageSize?: number;
+  },
+) {
+  return [
+    companyId,
+    opts?.search ?? "",
+    opts?.status ?? "all",
+    opts?.fulfillmentStatus ?? "all",
+    opts?.paymentStatus ?? "all",
+    opts?.customerId ?? "",
+    opts?.page ?? 1,
+    opts?.pageSize ?? 10,
+  ].join("|");
+}
+
+function salesOrderDetailCacheKey(
+  companyId: string,
+  id: string,
+  mode: "view" | "full",
+) {
+  return `${companyId}|${id}|${mode}`;
+}
+
+/** Synchronous facet read for stale-while-revalidate on the list page. */
+export function getCachedSalesOrderListFacets(
+  companyId: string,
+): SalesOrderListFacets | null {
+  if (!cachedListFacets || cachedListFacets.companyId !== companyId) {
+    return null;
+  }
+  if (Date.now() - cachedListFacets.at >= LIST_FACETS_CACHE_MS) {
+    return null;
+  }
+  return cachedListFacets.data;
+}
+
+export function getCachedSalesOrderList(
+  companyId: string,
+  opts?: Parameters<typeof salesOrderListCacheKey>[1],
+): { rows: SalesOrderListRow[]; total: number } | null {
+  const hit = listCache.get(salesOrderListCacheKey(companyId, opts));
+  if (!hit || hit.expires <= Date.now()) return null;
+  return { rows: hit.rows, total: hit.total };
+}
+
+export function getCachedSalesOrder(
+  companyId: string,
+  id: string,
+  mode: "view" | "full" = "full",
+): SalesOrderDetail | null {
+  const hit = detailCache.get(salesOrderDetailCacheKey(companyId, id, mode));
+  if (!hit || hit.companyId !== companyId) return null;
+  if (hit.expires <= Date.now()) return null;
+  return hit.detail;
+}
+
+/** Clears list, facet, and detail caches after mutations. */
+export function invalidateSalesOrderCaches() {
+  cachedListFacets = null;
+  listCache.clear();
+  detailCache.clear();
+}
+
+export async function getSalesOrderListFacets(opts?: {
+  force?: boolean;
+}): Promise<SalesOrderListFacets> {
+  const companyId = await requireActiveCompanyId();
+
+  if (
+    !opts?.force &&
+    cachedListFacets &&
+    cachedListFacets.companyId === companyId &&
+    Date.now() - cachedListFacets.at < LIST_FACETS_CACHE_MS
+  ) {
+    return cachedListFacets.data;
+  }
+
+  const head = () =>
+    supabase
+      .from("sales_orders")
+      .select("*", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const countOf = async (
+    builder: ReturnType<typeof head>,
+  ): Promise<number> => {
+    const { count, error } = await builder;
+    if (error) throw error;
+    return count ?? 0;
+  };
+
+  const [fulfillmentEnum, paymentEnum, total] = await Promise.all([
+    fetchSalesOrderFulfillmentStatusEnumValues(),
+    fetchSalesOrderPaymentStatusEnumValues(),
+    countOf(head()),
+  ]);
+
+  const statusCounts = await Promise.all([
+    ...fulfillmentEnum.map((s) => countOf(head().eq("fulfillment_status", s))),
+    ...paymentEnum.map((s) => countOf(head().eq("payment_status", s))),
+  ]);
+
+  const fulfillmentCounts = statusCounts.slice(0, fulfillmentEnum.length);
+  const paymentCounts = statusCounts.slice(fulfillmentEnum.length);
+
+  const byFulfillment = Object.fromEntries(
+    fulfillmentEnum.map((s, i) => [s, fulfillmentCounts[i] ?? 0]),
+  );
+  const byPayment = Object.fromEntries(
+    paymentEnum.map((s, i) => [s, paymentCounts[i] ?? 0]),
+  );
+
+  const data: SalesOrderListFacets = {
+    total,
+    fulfillmentEnum,
+    paymentEnum,
+    byFulfillment,
+    byPayment,
+  };
+
+  cachedListFacets = { companyId, at: Date.now(), data };
+  return data;
+}
+
+/** @deprecated Use {@link getSalesOrderListFacets}. */
 export async function getSalesOrderKpiCounts(): Promise<{
   total: number;
   byFulfillment: Record<SalesOrderFulfillmentStatus, number>;
 }> {
-  const companyId = await requireActiveCompanyId();
-  const { data, error } = await supabase
-    .from("sales_orders")
-    .select("fulfillment_status")
-    .eq("company_id", companyId);
-  if (error) throw error;
-
-  const byFulfillment: Record<SalesOrderFulfillmentStatus, number> = {
-    new: 0,
-    pending: 0,
-    "delivery note created": 0,
-    "delivered to driver": 0,
-    "delivered to customer": 0,
-    completed: 0,
-    cancelled: 0,
-    rescheduled: 0,
-  };
-  for (const row of data ?? []) {
-    const s = normalizeSalesOrderFulfillmentStatus(
-      (row as { fulfillment_status?: string | null }).fulfillment_status,
-    );
-    byFulfillment[s] = (byFulfillment[s] ?? 0) + 1;
-  }
+  const facets = await getSalesOrderListFacets();
   return {
-    total: data?.length ?? 0,
-    byFulfillment,
+    total: facets.total,
+    byFulfillment: facets.byFulfillment as Record<
+      SalesOrderFulfillmentStatus,
+      number
+    >,
   };
 }
 
@@ -616,6 +1173,8 @@ export async function listSalesOrders(opts?: {
   status?: SalesOrderStatus | "all";
   /** When set (not `"all"`), filter by `sales_orders.fulfillment_status`. */
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
+  /** When set (not `"all"`), filter by `sales_orders.payment_status` (Postgres enum). */
+  paymentStatus?: SalesOrderPaymentStatusDb | "all";
   /** When set, only orders linked to this customer (`sales_orders.customer_id`). */
   customerId?: string;
   page?: number;
@@ -636,60 +1195,37 @@ export async function listSalesOrders(opts?: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  const citiesFetch = listDeliveryCities();
-
   let q = supabase
     .from("sales_orders")
-    .select(
-      "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, user_id, notes",
-      { count: "exact" }
-    )
+    .select(SALES_ORDER_LIST_SELECT, { count: "exact" })
     .eq("company_id", companyId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .range(from, to);
 
-  if (opts?.status && opts.status !== "all") {
-    q = q.eq("status", opts.status);
-  }
+  q = applySalesOrderListFilters(q, opts);
+  const searchOr = await buildSalesOrderListSearchOrClause(
+    companyId,
+    opts?.search,
+  );
+  if (searchOr) q = q.or(searchOr);
 
-  if (opts?.fulfillmentStatus && opts.fulfillmentStatus !== "all") {
-    q = q.eq("fulfillment_status", opts.fulfillmentStatus);
-  }
-
-  const cid = opts?.customerId?.trim();
-  if (cid) {
-    q = q.eq("customer_id", cid);
-  }
-
-  if (opts?.search?.trim()) {
-    const raw = opts.search.trim();
-    const s = `%${raw}%`;
-    const filters = [
-      `number.ilike.${s}`,
-      `bill_to_snapshot->>company_name.ilike.${s}`,
-      `bill_to_snapshot->>full_name.ilike.${s}`,
-      `bill_to_snapshot->>phone.ilike.${s}`,
-    ];
-    const digitsOnly = raw.replace(/\D/g, "");
-    if (digitsOnly && digitsOnly !== raw) {
-      filters.push(`bill_to_snapshot->>phone.ilike.%${digitsOnly}%`);
-    }
-    q = q.or(filters.join(","));
-  }
-
-  const [{ data, error, count }, cityRows] = await Promise.all([
-    q,
-    citiesFetch,
-  ]);
+  const { data, error, count } = await q;
   if (error) throw error;
 
-  const cityById = new Map(cityRows.map((c) => [c.id, c.name] as const));
-
   const rawRows = (data ?? []) as Array<Record<string, unknown>>;
-  const rows = await finishSalesOrderListRows(rawRows, cityById);
+  const rows = await finishSalesOrderListRows(rawRows);
 
-  return { rows, total: count ?? 0 };
+  const total = count ?? 0;
+  const cacheKey = salesOrderListCacheKey(companyId, opts);
+  listCache.set(cacheKey, {
+    key: cacheKey,
+    expires: Date.now() + LIST_CACHE_MS,
+    rows,
+    total,
+  });
+
+  return { rows, total };
 }
 
 /**
@@ -699,6 +1235,7 @@ export async function listSalesOrders(opts?: {
 export async function listAllSalesOrdersForExport(opts?: {
   search?: string;
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
+  paymentStatus?: SalesOrderPaymentStatusDb | "all";
   customerId?: string;
   status?: SalesOrderStatus | "all";
   /**
@@ -710,8 +1247,7 @@ export async function listAllSalesOrdersForExport(opts?: {
     await expireStaleSalesOrders();
   }
   const companyId = await requireActiveCompanyId();
-  const cityRows = await listDeliveryCities();
-  const cityById = new Map(cityRows.map((c) => [c.id, c.name] as const));
+  const cityById = await deliveryCityNameMapForCompany(companyId);
 
   const BATCH = 1000;
   let from = 0;
@@ -720,39 +1256,18 @@ export async function listAllSalesOrdersForExport(opts?: {
   for (;;) {
     let q = supabase
       .from("sales_orders")
-      .select(
-        "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, user_id, notes",
-      )
+      .select(SALES_ORDER_LIST_SELECT)
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(from, from + BATCH - 1);
 
-    if (opts?.status && opts.status !== "all") {
-      q = q.eq("status", opts.status);
-    }
-    if (opts?.fulfillmentStatus && opts.fulfillmentStatus !== "all") {
-      q = q.eq("fulfillment_status", opts.fulfillmentStatus);
-    }
-    const cid = opts?.customerId?.trim();
-    if (cid) {
-      q = q.eq("customer_id", cid);
-    }
-    if (opts?.search?.trim()) {
-      const raw = opts.search.trim();
-      const s = `%${raw}%`;
-      const filters = [
-        `number.ilike.${s}`,
-        `bill_to_snapshot->>company_name.ilike.${s}`,
-        `bill_to_snapshot->>full_name.ilike.${s}`,
-        `bill_to_snapshot->>phone.ilike.${s}`,
-      ];
-      const digitsOnly = raw.replace(/\D/g, "");
-      if (digitsOnly && digitsOnly !== raw) {
-        filters.push(`bill_to_snapshot->>phone.ilike.%${digitsOnly}%`);
-      }
-      q = q.or(filters.join(","));
-    }
+    q = applySalesOrderListFilters(q, opts);
+    const searchOr = await buildSalesOrderListSearchOrClause(
+      companyId,
+      opts?.search,
+    );
+    if (searchOr) q = q.or(searchOr);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -885,7 +1400,7 @@ export async function getSalesOrder(
 
   const rawDelivery = row.delivery_date;
 
-  return {
+  const detail: SalesOrderDetail = {
     id: row.id,
     number: row.number,
     issue_date: row.issue_date,
@@ -919,6 +1434,14 @@ export async function getSalesOrder(
         : null,
     items,
   };
+
+  detailCache.set(salesOrderDetailCacheKey(companyId, id, mode), {
+    companyId,
+    expires: Date.now() + DETAIL_CACHE_MS,
+    detail,
+  });
+
+  return detail;
 }
 
 export async function updateSalesOrderPaymentStatus(
@@ -935,6 +1458,7 @@ export async function updateSalesOrderPaymentStatus(
     .eq("id", id)
     .eq("company_id", companyId);
   if (error) throw error;
+  invalidateSalesOrderCaches();
 }
 
 export async function updateSalesOrderFulfillmentStatus(
@@ -961,6 +1485,7 @@ export async function updateSalesOrderFulfillmentStatus(
     .eq("id", id)
     .eq("company_id", companyId);
   if (error) throw error;
+  invalidateSalesOrderCaches();
 }
 
 export async function deleteSalesOrder(id: string): Promise<void> {
@@ -985,6 +1510,7 @@ export async function deleteSalesOrder(id: string): Promise<void> {
     .eq("id", id)
     .eq("company_id", companyId);
   if (error) throw error;
+  invalidateSalesOrderCaches();
 }
 
 export type UpdateSalesOrderPayload = Omit<
@@ -1098,4 +1624,6 @@ export async function updateSalesOrder(
       .insert(rows);
     if (insErr) throw insErr;
   }
+
+  invalidateSalesOrderCaches();
 }

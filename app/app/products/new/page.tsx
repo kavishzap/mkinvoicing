@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AppPageShell } from "@/components/app-page-shell";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { getActiveCompanyId } from "@/lib/active-company";
@@ -338,6 +339,9 @@ export default function NewInventoryProductPage() {
         </Button>
       }
     >
+      {loading ? (
+        <FormTwoColumnPageSkeleton withLineItems />
+      ) : (
       <div className="flex min-w-0 flex-col gap-4 overflow-x-hidden rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="grid grid-cols-1 gap-6 lg:gap-8">
           <SectionCard icon={Package} title="Product details">
@@ -566,6 +570,7 @@ export default function NewInventoryProductPage() {
           )}
         </SectionCard>
       </div>
+      )}
     </AppPageShell>
   );
 }

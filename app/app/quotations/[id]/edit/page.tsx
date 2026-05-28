@@ -1,6 +1,7 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -111,6 +112,8 @@ export default function EditQuotationPage() {
   const params = useParams<{ id: string }>();
   const quotationId = params.id;
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -168,14 +171,20 @@ export default function EditQuotationPage() {
     (async () => {
       try {
         setLoading(true);
-        const [p, prefs, q] = await Promise.all([
+        const [p, prefs, q, customerRes] = await Promise.all([
           fetchProfile(),
           fetchPreferences(),
           getQuotation(quotationId),
+          listCustomers({
+            search: "",
+            includeInactive: false,
+            page: 1,
+            pageSize: 100,
+          }),
         ]);
         if (cancelled) return;
         if (!q) {
-          toast({
+          toastRef.current({
             title: "Quotation not found",
             variant: "destructive",
           });
@@ -231,23 +240,17 @@ export default function EditQuotationPage() {
             }))
         );
 
-        const { rows } = await listCustomers({
-          search: "",
-          includeInactive: false,
-          page: 1,
-          pageSize: 100,
-        });
         if (!cancelled) {
-          setCustomers(rows);
+          setCustomers(customerRes.rows);
           if (q.customer_id) {
-            const match = rows.find((c) => c.id === q.customer_id);
+            const match = customerRes.rows.find((c) => c.id === q.customer_id);
             if (match) setSelectedCustomer(match);
           }
         }
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load quotation",
             description: msg,
             variant: "destructive",
@@ -260,7 +263,7 @@ export default function EditQuotationPage() {
     return () => {
       cancelled = true;
     };
-  }, [quotationId, router, toast]);
+  }, [quotationId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -371,7 +374,7 @@ export default function EditQuotationPage() {
       address_line_2: c.address_line_2 ?? "",
     });
     setIsCustomerDialogOpen(false);
-    toast({
+    toastRef.current({
       title: "Customer selected",
       description: `${
         c.type === "company" ? c.companyName : c.fullName
@@ -415,7 +418,7 @@ export default function EditQuotationPage() {
   async function saveQuotation() {
     if (!quotationId) return;
     if (!validate()) {
-      toast({
+      toastRef.current({
         title: "Please fix the highlighted fields.",
         variant: "destructive",
       });
@@ -473,14 +476,14 @@ export default function EditQuotationPage() {
         items: itemsPayload,
       });
 
-      toast({
+      toastRef.current({
         title: "Quotation updated",
         description: "Your changes were saved.",
       });
       router.push(`/app/quotations/${quotationId}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
+      toastRef.current({
         title: "Failed to save quotation",
         description: msg,
         variant: "destructive",
@@ -496,17 +499,7 @@ export default function EditQuotationPage() {
   if (loading) {
     return (
       <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="flex gap-2">
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
-          </div>
-        </div>
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
-        </div>
-        <div className="h-64 rounded bg-muted animate-pulse" />
+        <FormTwoColumnPageSkeleton withLineItems />
       </div>
     );
   }
@@ -1109,9 +1102,6 @@ export default function EditQuotationPage() {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Select Customer</DialogTitle>
-            <DialogDescription>
-              Choose a customer from your database
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 flex-1 overflow-hidden flex flex-col">

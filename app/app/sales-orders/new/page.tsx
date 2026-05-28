@@ -1,6 +1,15 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -46,6 +55,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { useToast } from "@/hooks/use-toast";
 
 import {
@@ -62,26 +78,35 @@ import {
 import {
   createSalesOrder,
   getSalesOrder,
+  resolveDiscountAmount,
+  computeSalesOrderValidUntil,
   buildFromSnapshotForSalesOrder,
   buildBillToSnapshot,
   clientInfoFromBillSnapshot,
   cityIdFromDeliveryCityName,
   type SalesOrderLinePayload,
   type SalesOrderStatus,
-  type SalesOrderFulfillmentStatus,
   type SalesOrderItemRow,
-  SALES_ORDER_FULFILLMENT_STATUSES,
-  SALES_ORDER_FULFILLMENT_LABELS,
 } from "@/lib/sales-orders-service";
+import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { getQuotation } from "@/lib/quotations-service";
 import { AppPageShell } from "@/components/app-page-shell";
 import { cn } from "@/lib/utils";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
-import { DiscountTypeToggle } from "@/components/discount-type-toggle";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
 
-const DEFAULT_TAX_PERCENT = 15;
+const DEFAULT_TAX_PERCENT = 0;
+
+function formatNumericFieldValue(n: number) {
+  return n === 0 ? "" : String(n);
+}
+
+function parseNumericFieldValue(raw: string) {
+  if (raw.trim() === "") return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -100,11 +125,13 @@ function SectionCard({
   title,
   children,
   className,
+  headerRight,
 }: {
   icon: LucideIcon;
   title: string;
   children: ReactNode;
   className?: string;
+  headerRight?: ReactNode;
 }) {
   return (
     <Card
@@ -113,11 +140,16 @@ function SectionCard({
         className,
       )}
     >
-      <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
-        <div className={sectionIconBoxClass}>
-          <Icon className={sectionIconClass} aria-hidden />
+      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 rounded-none border-b bg-muted/40 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className={sectionIconBoxClass}>
+            <Icon className={sectionIconClass} aria-hidden />
+          </div>
+          <CardTitle className={sectionTitleClass}>{title}</CardTitle>
         </div>
-        <CardTitle className={sectionTitleClass}>{title}</CardTitle>
+        {headerRight ? (
+          <div className="flex shrink-0 items-center">{headerRight}</div>
+        ) : null}
       </CardHeader>
       <CardContent className="field-controls flex min-h-0 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs [&_textarea]:text-xs">
         {children}
@@ -197,6 +229,9 @@ function CompactBillToCustomer({ c }: { c: CustomerRow }) {
       {city ? (
         <p className="break-words text-muted-foreground">{city}</p>
       ) : null}
+      {c.address_line_1?.trim() ? (
+        <p className="break-words text-muted-foreground">{c.address_line_1}</p>
+      ) : null}
     </div>
   );
 }
@@ -209,7 +244,7 @@ function CompactBillToClientInfo({ ci }: { ci: ClientInfo }) {
   const sub =
     ci.type === "company" && ci.contactName.trim() ? ci.contactName : null;
   const contactLine = [ci.email, ci.phone].filter(Boolean).join(" · ");
-  const addr = [ci.address_line_1, ci.address_line_2].filter(Boolean).join(", ");
+  const addr = ci.address_line_1.trim();
   return (
     <div className="min-w-0 w-full max-w-full rounded-md border bg-muted/30 px-3 py-2.5 text-sm space-y-1">
       <p className="break-words font-medium text-foreground">{name}</p>
@@ -234,7 +269,6 @@ function NewSalesOrderPageContent() {
   const [convertFromQuotationId] = useState(() =>
     searchParams.get("convertFromQuotation")
   );
-  const { toast } = useToast();
 
   const returnToNewCustomer = useMemo(() => {
     const qs = searchParams.toString();
@@ -248,6 +282,7 @@ function NewSalesOrderPageContent() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
+  const [addItemDialogOpen, setAddItemDialogOpen] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
@@ -272,20 +307,13 @@ function NewSalesOrderPageContent() {
   });
 
   const [salesOrderNumber, setSalesOrderNumber] = useState("");
-  const [issueDate, setIssueDate] = useState(
-    new Date().toISOString().split("T")[0]
+  const [issueDate] = useState(() =>
+    new Date().toISOString().split("T")[0],
   );
-  const [validUntil, setValidUntil] = useState(
-    new Date().toISOString().split("T")[0]
-  );
-  const [validForDays, setValidForDays] = useState("14");
-  /** Optional `sales_orders.delivery_date` (YYYY-MM-DD). */
-  const [deliveryDate, setDeliveryDate] = useState("");
+  /** Optional `sales_orders.delivery_date` (YYYY-MM-DD); set elsewhere. */
+  const [deliveryDate] = useState("");
   const [lifecycleStatus, setLifecycleStatus] =
     useState<SalesOrderStatus>("active");
-  const [fulfillmentStatus, setFulfillmentStatus] =
-    useState<SalesOrderFulfillmentStatus>("new");
-
   const [lineItems, setLineItems] = useState<LineItem[]>([
     {
       id: "1",
@@ -297,10 +325,7 @@ function NewSalesOrderPageContent() {
       tax: DEFAULT_TAX_PERCENT,
     },
   ]);
-  const [discount, setDiscount] = useState({
-    type: "value" as "value" | "percent",
-    amount: 0,
-  });
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [notes, setNotes] = useState("");
   const [terms, setTerms] = useState("");
 
@@ -310,6 +335,9 @@ function NewSalesOrderPageContent() {
   >(null);
   const [convertedFromQuotationNumber, setConvertedFromQuotationNumber] =
     useState<string | null>(null);
+  const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const duplicateHandledRef = useRef(false);
   const convertHandledRef = useRef(false);
 
@@ -317,10 +345,48 @@ function NewSalesOrderPageContent() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, prefs] = await Promise.all([
-          fetchProfile(),
-          fetchPreferences(),
-        ]);
+        type ConversionResult =
+          | { kind: "quotation"; data: Awaited<ReturnType<typeof getQuotation>> }
+          | { kind: "duplicate"; data: Awaited<ReturnType<typeof getSalesOrder>> }
+          | null;
+
+        const conversionPromise: Promise<ConversionResult> = (async () => {
+          if (convertFromQuotationId) {
+            return {
+              kind: "quotation",
+              data: await getQuotation(convertFromQuotationId),
+            };
+          }
+          if (duplicateSourceId) {
+            return {
+              kind: "duplicate",
+              data: await getSalesOrder(duplicateSourceId),
+            };
+          }
+          return null;
+        })();
+
+        const [p, prefs, customerRes, prodRes, cityRows, conversion] =
+          await Promise.all([
+            fetchProfile(),
+            fetchPreferences(),
+            listCustomers({
+              search: "",
+              includeInactive: false,
+              page: 1,
+              pageSize: 100,
+            }),
+            listProducts({
+              search: "",
+              includeInactive: false,
+              page: 1,
+              pageSize: 400,
+              onlyWithPositiveStock: true,
+            }),
+            listDeliveryCities(),
+            conversionPromise,
+          ]);
+
         if (cancelled) return;
         setProfile(p);
         setPreferences(prefs);
@@ -330,41 +396,21 @@ function NewSalesOrderPageContent() {
         const son = prefs.salesOrderNextNumber ?? 1;
         setSalesOrderNumber(`${sop}-${String(son).padStart(sopad, "0")}`);
 
-        const today = new Date();
-        setIssueDate(today.toISOString().split("T")[0]);
-
-        const v = new Date(today);
-        v.setDate(v.getDate() + (prefs.paymentTerms || 14));
-        setValidUntil(v.toISOString().split("T")[0]);
-        setValidForDays(String(prefs.paymentTerms || 14));
-
         setNotes(prefs.defaultNotes || "");
         setTerms(prefs.defaultTerms || "");
 
-        const [{ rows }, prodRes, cityRows] = await Promise.all([
-          listCustomers({
-            search: "",
-            includeInactive: false,
-            page: 1,
-            pageSize: 100,
-          }),
-          listProducts({
-            search: "",
-            includeInactive: false,
-            page: 1,
-            pageSize: 400,
-            onlyWithPositiveStock: true,
-          }),
-          listDeliveryCities(),
-        ]);
-        if (cancelled) return;
+        const rows = customerRes.rows;
         setCustomers(rows);
         setProducts(prodRes.rows);
         setCities(cityRows);
 
-        if (convertFromQuotationId && !convertHandledRef.current) {
+        if (
+          conversion?.kind === "quotation" &&
+          convertFromQuotationId &&
+          !convertHandledRef.current
+        ) {
           convertHandledRef.current = true;
-          const q = await getQuotation(convertFromQuotationId);
+          const q = conversion.data;
           if (cancelled) return;
           if (q) {
             const ci = clientInfoFromBillSnapshot(q.bill_to_snapshot);
@@ -382,51 +428,60 @@ function NewSalesOrderPageContent() {
               address_line_1: ci.address_line_1,
               address_line_2: ci.address_line_2,
             });
-            setDiscount({
-              type: q.discount_type,
-              amount: q.discount_amount,
-            });
+            const convertedLines = [...q.items]
+              .sort(
+                (a, b) =>
+                  Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+              )
+              .map((it, i) => ({
+                id: `ln-${Date.now()}-${i}`,
+                productId:
+                  (it as { product_id?: string | null }).product_id ?? null,
+                item: it.item,
+                description: it.description ?? "",
+                quantity: Number(it.quantity),
+                unitPrice: Number(it.unit_price),
+                tax: Number(it.tax_percent),
+              }));
+            const convertedSubtotal = convertedLines.reduce(
+              (sum, it) => sum + it.quantity * it.unitPrice,
+              0,
+            );
+            setDiscountAmount(
+              resolveDiscountAmount(
+                q.discount_type,
+                q.discount_amount,
+                convertedSubtotal,
+              ),
+            );
             setNotes(q.notes ?? "");
             setTerms(q.terms ?? "");
             setLifecycleStatus("active");
-            setFulfillmentStatus("new");
-            setLineItems(
-              [...q.items]
-                .sort(
-                  (a, b) =>
-                    Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-                )
-                .map((it, i) => ({
-                  id: `ln-${Date.now()}-${i}`,
-                  productId:
-                    (it as { product_id?: string | null }).product_id ?? null,
-                  item: it.item,
-                  description: it.description ?? "",
-                  quantity: Number(it.quantity),
-                  unitPrice: Number(it.unit_price),
-                  tax: Number(it.tax_percent),
-                }))
-            );
+            setLineItems(convertedLines);
             if (q.customer_id) {
               const match = rows.find((c) => c.id === q.customer_id);
               if (match) setSelectedCustomer(match);
             }
             setConvertedFromQuotationNumber(q.number);
-            toast({
+            toastRef.current({
               title: "Convert from quotation",
               description: `Form filled from quotation ${q.number}. Save to create sales order with link.`,
             });
           } else {
-            toast({
+            toastRef.current({
               title: "Could not load quotation",
               description: "Starting with a blank form.",
               variant: "destructive",
             });
           }
           router.replace("/app/sales-orders/new", { scroll: false });
-        } else if (duplicateSourceId && !duplicateHandledRef.current) {
+        } else if (
+          conversion?.kind === "duplicate" &&
+          duplicateSourceId &&
+          !duplicateHandledRef.current
+        ) {
           duplicateHandledRef.current = true;
-          const q = await getSalesOrder(duplicateSourceId);
+          const q = conversion.data;
           if (cancelled) return;
           if (q) {
             const ci = clientInfoFromBillSnapshot(q.bill_to_snapshot);
@@ -448,44 +503,46 @@ function NewSalesOrderPageContent() {
               address_line_1: ci.address_line_1,
               address_line_2: ci.address_line_2,
             });
-            setDiscount({
-              type: q.discount_type,
-              amount: q.discount_amount,
-            });
+            const duplicatedLines = [...q.items]
+              .sort(
+                (a, b) =>
+                  Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
+              )
+              .map((it, i) => ({
+                id: `ln-${Date.now()}-${i}`,
+                productId: (it as SalesOrderItemRow).product_id ?? null,
+                item: it.item,
+                description: it.description ?? "",
+                quantity: Number(it.quantity),
+                unitPrice: Number(it.unit_price),
+                tax: Number(it.tax_percent),
+              }));
+            const duplicatedSubtotal = duplicatedLines.reduce(
+              (sum, it) => sum + it.quantity * it.unitPrice,
+              0,
+            );
+            setDiscountAmount(
+              resolveDiscountAmount(
+                q.discount_type,
+                q.discount_amount,
+                duplicatedSubtotal,
+              ),
+            );
             setNotes(q.notes ?? "");
             setTerms(q.terms ?? "");
             setLifecycleStatus(q.status);
-            setFulfillmentStatus(q.fulfillment_status);
-            setLineItems(
-              [...q.items]
-                .sort(
-                  (a, b) =>
-                    Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-                )
-                .map((it, i) => ({
-                  id: `ln-${Date.now()}-${i}`,
-                  productId: (it as SalesOrderItemRow).product_id ?? null,
-                  item: it.item,
-                  description: it.description ?? "",
-                  quantity: Number(it.quantity),
-                  unitPrice: Number(it.unit_price),
-                  tax: Number(it.tax_percent),
-                }))
-            );
+            setLineItems(duplicatedLines);
             if (q.customer_id) {
               const match = rows.find((c) => c.id === q.customer_id);
               if (match) setSelectedCustomer(match);
             }
-            setDeliveryDate(
-              q.delivery_date ? String(q.delivery_date).slice(0, 10) : "",
-            );
             setDuplicatedFromNumber(q.number);
-            toast({
+            toastRef.current({
               title: "Form filled from sales order",
               description: `Edit as needed, then save to create ${sop}-${String(son).padStart(sopad, "0")}.`,
             });
           } else {
-            toast({
+            toastRef.current({
               title: "Could not load sales order",
               description: "Starting with a blank form.",
               variant: "destructive",
@@ -496,7 +553,7 @@ function NewSalesOrderPageContent() {
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load data",
             description: msg,
             variant: "destructive",
@@ -509,7 +566,7 @@ function NewSalesOrderPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [toast, duplicateSourceId, convertFromQuotationId, router]);
+  }, [duplicateSourceId, convertFromQuotationId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -536,39 +593,70 @@ function NewSalesOrderPageContent() {
       lineItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0),
     [lineItems]
   );
-  const taxTotal = useMemo(
-    () =>
-      lineItems.reduce(
-        (sum, item) => sum + (item.quantity * item.unitPrice * item.tax) / 100,
-        0
-      ),
-    [lineItems]
-  );
-  const discountAmount = useMemo(
-    () =>
-      discount.type === "percent"
-        ? (subtotal * discount.amount) / 100
-        : discount.amount,
-    [discount, subtotal]
-  );
   const total = useMemo(
-    () => subtotal + taxTotal - discountAmount,
-    [subtotal, taxTotal, discountAmount]
+    () => subtotal - discountAmount,
+    [subtotal, discountAmount]
   );
 
-  const addLineItem = () =>
-    setLineItems((prev) => [
-      ...prev,
-      {
-        id: String(Date.now()),
-        productId: null,
-        item: "",
-        description: "",
-        quantity: 1,
-        unitPrice: 0,
-        tax: DEFAULT_TAX_PERCENT,
-      },
-    ]);
+  const pickProductForLine = useCallback(
+    (lineId: string, p: ProductRow) => {
+      setLineItems((prev) =>
+        applyProductPickToLines(prev, lineId, {
+          id: p.id,
+          name: p.name,
+          description: p.description || "",
+          salePrice: p.salePrice,
+        }),
+      );
+      setErrors((e) => {
+        const next = { ...e };
+        delete next[`product_${lineId}`];
+        delete next[`qty_${lineId}`];
+        delete next[`price_${lineId}`];
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleAddItemFromCatalog = (p: ProductRow) => {
+    const lineId = String(Date.now());
+    setLineItems((prev) => {
+      const existing = prev.find((l) => l.productId === p.id);
+      if (existing) {
+        return applyProductPickToLines(prev, existing.id, {
+          id: p.id,
+          name: p.name,
+          description: p.description || "",
+          salePrice: p.salePrice,
+        });
+      }
+      const withBlank = [
+        ...prev,
+        {
+          id: lineId,
+          productId: null,
+          item: "",
+          description: "",
+          quantity: 1,
+          unitPrice: 0,
+          tax: DEFAULT_TAX_PERCENT,
+        },
+      ];
+      return applyProductPickToLines(withBlank, lineId, {
+        id: p.id,
+        name: p.name,
+        description: p.description || "",
+        salePrice: p.salePrice,
+      });
+    });
+    setAddItemDialogOpen(false);
+    setErrors((e) => {
+      const next = { ...e };
+      delete next.lineItems;
+      return next;
+    });
+  };
 
   const removeLineItem = (id: string) => {
     setLineItems((prev) =>
@@ -621,7 +709,7 @@ function NewSalesOrderPageContent() {
       postal: c.postal ?? "",
       country: c.country ?? "",
       address_line_1: c.address_line_1 ?? "",
-      address_line_2: c.address_line_2 ?? "",
+      address_line_2: "",
     });
     setIsCustomerDialogOpen(false);
     setErrors((e) => {
@@ -666,7 +754,7 @@ function NewSalesOrderPageContent() {
     } else {
       lineItems.forEach((li) => {
         if (!li.productId?.trim())
-          next[`product_${li.id}`] = "Select a product";
+          next[`product_${li.id}`] = "Select an item";
         if (!(li.quantity > 0))
           next[`qty_${li.id}`] = "Quantity must be greater than 0";
         if (!(li.unitPrice >= 0))
@@ -702,7 +790,7 @@ function NewSalesOrderPageContent() {
         description: li.description || undefined,
         quantity: li.quantity,
         unit_price: li.unitPrice,
-        tax_percent: li.tax,
+        tax_percent: 0,
         sort_order: i,
         product_id: li.productId,
       }));
@@ -724,17 +812,20 @@ function NewSalesOrderPageContent() {
             postal: clientInfo.postal || null,
             country: clientInfo.country || null,
             address_line_1: clientInfo.address_line_1 || null,
-            address_line_2: clientInfo.address_line_2 || null,
+            address_line_2: null,
           };
 
       const id = await createSalesOrder({
         issue_date: issueDate,
-        valid_until: validUntil,
+        valid_until: computeSalesOrderValidUntil(
+          issueDate,
+          preferences?.paymentTerms ?? 14,
+        ),
         status: lifecycleStatus,
-        fulfillment_status: fulfillmentStatus,
+        fulfillment_status: "new",
         currency: preferences.currency,
-        discount_type: discount.type,
-        discount_amount: discount.amount,
+        discount_type: "value",
+        discount_amount: discountAmount,
         shipping_amount: 0,
         notes,
         terms,
@@ -778,18 +869,7 @@ function NewSalesOrderPageContent() {
         fillHeight
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       >
-        <div className="flex min-w-0 flex-col gap-6 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-          <div className={salesOrderTwoColGridClass}>
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-          </div>
-          <div className="h-40 animate-pulse rounded-lg bg-muted" />
-          <div className={salesOrderTwoColGridClass}>
-            <div className="h-36 animate-pulse rounded-lg bg-muted" />
-            <div className="h-36 animate-pulse rounded-lg bg-muted" />
-          </div>
-        </div>
+        <FormTwoColumnPageSkeleton withLineItems />
       </AppPageShell>
     );
   }
@@ -826,11 +906,7 @@ function NewSalesOrderPageContent() {
                 <CompactBillToCustomer c={selectedCustomer} />
               ) : hasBillToDetails(clientInfo) ? (
                 <CompactBillToClientInfo ci={clientInfo} />
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Pick someone from your customer list.
-                </p>
-              )}
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
@@ -901,6 +977,41 @@ function NewSalesOrderPageContent() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="soAddress1" className={fieldLabelClass}>
+                  Address
+                </Label>
+                <Input
+                  id="soAddress1"
+                  className="h-8 rounded-sm text-xs"
+                  value={clientInfo.address_line_1}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setClientInfo((prev) => ({
+                      ...prev,
+                      address_line_1: value,
+                    }));
+                    if (selectedCustomer) {
+                      setSelectedCustomer((prev) =>
+                        prev ? { ...prev, address_line_1: value } : prev,
+                      );
+                    }
+                    setErrors((err) => {
+                      if (!err.address_line_1) return err;
+                      const next = { ...err };
+                      delete next.address_line_1;
+                      return next;
+                    });
+                  }}
+                  placeholder="e.g. 123 Main St, Port Louis"
+                  autoComplete="address-line1"
+                />
+                {errors.address_line_1 ? (
+                  <p className="text-xs text-destructive">
+                    {errors.address_line_1}
+                  </p>
+                ) : null}
+              </div>
               {errors.billTo ? (
                 <p className="text-xs text-destructive">{errors.billTo}</p>
               ) : null}
@@ -928,57 +1039,9 @@ function NewSalesOrderPageContent() {
                   id="issueDate"
                   type="date"
                   value={issueDate}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setIssueDate(v);
-                    const base = new Date(v);
-                    const days = Number(validForDays) || 14;
-                    base.setDate(base.getDate() + days);
-                    setValidUntil(base.toISOString().split("T")[0]);
-                  }}
+                  disabled
+                  className="bg-muted/50"
                 />
-              </div>
-              <div className="min-w-0 space-y-2">
-                <Label htmlFor="validUntil" className={fieldLabelClass}>
-                  Valid until
-                </Label>
-                <Input
-                  id="validUntil"
-                  type="date"
-                  value={validUntil}
-                  onChange={(e) => setValidUntil(e.target.value)}
-                />
-              </div>
-              <div className="min-w-0 space-y-2">
-                <Label htmlFor="validForDays" className={fieldLabelClass}>
-                  Valid for (days)
-                </Label>
-                <Select
-                  value={validForDays}
-                  onValueChange={(v) => {
-                    setValidForDays(v);
-                    const days = Number(v) || 14;
-                    const base = new Date(
-                      issueDate || new Date().toISOString().split("T")[0]
-                    );
-                    base.setDate(base.getDate() + days);
-                    setValidUntil(base.toISOString().split("T")[0]);
-                  }}
-                >
-                  <SelectTrigger
-                    id="validForDays"
-                    className="h-8 w-full rounded-sm text-xs"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="14">14 days</SelectItem>
-                    <SelectItem value="30">30 days</SelectItem>
-                    <SelectItem value="60">60 days</SelectItem>
-                    <SelectItem value="90">90 days</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
               <div className="min-w-0 space-y-2">
                 <Label htmlFor="soDeliveryDate" className={fieldLabelClass}>
@@ -988,36 +1051,15 @@ function NewSalesOrderPageContent() {
                   id="soDeliveryDate"
                   type="date"
                   value={deliveryDate}
-                  onChange={(e) => setDeliveryDate(e.target.value)}
+                  disabled
+                  className="bg-muted/50"
                 />
-                <p className="text-[11px] leading-snug text-muted-foreground">
-                  Optional. Read-only on the sales order view.
-                </p>
               </div>
               <div className="min-w-0 space-y-2 sm:col-span-2">
-                <Label htmlFor="soFulfillment" className={fieldLabelClass}>
-                  Fulfillment status
-                </Label>
-                <Select
-                  value={fulfillmentStatus}
-                  onValueChange={(v) =>
-                    setFulfillmentStatus(v as SalesOrderFulfillmentStatus)
-                  }
-                >
-                  <SelectTrigger
-                    id="soFulfillment"
-                    className="h-8 w-full max-w-md rounded-sm text-xs"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SALES_ORDER_FULFILLMENT_STATUSES.map((v) => (
-                      <SelectItem key={v} value={v}>
-                        {SALES_ORDER_FULFILLMENT_LABELS[v]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className={fieldLabelClass}>Fulfillment status</Label>
+                <div className="flex h-8 items-center">
+                  <SalesOrderFulfillmentStatusBadge status="new" />
+                </div>
               </div>
             </div>
           </SectionCard>
@@ -1027,6 +1069,17 @@ function NewSalesOrderPageContent() {
           icon={ListOrdered}
           title="Line items"
           className="min-w-0 max-w-full"
+          headerRight={
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 gap-1.5"
+              onClick={() => setAddItemDialogOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              Add item
+            </Button>
+          }
         >
           {errors.lineItems && (
             <p className="mb-2 text-xs text-destructive">{errors.lineItems}</p>
@@ -1039,9 +1092,8 @@ function NewSalesOrderPageContent() {
                     Order
                   </TableHead>
                   <TableHead className="min-w-[9rem] align-middle">
-                    Product *
+                    Item *
                   </TableHead>
-                  <TableHead className="min-w-[7rem] align-middle">Item</TableHead>
                   <TableHead className="min-w-[10rem] align-middle">
                     Description
                   </TableHead>
@@ -1049,7 +1101,6 @@ function NewSalesOrderPageContent() {
                   <TableHead className="min-w-[5.5rem] align-middle">
                     Unit Price *
                   </TableHead>
-                  <TableHead className="min-w-[4.5rem] align-middle">Tax %</TableHead>
                   <TableHead className="min-w-[5.5rem] text-right align-middle">
                     Total
                   </TableHead>
@@ -1064,8 +1115,7 @@ function NewSalesOrderPageContent() {
                     errors[`qty_${item.id}` as keyof FieldErrors];
                   const lineErrPrice =
                     errors[`price_${item.id}` as keyof FieldErrors];
-                  const lineTotal =
-                    item.quantity * item.unitPrice * (1 + item.tax / 100);
+                  const lineTotal = item.quantity * item.unitPrice;
 
                   return (
                     <TableRow key={item.id} className="align-middle">
@@ -1104,21 +1154,7 @@ function NewSalesOrderPageContent() {
                             onValueChange={(pid) => {
                               const p = products.find((x) => x.id === pid);
                               if (!p) return;
-                              setLineItems((prev) =>
-                                applyProductPickToLines(prev, item.id, {
-                                  id: p.id,
-                                  name: p.name,
-                                  description: p.description || "",
-                                  salePrice: p.salePrice,
-                                })
-                              );
-                              setErrors((e) => {
-                                const next = { ...e };
-                                delete next[`product_${item.id}`];
-                                delete next[`qty_${item.id}`];
-                                delete next[`price_${item.id}`];
-                                return next;
-                              });
+                              pickProductForLine(item.id, p);
                             }}
                           />
                           {lineErrProduct ? (
@@ -1127,16 +1163,6 @@ function NewSalesOrderPageContent() {
                             </p>
                           ) : null}
                         </div>
-                      </TableCell>
-                      <TableCell className="align-middle py-2">
-                        <Input
-                          readOnly
-                          tabIndex={-1}
-                          value={item.item}
-                          placeholder="—"
-                          title={item.item || undefined}
-                          className="h-9 bg-muted/40 pointer-events-none"
-                        />
                       </TableCell>
                       <TableCell className="max-w-[18rem] whitespace-normal align-middle py-2">
                         <Input
@@ -1156,12 +1182,15 @@ function NewSalesOrderPageContent() {
                         <Input
                           type="number"
                           min="1"
-                          value={item.quantity}
+                          inputMode="decimal"
+                          value={formatNumericFieldValue(item.quantity)}
+                          placeholder="1"
+                          onFocus={(e) => e.currentTarget.select()}
                           onChange={(e) =>
                             updateLineItem(
                               item.id,
                               "quantity",
-                              Number(e.target.value)
+                              parseNumericFieldValue(e.target.value),
                             )
                           }
                           className={`h-9 ${
@@ -1179,12 +1208,15 @@ function NewSalesOrderPageContent() {
                           type="number"
                           min="0"
                           step="0.01"
-                          value={item.unitPrice}
+                          inputMode="decimal"
+                          value={formatNumericFieldValue(item.unitPrice)}
+                          placeholder="0.00"
+                          onFocus={(e) => e.currentTarget.select()}
                           onChange={(e) =>
                             updateLineItem(
                               item.id,
                               "unitPrice",
-                              Number(e.target.value)
+                              parseNumericFieldValue(e.target.value),
                             )
                           }
                           className={`h-9 ${
@@ -1196,25 +1228,6 @@ function NewSalesOrderPageContent() {
                             {String(lineErrPrice)}
                           </p>
                         )}
-                      </TableCell>
-                      <TableCell className="align-middle py-2">
-                        <Select
-                          value={item.tax.toString()}
-                          onValueChange={(v) =>
-                            updateLineItem(item.id, "tax", Number(v))
-                          }
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="0">0%</SelectItem>
-                            <SelectItem value="5">5%</SelectItem>
-                            <SelectItem value="10">10%</SelectItem>
-                            <SelectItem value="15">15%</SelectItem>
-                            <SelectItem value="20">20%</SelectItem>
-                          </SelectContent>
-                        </Select>
                       </TableCell>
                       <TableCell className="text-right font-medium align-middle py-2">
                         {preferences?.currency} {lineTotal.toFixed(2)}
@@ -1236,14 +1249,6 @@ function NewSalesOrderPageContent() {
               </TableBody>
             </Table>
           </div>
-          <Button
-            variant="outline"
-            onClick={addLineItem}
-            className="mt-4 gap-2 bg-transparent"
-          >
-            <Plus className="h-4 w-4" />
-            Add Row
-          </Button>
       </SectionCard>
 
       <div className={salesOrderTwoColGridClass}>
@@ -1286,30 +1291,19 @@ function NewSalesOrderPageContent() {
                 {preferences?.currency} {subtotal.toFixed(2)}
               </span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Tax</span>
-              <span className="tabular-nums font-medium">
-                {preferences?.currency} {taxTotal.toFixed(2)}
-              </span>
-            </div>
             <div className="flex flex-wrap items-center justify-between gap-4">
               <span className="text-sm text-muted-foreground">Discount</span>
               <div className="flex flex-wrap items-center gap-2">
-                <DiscountTypeToggle
-                  value={discount.type}
-                  onChange={(t) => setDiscount({ ...discount, type: t })}
-                  currencyLabel={preferences?.currency ?? ""}
-                />
                 <Input
                   type="number"
                   min="0"
                   step="0.01"
-                  value={discount.amount}
+                  inputMode="decimal"
+                  value={formatNumericFieldValue(discountAmount)}
+                  placeholder="0"
+                  onFocus={(e) => e.currentTarget.select()}
                   onChange={(e) =>
-                    setDiscount({
-                      ...discount,
-                      amount: Number(e.target.value),
-                    })
+                    setDiscountAmount(parseNumericFieldValue(e.target.value))
                   }
                   className="h-8 w-[100px]"
                 />
@@ -1329,6 +1323,41 @@ function NewSalesOrderPageContent() {
         </SectionCard>
       </div>
       </div>
+
+      <Dialog open={addItemDialogOpen} onOpenChange={setAddItemDialogOpen}>
+        <DialogContent className="flex max-h-[80vh] max-w-lg flex-col overflow-hidden p-0 sm:max-w-lg">
+          <DialogHeader className="shrink-0 space-y-1 border-b px-5 py-4 text-left">
+            <DialogTitle>Add item</DialogTitle>
+            <DialogDescription>
+              Search your product catalog and add a line to this sales order.
+            </DialogDescription>
+          </DialogHeader>
+          <Command shouldFilter className="flex min-h-0 flex-1 flex-col">
+            <CommandInput
+              placeholder="Search by name or SKU…"
+              className="border-b px-3 text-sm"
+            />
+            <CommandList className="max-h-[min(60vh,24rem)] flex-1 overflow-y-auto p-2">
+              <CommandEmpty>No items found.</CommandEmpty>
+              {products.map((p) => (
+                <CommandItem
+                  key={p.id}
+                  value={`${p.name} ${p.sku ?? ""} ${p.id}`}
+                  className="flex cursor-pointer flex-col items-start gap-0.5 rounded-lg px-3 py-2.5"
+                  onSelect={() => handleAddItemFromCatalog(p)}
+                >
+                  <span className="font-medium text-sm text-foreground">
+                    {p.name}
+                  </span>
+                  {p.sku ? (
+                    <span className="text-xs text-muted-foreground">{p.sku}</span>
+                  ) : null}
+                </CommandItem>
+              ))}
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={isCustomerDialogOpen}
@@ -1354,9 +1383,6 @@ function NewSalesOrderPageContent() {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Select Customer</DialogTitle>
-            <DialogDescription>
-              Choose a customer from your database
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
@@ -1418,18 +1444,7 @@ export default function NewSalesOrderPage() {
           fillHeight
           className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
         >
-          <div className="flex min-w-0 flex-col gap-6 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-            <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-            <div className={salesOrderTwoColGridClass}>
-              <div className="h-56 animate-pulse rounded-lg bg-muted" />
-              <div className="h-56 animate-pulse rounded-lg bg-muted" />
-            </div>
-            <div className="h-40 animate-pulse rounded-lg bg-muted" />
-            <div className={salesOrderTwoColGridClass}>
-              <div className="h-36 animate-pulse rounded-lg bg-muted" />
-              <div className="h-36 animate-pulse rounded-lg bg-muted" />
-            </div>
-          </div>
+          <FormTwoColumnPageSkeleton withLineItems />
         </AppPageShell>
       }
     >

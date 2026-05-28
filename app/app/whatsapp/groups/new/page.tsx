@@ -221,7 +221,7 @@ export default function NewWhatsAppGroupPage() {
         customerIds: [...selectedCustomerIds],
       });
       toast({ title: "Group created" });
-      router.push("/app/whatsapp/groups");
+      router.push("/app/whatsapp?tab=groups");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Please try again.";
       toast({ title: "Save failed", description: msg, variant: "destructive" });
@@ -238,7 +238,7 @@ export default function NewWhatsAppGroupPage() {
         "flex min-h-0 min-w-0 flex-1 flex-col",
       )}
       leading={
-        <Link href="/app/whatsapp/groups">
+        <Link href="/app/whatsapp?tab=groups">
           <Button variant="ghost" size="icon" aria-label="Back to groups">
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -290,7 +290,7 @@ export default function NewWhatsAppGroupPage() {
               </div>
               <div className="mt-auto flex flex-wrap gap-2 border-t pt-4">
                 <Button type="button" variant="outline" asChild>
-                  <Link href="/app/whatsapp/groups">Cancel</Link>
+                  <Link href="/app/whatsapp?tab=groups">Cancel</Link>
                 </Button>
                 <Button type="submit" disabled={saving || companyReady !== true}>
                   {saving ? "Saving…" : "Create group"}

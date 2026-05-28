@@ -1,4 +1,5 @@
 "use client";
+import { SettingsTwoColumnSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 import {
   useEffect,
@@ -452,13 +453,7 @@ export default function SettingsPage() {
         fillHeight
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
-          <div className="h-9 w-full max-w-md animate-pulse rounded-lg bg-muted sm:w-72" />
-          <div className="grid flex-1 gap-4">
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-          </div>
-        </div>
+        <SettingsTwoColumnSkeleton className="flex-1" />
       </AppPageShell>
     );
   }

@@ -1,4 +1,5 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -486,17 +487,7 @@ export default function EditPurchaseOrderPage() {
   if (loading) {
     return (
       <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="flex gap-2">
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
-          </div>
-        </div>
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
-        </div>
-        <div className="h-64 rounded bg-muted animate-pulse" />
+        <FormTwoColumnPageSkeleton withLineItems />
       </div>
     );
   }

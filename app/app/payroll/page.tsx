@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineTableRowsSkeleton } from "@/components/page-skeletons";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Users, Calendar, ArrowRight, Loader2 } from "lucide-react";
@@ -79,9 +80,7 @@ export default function PayrollPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
+            <InlineTableRowsSkeleton rowCount={4} />
           ) : runs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">
               No payroll runs yet. Add employees and run payroll from the Run Payroll page.

@@ -1,9 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Download, Package, RefreshCw } from "lucide-react";
+import { TableBodyRowsSkeleton } from "@/components/page-skeletons";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  ChevronDown,
+  Download,
+  History,
+  Package,
+  RefreshCw,
+  Search,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import {
   listInventoryMovements,
@@ -12,8 +28,136 @@ import {
   type StockBalanceRow,
 } from "@/lib/inventory-stock-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import { cn } from "@/lib/utils";
+
+const linkClass =
+  "font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm";
+
+function LocationProductLink({
+  productId,
+  name,
+  sku,
+}: {
+  productId: string;
+  name: string;
+  sku?: string;
+}) {
+  return (
+    <div>
+      <Link href={`/app/products/${productId}/edit`} className={cn(linkClass, "font-semibold")}>
+        {name}
+      </Link>
+      {sku ? <span className="block text-xs text-muted-foreground">{sku}</span> : null}
+    </div>
+  );
+}
+
+function LocationMovementLink({
+  locationId,
+  label,
+}: {
+  locationId: string;
+  label: string;
+}) {
+  return (
+    <Link
+      href={`/app/locations/${locationId}?tab=products-line`}
+      className={linkClass}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function CollapsibleInventorySection({
+  icon: Icon,
+  title,
+  count,
+  defaultOpen = true,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Collapsible defaultOpen={defaultOpen}>
+      <Card className="flex min-w-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
+        <CollapsibleTrigger asChild>
+          <CardHeader className="cursor-pointer rounded-none border-b bg-muted/40 px-4 py-3 transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+            <div className="flex w-full min-w-0 flex-row items-start gap-2.5">
+              <ChevronDown
+                className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform collapsible-open:rotate-180"
+                aria-hidden
+              />
+              <Icon
+                className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1 text-left">
+                <CardTitle className="flex min-w-0 flex-wrap items-center gap-2 text-base leading-snug">
+                  <span className="min-w-0 break-words">{title}</span>
+                  {count !== undefined ? (
+                    <span className="rounded-full bg-muted/90 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground dark:bg-muted/70">
+                      {count}
+                    </span>
+                  ) : null}
+                </CardTitle>
+              </div>
+            </div>
+          </CardHeader>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="min-w-0 px-4 py-4">{children}</CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
+function MovementDetailCell({ m }: { m: InventoryMovementRow }) {
+  if (m.event_type === "transfer") {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+        {m.from_location_id && m.from_label !== "—" ? (
+          <LocationMovementLink locationId={m.from_location_id} label={m.from_label} />
+        ) : (
+          <span>{m.from_label}</span>
+        )}
+        <span aria-hidden>→</span>
+        {m.to_location_id && m.to_label !== "—" ? (
+          <LocationMovementLink locationId={m.to_location_id} label={m.to_label} />
+        ) : (
+          <span>{m.to_label}</span>
+        )}
+      </span>
+    );
+  }
+  if (m.event_type === "refill") {
+    return (
+      <span className="text-xs text-muted-foreground">
+        Into{" "}
+        {m.to_location_id && m.to_label !== "—" ? (
+          <LocationMovementLink locationId={m.to_location_id} label={m.to_label} />
+        ) : (
+          m.to_label
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-muted-foreground">
+      From{" "}
+      {m.from_location_id && m.from_label !== "—" ? (
+        <LocationMovementLink locationId={m.from_location_id} label={m.from_label} />
+      ) : (
+        m.from_label
+      )}
+    </span>
+  );
+}
 
 const EVENT_LABELS: Record<InventoryMovementRow["event_type"], string> = {
   transfer: "Transfer",
@@ -33,22 +177,18 @@ function formatWhen(iso: string) {
   }
 }
 
-function movementSummary(m: InventoryMovementRow): string {
-  if (m.event_type === "transfer") {
-    return `${m.from_label} → ${m.to_label}`;
-  }
-  if (m.event_type === "refill") {
-    return `Into ${m.to_label}`;
-  }
-  return `From ${m.from_label}`;
-}
-
 async function generateLocationInventoryPdf(params: {
   locationDisplay: string;
   balances: StockBalanceRow[];
   movements: InventoryMovementRow[];
   profile: Profile | null;
 }) {
+  const [{ default: jsPDF }, autoTableMod] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  const autoTable = autoTableMod.default;
+
   const { locationDisplay, balances, movements, profile } = params;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -111,7 +251,11 @@ async function generateLocationInventoryPdf(params: {
     EVENT_LABELS[m.event_type],
     m.product_name,
     String(m.quantity),
-    movementSummary(m),
+    m.event_type === "transfer"
+      ? `${m.from_label} → ${m.to_label}`
+      : m.event_type === "refill"
+        ? `Into ${m.to_label}`
+        : `From ${m.from_label}`,
     m.note ? m.note.slice(0, 80) : "—",
     m.recorded_by_label,
   ]);
@@ -157,6 +301,8 @@ export function LocationProductsLineTab({
   const movPageSize = 20;
   const [loading, setLoading] = useState(true);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const loadRequestGen = useRef(0);
 
   const locationDisplay = locationCode
     ? `${locationName} (${locationCode})`
@@ -164,10 +310,22 @@ export function LocationProductsLineTab({
 
   useEffect(() => {
     setMovPage(1);
+    setProductSearch("");
   }, [locationId]);
+
+  const filteredBalances = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return balances;
+    return balances.filter((b) => {
+      const name = (b.product_name ?? "").toLowerCase();
+      const sku = (b.product_sku ?? "").toLowerCase();
+      return name.includes(q) || sku.includes(q);
+    });
+  }, [balances, productSearch]);
 
   const load = useCallback(async () => {
     if (!locationId || !enabled) return;
+    const gen = ++loadRequestGen.current;
     setLoading(true);
     try {
       const [bal, mov] = await Promise.all([
@@ -178,10 +336,12 @@ export function LocationProductsLineTab({
           pageSize: movPageSize,
         }),
       ]);
+      if (gen !== loadRequestGen.current) return;
       setBalances(bal);
       setMovRows(mov.rows);
       setMovTotal(mov.total);
     } catch (e: unknown) {
+      if (gen !== loadRequestGen.current) return;
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({
         title: "Could not load inventory",
@@ -192,12 +352,15 @@ export function LocationProductsLineTab({
       setMovRows([]);
       setMovTotal(0);
     } finally {
-      setLoading(false);
+      if (gen === loadRequestGen.current) {
+        setLoading(false);
+      }
     }
-  }, [locationId, enabled, movPage, toast]);
+  }, [locationId, enabled, movPage]);
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
   }, [load]);
 
   const movPages = Math.max(1, Math.ceil(movTotal / movPageSize));
@@ -224,7 +387,6 @@ export function LocationProductsLineTab({
       toast({
         title: "PDF failed",
         description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
       });
     } finally {
       setPdfBusy(false);
@@ -232,105 +394,124 @@ export function LocationProductsLineTab({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4">
-      <div className="flex min-w-0 w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="min-w-0 max-w-full text-sm text-muted-foreground sm:max-w-2xl">
-          Read-only snapshot of stock held here and movements involving this location (transfers,
-          refills, stock-outs). Use{" "}
-          <span className="font-medium text-foreground">Inventory</span> to record changes.
-        </p>
-        <div className="flex flex-wrap gap-2 shrink-0">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            disabled={loading}
-            onClick={() => void load()}
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="gap-2"
-            disabled={pdfBusy || loading}
-            onClick={() => void handleDownloadPdf()}
-          >
-            <Download className="h-4 w-4" />
-            {pdfBusy ? "Building…" : "Download PDF"}
-          </Button>
-        </div>
+    <div className="flex w-full min-w-0 flex-col gap-4">
+      <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          disabled={loading}
+          onClick={() => void load()}
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="gap-2"
+          disabled={pdfBusy || loading}
+          onClick={() => void handleDownloadPdf()}
+        >
+          <Download className="h-4 w-4" />
+          {pdfBusy ? "Building…" : "Download PDF"}
+        </Button>
       </div>
 
-      <Card className="min-w-0">
-        <CardHeader className="min-w-0 pb-3">
-          <div className="flex min-w-0 items-start gap-2">
-            <Package className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
-            <div className="min-w-0">
-              <CardTitle className="text-base leading-snug break-words">
-                Products at this location
-              </CardTitle>
-              <CardDescription>
-                Quantities from live balances (products with zero on hand are hidden).
-              </CardDescription>
-            </div>
+      <CollapsibleInventorySection
+        icon={Package}
+        title="Products at this location"
+        count={
+          loading
+            ? undefined
+            : productSearch.trim()
+              ? filteredBalances.length
+              : balances.length
+        }
+        defaultOpen
+      >
+        <div className="mb-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:max-w-md">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+              aria-hidden
+            />
+            <Input
+              type="search"
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              placeholder="Search by product name or SKU…"
+              className="h-9 w-full pl-9 text-sm"
+              aria-label="Search products at this location"
+              autoComplete="off"
+              disabled={loading}
+            />
           </div>
-        </CardHeader>
-        <CardContent className="min-w-0">
-          <div className="min-w-0 overflow-x-auto rounded-md border">
-            <table className="w-full min-w-0 text-sm">
-              <thead className="bg-muted/50 text-muted-foreground">
+          {!loading && balances.length > 0 ? (
+            <p className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {productSearch.trim()
+                ? `${filteredBalances.length} of ${balances.length}`
+                : `${balances.length} product${balances.length === 1 ? "" : "s"}`}
+            </p>
+          ) : null}
+        </div>
+        <div className="min-w-0 overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[28rem] text-sm">
+            <thead className="bg-muted/50 text-muted-foreground">
+              <tr>
+                <th className="p-3 text-left">Product</th>
+                <th className="p-3 text-left">SKU</th>
+                <th className="p-3 text-right">Qty</th>
+                <th className="p-3 text-left text-muted-foreground/80">Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <TableBodyRowsSkeleton rowCount={4} colCount={4} />
+              ) : balances.length === 0 ? (
                 <tr>
-                  <th className="p-3 text-left">Product</th>
-                  <th className="p-3 text-left">SKU</th>
-                  <th className="p-3 text-right">Qty</th>
-                  <th className="p-3 text-left text-muted-foreground/80">Updated</th>
+                  <td colSpan={4} className="p-8 text-center text-muted-foreground">
+                    No on-hand stock at this location.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                      Loading…
+              ) : filteredBalances.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-muted-foreground">
+                    No products match your search.
+                  </td>
+                </tr>
+              ) : (
+                filteredBalances.map((b) => (
+                  <tr key={b.product_id} className="border-t">
+                    <td className="p-3">
+                      <LocationProductLink
+                        productId={b.product_id}
+                        name={b.product_name}
+                        sku={b.product_sku || undefined}
+                      />
+                    </td>
+                    <td className="p-3 text-muted-foreground">{b.product_sku || "—"}</td>
+                    <td className="p-3 text-right tabular-nums font-medium">{b.quantity}</td>
+                    <td className="p-3 text-xs tabular-nums text-muted-foreground">
+                      {formatWhen(b.balance_updated_at)}
                     </td>
                   </tr>
-                ) : balances.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-muted-foreground">
-                      No on-hand stock at this location.
-                    </td>
-                  </tr>
-                ) : (
-                  balances.map((b) => (
-                    <tr key={b.product_id} className="border-t">
-                      <td className="p-3 font-medium">{b.product_name}</td>
-                      <td className="p-3 text-muted-foreground">{b.product_sku || "—"}</td>
-                      <td className="p-3 text-right tabular-nums font-medium">{b.quantity}</td>
-                      <td className="p-3 text-muted-foreground text-xs tabular-nums">
-                        {formatWhen(b.balance_updated_at)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleInventorySection>
 
-      <Card className="min-w-0">
-        <CardHeader className="min-w-0 pb-3">
-          <CardTitle className="text-base leading-snug break-words hyphens-auto">
-            Transfers, refills & stock-outs
-          </CardTitle>
-          <CardDescription className="break-words">
-            History rows where stock moved in or out of this location.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="min-w-0 space-y-4">
-          <div className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-md border">
+      <CollapsibleInventorySection
+        icon={History}
+        title="Transfers, refills & stock-outs"
+        count={loading ? undefined : movTotal}
+        defaultOpen
+      >
+        <div className="flex flex-col gap-4">
+          <div className="overflow-x-auto rounded-md border">
             <table className="w-max min-w-full text-sm">
               <thead className="bg-muted/50 text-muted-foreground">
                 <tr>
@@ -345,12 +526,8 @@ export function LocationProductsLineTab({
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-muted-foreground">
-                      Loading…
-                    </td>
-                  </tr>
-                ) : movRows.length === 0 ? (
+                <TableBodyRowsSkeleton rowCount={5} colCount={7} />
+              ) : movRows.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-8 text-center text-muted-foreground">
                       No movements recorded for this location yet.
@@ -365,22 +542,23 @@ export function LocationProductsLineTab({
                       <td className="whitespace-nowrap p-3 text-xs">
                         {EVENT_LABELS[m.event_type]}
                       </td>
-                      <td className="max-w-[14rem] p-3 break-words sm:max-w-[18rem]">
-                        <span className="font-medium">{m.product_name}</span>
-                        {m.product_sku ? (
-                          <span className="block text-xs text-muted-foreground">{m.product_sku}</span>
-                        ) : null}
+                      <td className="max-w-[14rem] break-words p-3 sm:max-w-[18rem]">
+                        <LocationProductLink
+                          productId={m.product_id}
+                          name={m.product_name}
+                          sku={m.product_sku || undefined}
+                        />
                       </td>
                       <td className="whitespace-nowrap p-3 text-right tabular-nums font-medium">
                         {m.quantity}
                       </td>
-                      <td className="max-w-[16rem] p-3 text-xs text-muted-foreground break-words sm:max-w-[22rem]">
-                        {movementSummary(m)}
+                      <td className="max-w-[16rem] break-words p-3 sm:max-w-[22rem]">
+                        <MovementDetailCell m={m} />
                       </td>
-                      <td className="max-w-[16rem] p-3 text-xs text-muted-foreground break-words sm:max-w-[22rem]">
+                      <td className="max-w-[16rem] break-words p-3 text-xs text-muted-foreground sm:max-w-[22rem]">
                         {m.note || "—"}
                       </td>
-                      <td className="max-w-[10rem] p-3 text-xs break-words sm:max-w-[12rem]">
+                      <td className="max-w-[10rem] break-words p-3 text-xs sm:max-w-[12rem]">
                         {m.recorded_by_label}
                       </td>
                     </tr>
@@ -391,7 +569,7 @@ export function LocationProductsLineTab({
           </div>
 
           {!loading && movTotal > 0 ? (
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex shrink-0 flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
               <span>
                 Page <span className="font-medium text-foreground">{movPage}</span> / {movPages}{" "}
                 — {movTotal} movement(s)
@@ -418,8 +596,8 @@ export function LocationProductsLineTab({
               </div>
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </CollapsibleInventorySection>
     </div>
   );
 }

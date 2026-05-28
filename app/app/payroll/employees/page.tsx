@@ -1,5 +1,6 @@
 "use client";
 
+import { TableListPageSkeleton } from "@/components/page-skeletons";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
@@ -229,7 +230,7 @@ export default function PayrollEmployeesPage() {
       </Card>
 
       {loading ? (
-        <div className="h-64 rounded-md border bg-muted/30 animate-pulse" />
+        <TableListPageSkeleton />
       ) : (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">

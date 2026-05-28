@@ -1,6 +1,7 @@
 "use client";
+import { TableListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
@@ -46,85 +47,195 @@ import { useToast } from "@/hooks/use-toast";
 import {
   listQuotations,
   deleteQuotation,
+  expireStaleQuotations,
+  getCachedQuotationList,
+  invalidateQuotationCaches,
   type QuotationListRow,
   type QuotationStatus,
 } from "@/lib/quotations-service";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
+
+function formatListCurrency(amount: number, currency: string) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
+    amount,
+  );
+}
+
+function formatListDate(dateString: string) {
+  return new Date(dateString).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
 
 export default function QuotationsPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
+  const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [rows, setRows] = useState<QuotationListRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | "all">(
     "all"
   );
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
+  const [activeCompanyScope, setActiveCompanyScope] = useState(0);
+
+  const listRequestGen = useRef(0);
+  const prevListDepsRef = useRef({
+    debouncedSearch: "",
+    statusFilter: "all" as QuotationStatus | "all",
+    itemsPerPage: 10,
+    activeCompanyScope: 0,
+  });
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const hasActiveFilters = useMemo(
-    () => searchQuery.trim() !== "" || statusFilter !== "all",
-    [searchQuery, statusFilter]
+    () => debouncedSearch !== "" || statusFilter !== "all",
+    [debouncedSearch, statusFilter],
   );
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 220);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const bump = () => {
+      invalidateQuotationCaches();
+      setActiveCompanyScope((n) => n + 1);
+    };
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        setIsLoading(true);
-        const { rows, total } = await listQuotations({
-          search: searchQuery,
-          status: statusFilter,
-          page: currentPage,
-          pageSize: itemsPerPage,
-        });
-        if (!cancelled) {
-          setRows(rows);
-          setTotal(total);
-        }
-      } catch (e: unknown) {
-        if (!cancelled) {
-          toast({
-            title: "Failed to load quotations",
-            description: e instanceof Error ? e.message : "Please try again.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
+      const id = await getActiveCompanyId();
+      if (cancelled) return;
+      setCompanyReady(!!id);
+      if (!id) {
+        setRows([]);
+        setTotal(0);
+        setListLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [searchQuery, statusFilter, currentPage, itemsPerPage, toast]);
+  }, [activeCompanyScope]);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, itemsPerPage]);
+    if (companyReady !== true) return;
+
+    const prev = prevListDepsRef.current;
+    const depsChanged =
+      prev.debouncedSearch !== debouncedSearch ||
+      prev.statusFilter !== statusFilter ||
+      prev.itemsPerPage !== itemsPerPage ||
+      prev.activeCompanyScope !== activeCompanyScope;
+
+    if (depsChanged && currentPage !== 1) {
+      setCurrentPage(1);
+      return;
+    }
+
+    prevListDepsRef.current = {
+      debouncedSearch,
+      statusFilter,
+      itemsPerPage,
+      activeCompanyScope,
+    };
+
+    const gen = ++listRequestGen.current;
+    let cancelled = false;
+
+    (async () => {
+      const companyId = await getActiveCompanyId();
+      if (cancelled || gen !== listRequestGen.current) return;
+
+      const listOpts = {
+        search: debouncedSearch || undefined,
+        status: statusFilter,
+        page: currentPage,
+        pageSize: itemsPerPage,
+      };
+
+      const cached = companyId
+        ? getCachedQuotationList(companyId, listOpts)
+        : null;
+      if (cached) {
+        setRows(cached.rows);
+        setTotal(cached.total);
+        setListLoading(false);
+      } else {
+        setListLoading(true);
+      }
+
+      try {
+        if (gen === listRequestGen.current) {
+          await expireStaleQuotations();
+        }
+        const listRes = await listQuotations({
+          ...listOpts,
+          skipExpireStale: true,
+        });
+        if (cancelled || gen !== listRequestGen.current) return;
+        setRows(listRes.rows);
+        setTotal(listRes.total);
+      } catch (e: unknown) {
+        if (cancelled || gen !== listRequestGen.current) return;
+        toastRef.current({
+          title: "Failed to load quotations",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        if (!cancelled && gen === listRequestGen.current) {
+          setListLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    companyReady,
+    debouncedSearch,
+    statusFilter,
+    currentPage,
+    itemsPerPage,
+    activeCompanyScope,
+  ]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / itemsPerPage)),
     [total, itemsPerPage]
   );
 
-  const formatCurrency = (amount: number, currency: string) =>
-    new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
-      amount
-    );
-
-  const formatDate = (dateString: string) =>
-    new Date(dateString).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
 
   const handleDuplicate = useCallback(
     (id: string) => {
@@ -167,7 +278,7 @@ export default function QuotationsPage() {
           <DataTableColumnHeader column={column} title="Issue Date" />
         ),
         meta: { searchValue: (row: QuotationListRow) => row.issueDate },
-        cell: ({ row }) => formatDate(row.original.issueDate),
+        cell: ({ row }) => formatListDate(row.original.issueDate),
       },
       {
         id: "validUntil",
@@ -176,7 +287,7 @@ export default function QuotationsPage() {
           <DataTableColumnHeader column={column} title="Valid Until" />
         ),
         meta: { searchValue: (row: QuotationListRow) => row.validUntil },
-        cell: ({ row }) => formatDate(row.original.validUntil),
+        cell: ({ row }) => formatListDate(row.original.validUntil),
       },
       {
         id: "status",
@@ -204,7 +315,7 @@ export default function QuotationsPage() {
             String(row.total) + " " + row.currency,
         },
         cell: ({ row }) =>
-          formatCurrency(row.original.total, row.original.currency),
+          formatListCurrency(row.original.total, row.original.currency),
       },
       {
         id: "actions",
@@ -286,12 +397,12 @@ export default function QuotationsPage() {
     setDeleting(true);
     try {
       await deleteQuotation(deleteId);
-      toast({ title: "Quotation deleted" });
+      toastRef.current({ title: "Quotation deleted" });
       setRows((r) => r.filter((x) => x.id !== deleteId));
       setTotal((t) => Math.max(0, t - 1));
       setDeleteId(null);
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -304,7 +415,7 @@ export default function QuotationsPage() {
   const quotationSubtitle =
     "Send price proposals before you invoice—convert accepted quotes to orders or invoices when you’re ready.";
 
-  if (isLoading && rows.length === 0) {
+  if (listLoading && rows.length === 0) {
     return (
       <AppPageShell
         subtitle={quotationSubtitle}
@@ -318,14 +429,12 @@ export default function QuotationsPage() {
           </Button>
         }
       >
-        <Card className="p-6">
-          <div className="h-40 rounded bg-muted animate-pulse" />
-        </Card>
+        <TableListPageSkeleton />
       </AppPageShell>
     );
   }
 
-  if (!isLoading && total === 0 && !hasActiveFilters) {
+  if (!listLoading && total === 0 && !hasActiveFilters) {
     return (
       <AppPageShell
         subtitle={quotationSubtitle}

@@ -1,4 +1,5 @@
 "use client";
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -638,7 +639,7 @@ export default function DeliveryZoneCitiesPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory ? (

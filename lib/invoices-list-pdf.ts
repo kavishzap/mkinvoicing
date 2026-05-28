@@ -148,7 +148,7 @@ export async function buildInvoicesListPdfDoc(params: {
 
   autoTable(doc, {
     startY: y,
-    head: [["Invoice #", "Client", "Issue date", "Due date", "Status", "Total"]],
+    head: [["Invoice #", "Customer", "Issue date", "Due date", "Status", "Total"]],
     body,
     styles: { font: "helvetica", fontSize: 9, cellPadding: 4 },
     headStyles: {

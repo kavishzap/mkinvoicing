@@ -14,6 +14,7 @@ import { ensureUserSettingsRow } from "@/lib/settings-service";
 
 const FACET_TTL_MS = 30_000;
 const LIST_TTL_MS = 30_000;
+const DETAIL_TTL_MS = 45_000;
 
 type FacetCacheEntry = {
   companyId: string;
@@ -30,6 +31,18 @@ type ListCacheEntry = {
 
 let facetCache: FacetCacheEntry | null = null;
 const listCache = new Map<string, ListCacheEntry>();
+
+type DetailCacheEntry = {
+  companyId: string;
+  expires: number;
+  detail: InvoiceDetail;
+};
+
+const detailCache = new Map<string, DetailCacheEntry>();
+
+function detailCacheKey(companyId: string, id: string) {
+  return `${companyId}|${id}`;
+}
 
 function makeListCacheKey(
   companyId: string,
@@ -77,10 +90,22 @@ export function getCachedInvoiceList(
   return { rows: hit.rows, total: hit.total };
 }
 
+/** Synchronous detail read for stale-while-revalidate on the invoice view page. */
+export function getCachedInvoice(
+  companyId: string,
+  id: string,
+): InvoiceDetail | null {
+  const hit = detailCache.get(detailCacheKey(companyId, id));
+  if (!hit || hit.companyId !== companyId) return null;
+  if (hit.expires <= Date.now()) return null;
+  return hit.detail;
+}
+
 /** Clears all invoice caches; call from any mutation that may change rows. */
 export function invalidateInvoiceCaches() {
   facetCache = null;
   listCache.clear();
+  detailCache.clear();
 }
 
 /* -------------------- Types -------------------- */
@@ -151,7 +176,7 @@ async function ensureInvoiceItemsCompanyId(
     .eq("invoice_id", invoiceId);
 
   if (error) {
-    console.warn("ensureInvoiceItemsCompanyId: update failed", error);
+    /* non-fatal: lines may already have company_id from RPC */
   }
 }
 
@@ -169,7 +194,6 @@ async function patchInvoiceItemsProductIds(
     .eq("invoice_id", invoiceId);
 
   if (error || !rows?.length) {
-    console.warn("patchInvoiceItemsProductIds: could not load invoice_items", error);
     return;
   }
 
@@ -193,7 +217,6 @@ async function patchInvoiceItemsProductIds(
     );
 
     if (!match) {
-      console.warn("patchInvoiceItemsProductIds: no matching row for line", li.item);
       continue;
     }
 
@@ -202,9 +225,7 @@ async function patchInvoiceItemsProductIds(
       .update({ product_id: pid, company_id: companyId })
       .eq("id", match.id);
 
-    if (upErr) {
-      console.warn("patchInvoiceItemsProductIds: update failed", upErr);
-    } else {
+    if (!upErr) {
       used.add(match.id);
     }
   }
@@ -304,17 +325,17 @@ export async function createInvoice(
       .eq("id", invoiceId);
 
     if (updateError) {
-      console.warn("Failed to update invoice after creation:", updateError);
+      /* RPC row exists; optional stamp fields may fail under RLS */
     }
-  } catch (updateError) {
-    console.warn("Failed to update invoice after creation:", updateError);
+  } catch {
+    /* optional post-create stamp */
   }
 
   try {
     await ensureInvoiceItemsCompanyId(invoiceId, companyId);
     await patchInvoiceItemsProductIds(invoiceId, companyId, items);
-  } catch (e) {
-    console.warn("patchInvoiceItemsAfterCreate:", e);
+  } catch {
+    /* product_id patch is best-effort */
   }
 
   invalidateInvoiceCaches();
@@ -332,8 +353,12 @@ export type InvoiceListRow = {
   dueDate: string;
   status: InvoiceStatus;
   currency: string;
+  /** Bill-to / linked customer display name. */
   clientName: string;
+  customerId: string | null;
   total: number;
+  salesOrderId: string | null;
+  salesOrderNumber: string | null;
 };
 
 /** Same figure the list table showed when totals came from line items: subtotal + line taxes (no header discount). */
@@ -346,6 +371,61 @@ function nameFromBillTo(bill?: any) {
   return bill.type === "company"
     ? bill.company_name ?? ""
     : bill.full_name ?? "";
+}
+
+function nameFromCustomerRecord(
+  c?: {
+    type?: string;
+    company_name?: string | null;
+    full_name?: string | null;
+    contact_name?: string | null;
+  } | null
+): string {
+  if (!c) return "";
+  if (c.type === "company") {
+    return String(c.company_name ?? c.contact_name ?? "").trim();
+  }
+  return String(c.full_name ?? "").trim();
+}
+
+function customerLinkFromInvoiceRow(r: {
+  customer_id?: string | null;
+  bill_to_snapshot?: unknown;
+  customers?:
+    | {
+        type?: string;
+        company_name?: string | null;
+        full_name?: string | null;
+        contact_name?: string | null;
+      }
+    | {
+        type?: string;
+        company_name?: string | null;
+        full_name?: string | null;
+        contact_name?: string | null;
+      }[]
+    | null;
+}): { customerId: string | null; clientName: string } {
+  const customerId = r.customer_id ?? null;
+  const billName = nameFromBillTo(r.bill_to_snapshot).trim();
+  const rel = r.customers;
+  const row = Array.isArray(rel) ? rel[0] : rel;
+  const recordName = nameFromCustomerRecord(row);
+  return { customerId, clientName: billName || recordName };
+}
+
+function salesOrderLinkFromInvoiceRow(r: {
+  created_from_sales_order_id?: string | null;
+  sales_orders?: { number?: string | null } | { number?: string | null }[] | null;
+}): { salesOrderId: string | null; salesOrderNumber: string | null } {
+  const salesOrderId = r.created_from_sales_order_id ?? null;
+  if (!salesOrderId) {
+    return { salesOrderId: null, salesOrderNumber: null };
+  }
+  const rel = r.sales_orders;
+  const so = Array.isArray(rel) ? rel[0] : rel;
+  const num = so?.number != null ? String(so.number).trim() : "";
+  return { salesOrderId, salesOrderNumber: num || null };
 }
 
 type SortByKey = "issueDate" | "number" | "dueDate" | "created_at";
@@ -505,7 +585,7 @@ export async function listInvoices(opts?: {
   let q = supabase
     .from("invoices")
     .select(
-      "id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at, subtotal, tax_total",
+      "id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at, subtotal, tax_total, customer_id, customers!invoices_customer_id_fkey(type, company_name, full_name, contact_name), created_from_sales_order_id, sales_orders!invoices_created_from_sales_order_id_fkey(number)",
       { count: "exact" },
     )
     .or(`company_id.eq.${companyId},company_id.is.null`);
@@ -558,19 +638,26 @@ export async function listInvoices(opts?: {
   const { data, count, error } = await q;
   if (error) throw error;
 
-  const rows: InvoiceListRow[] = (data ?? []).map((r: any) => ({
-    id: r.id,
-    number: r.number,
-    issueDate: r.issue_date,
-    dueDate: r.due_date,
-    status: r.status as InvoiceStatus,
-    currency: r.currency,
-    clientName: nameFromBillTo(r.bill_to_snapshot),
-    total: listRowLineAndTaxTotal(
-      Number(r.subtotal ?? 0),
-      Number(r.tax_total ?? 0),
-    ),
-  }));
+  const rows: InvoiceListRow[] = (data ?? []).map((r: any) => {
+    const { salesOrderId, salesOrderNumber } = salesOrderLinkFromInvoiceRow(r);
+    const { customerId, clientName } = customerLinkFromInvoiceRow(r);
+    return {
+      id: r.id,
+      number: r.number,
+      issueDate: r.issue_date,
+      dueDate: r.due_date,
+      status: r.status as InvoiceStatus,
+      currency: r.currency,
+      clientName,
+      customerId,
+      total: listRowLineAndTaxTotal(
+        Number(r.subtotal ?? 0),
+        Number(r.tax_total ?? 0),
+      ),
+      salesOrderId,
+      salesOrderNumber,
+    };
+  });
 
   const total = count ?? 0;
   const cacheKey = makeListCacheKey(companyId, opts);
@@ -620,6 +707,32 @@ export async function listAllInvoicesForExport(opts?: {
   return out.slice(0, maxRows);
 }
 
+export type InvoiceLinkForSalesOrder = {
+  id: string;
+  number: string;
+};
+
+/** Invoice created from this sales order, if any. */
+export async function getInvoiceForSalesOrder(
+  salesOrderId: string
+): Promise<InvoiceLinkForSalesOrder | null> {
+  const companyId = await requireActiveCompanyId();
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("id, number, company_id")
+    .eq("created_from_sales_order_id", salesOrderId)
+    .or(`company_id.eq.${companyId},company_id.is.null`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+  if (data.company_id && data.company_id !== companyId) return null;
+
+  return { id: data.id, number: data.number };
+}
+
 /* -------------------- Detail -------------------- */
 
 export type InvoiceItemRow = {
@@ -642,6 +755,8 @@ export type InvoiceDetail = {
   customer_id: string | null;
   created_from_quotation_id: string | null;
   created_from_sales_order_id: string | null;
+  /** Linked sales order number when `created_from_sales_order_id` is set. */
+  createdFromSalesOrderNumber: string | null;
   from_snapshot: any;
   bill_to_snapshot: any;
   shipping_amount: number;
@@ -682,6 +797,7 @@ export function computeTotals(inv: InvoiceDetail) {
 const INVOICE_DETAIL_SELECT = `
       id, company_id, number, issue_date, due_date, status, currency, customer_id,
       created_from_quotation_id, created_from_sales_order_id,
+      sales_orders!invoices_created_from_sales_order_id_fkey(number),
       from_snapshot, bill_to_snapshot,
       shipping_amount,
       discount_type, discount_amount,
@@ -721,32 +837,9 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
   }
 
   const data = row;
-
-  // Calculate totals to determine correct amount_due
   const items = (data.invoice_items ?? []) as InvoiceItemRow[];
-  const subtotal = items.reduce(
-    (s, it) => s + Number(it.quantity) * Number(it.unit_price),
-    0
-  );
-  const taxTotal = items.reduce((s, it) => {
-    const line = Number(it.quantity) * Number(it.unit_price);
-    return s + line * (Number(it.tax_percent) / 100);
-  }, 0);
-  const discount =
-    data.discount_type === "percent"
-      ? (subtotal * Number(data.discount_amount || 0)) / 100
-      : Number(data.discount_amount || 0);
-  const total = subtotal + taxTotal - discount;
-  
-  const amountPaid = Number(data.amount_paid || 0);
-  // Match invoice UI: derive balance from line totals minus paid. Stored amount_due can be 0/null
-  // for new unpaid rows, which must not hide the real balance on screen or in exports.
-  const amountDue =
-    data.status === "paid" || data.status === "cancelled"
-      ? 0
-      : Math.max(0, total - amountPaid);
 
-  return {
+  const detail: InvoiceDetail = {
     id: data.id,
     number: data.number,
     issue_date: data.issue_date,
@@ -756,6 +849,13 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     customer_id: (data.customer_id as string) ?? null,
     created_from_quotation_id: (data.created_from_quotation_id as string) ?? null,
     created_from_sales_order_id: (data.created_from_sales_order_id as string) ?? null,
+    createdFromSalesOrderNumber: (() => {
+      const rel = (data as { sales_orders?: { number?: string } | { number?: string }[] })
+        .sales_orders;
+      const so = Array.isArray(rel) ? rel[0] : rel;
+      const num = so?.number != null ? String(so.number).trim() : "";
+      return num || null;
+    })(),
     from_snapshot: data.from_snapshot,
     bill_to_snapshot: data.bill_to_snapshot,
     shipping_amount: Number(data.shipping_amount ?? 0),
@@ -764,10 +864,27 @@ export async function getInvoice(id: string): Promise<InvoiceDetail | null> {
     notes: data.notes,
     terms: data.terms,
     payment_method: (data.payment_method as string | null) ?? null,
-    amount_paid: amountPaid,
-    amount_due: amountDue,
-    items: items,
+    amount_paid: Number(data.amount_paid || 0),
+    amount_due: 0,
+    items,
   };
+
+  const { total } = computeTotals(detail);
+  const amountPaid = detail.amount_paid;
+  // Match invoice UI: derive balance from line totals minus paid. Stored amount_due can be 0/null
+  // for new unpaid rows, which must not hide the real balance on screen or in exports.
+  detail.amount_due =
+    detail.status === "paid" || detail.status === "cancelled"
+      ? 0
+      : Math.max(0, total - amountPaid);
+
+  detailCache.set(detailCacheKey(companyId, id), {
+    companyId,
+    expires: Date.now() + DETAIL_TTL_MS,
+    detail,
+  });
+
+  return detail;
 }
 
 export async function markInvoicePaid(id: string): Promise<void> {

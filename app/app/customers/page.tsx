@@ -1,8 +1,16 @@
 "use client";
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { LucideIcon } from "lucide-react";
@@ -48,6 +56,9 @@ import { useToast } from "@/hooks/use-toast";
 import {
   deleteCustomer,
   fetchCustomerListFacets,
+  getCachedCustomerList,
+  getCachedCustomerListFacets,
+  invalidateCustomerCaches,
   listAllCustomersForExport,
   listCustomers,
   setCustomerActive,
@@ -76,7 +87,7 @@ function iconForCustomerType(type: string): LucideIcon {
   return type === "company" ? Building2 : User;
 }
 
-function CustomersFilterSidebar({
+const CustomersFilterSidebar = memo(function CustomersFilterSidebar({
   facets,
   typeFilter,
   onTypeChange,
@@ -157,11 +168,13 @@ function CustomersFilterSidebar({
       </div>
     </aside>
   );
-}
+});
 
 export default function CustomersPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [rows, setRows] = useState<CustomerRow[]>([]);
@@ -206,7 +219,10 @@ export default function CustomersPage() {
   }, [searchQuery]);
 
   useEffect(() => {
-    const bump = () => setActiveCompanyScope((n) => n + 1);
+    const bump = () => {
+      invalidateCustomerCaches();
+      setActiveCompanyScope((n) => n + 1);
+    };
     window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
     const onStorage = (e: StorageEvent) => {
       if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
@@ -222,7 +238,6 @@ export default function CustomersPage() {
     let cancelled = false;
 
     (async () => {
-      setFacetsLoading(true);
       const id = await getActiveCompanyId();
       if (cancelled) return;
 
@@ -235,18 +250,26 @@ export default function CustomersPage() {
         return;
       }
 
+      const cachedFacets = getCachedCustomerListFacets(id);
+      if (cachedFacets) {
+        setFacets(cachedFacets);
+        setFacetsLoading(false);
+      } else {
+        setFacetsLoading(true);
+      }
+
       try {
         const facetData = await fetchCustomerListFacets();
         if (!cancelled) setFacets(facetData);
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load filters",
             description: msg,
             variant: "destructive",
           });
-          setFacets(null);
+          if (!cachedFacets) setFacets(null);
         }
       } finally {
         if (!cancelled) setFacetsLoading(false);
@@ -285,22 +308,37 @@ export default function CustomersPage() {
     let cancelled = false;
 
     (async () => {
-      setListLoading(true);
+      const companyId = await getActiveCompanyId();
+      if (cancelled || gen !== listRequestGen.current) return;
+
+      const listOpts = {
+        search: debouncedSearch || undefined,
+        statusFilter: "all" as const,
+        type: typeFilter === "all" ? undefined : typeFilter,
+        page,
+        pageSize,
+      };
+
+      const cached = companyId
+        ? getCachedCustomerList(companyId, listOpts)
+        : null;
+      if (cached) {
+        setRows(cached.rows);
+        setTotal(cached.total);
+        setListLoading(false);
+      } else {
+        setListLoading(true);
+      }
+
       try {
-        const listRes = await listCustomers({
-          search: debouncedSearch || undefined,
-          statusFilter: "all",
-          type: typeFilter === "all" ? undefined : typeFilter,
-          page,
-          pageSize,
-        });
+        const listRes = await listCustomers(listOpts);
         if (cancelled || gen !== listRequestGen.current) return;
         setRows(listRes.rows);
         setTotal(listRes.total);
       } catch (e: unknown) {
         if (cancelled || gen !== listRequestGen.current) return;
         const msg = e instanceof Error ? e.message : "Please try again.";
-        toast({
+        toastRef.current({
           title: "Failed to load customers",
           description: msg,
           variant: "destructive",
@@ -354,7 +392,7 @@ export default function CustomersPage() {
     } catch (e: unknown) {
       if (gen === listRequestGen.current) {
         const msg = e instanceof Error ? e.message : "Please try again.";
-        toast({
+        toastRef.current({
           title: "Failed to refresh customers",
           description: msg,
           variant: "destructive",
@@ -377,7 +415,7 @@ export default function CustomersPage() {
     async (c: CustomerRow) => {
       try {
         await setCustomerActive(c.id, !c.isActive);
-        toast({
+        toastRef.current({
           title: c.isActive ? "Customer set inactive" : "Customer activated",
           description: c.isActive
             ? "They will be hidden from default lists."
@@ -385,7 +423,7 @@ export default function CustomersPage() {
         });
         await reload();
       } catch (e: unknown) {
-        toast({
+        toastRef.current({
           title: "Update failed",
           description: e instanceof Error ? e.message : "Please try again.",
           variant: "destructive",
@@ -402,12 +440,12 @@ export default function CustomersPage() {
         setSingleDeleting(true);
         await deleteCustomer(id);
         ok = true;
-        toast({
+        toastRef.current({
           title: "Customer deleted",
           description: "Customer has been removed successfully.",
         });
       } catch (e: unknown) {
-        toast({
+        toastRef.current({
           title: "Delete failed",
           description: e instanceof Error ? e.message : "Please try again.",
           variant: "destructive",
@@ -448,7 +486,7 @@ export default function CustomersPage() {
       setExportingCsv(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to export",
           description: "No customers match the current filters.",
         });
@@ -493,12 +531,12 @@ export default function CustomersPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast({
+      toastRef.current({
         title: "CSV exported",
         description: `${data.length} customer${data.length === 1 ? "" : "s"} exported.`,
       });
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Export failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -514,7 +552,7 @@ export default function CustomersPage() {
       setPrinting(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to print",
           description: "No customers match the current filters.",
         });
@@ -537,13 +575,13 @@ export default function CustomersPage() {
         };
       } else {
         doc.save(filename);
-        toast({
+        toastRef.current({
           title: "Print blocked",
           description: "Allow popups to print. PDF downloaded instead.",
         });
       }
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Print failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -814,7 +852,7 @@ export default function CustomersPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory && facets ? (

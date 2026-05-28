@@ -1,87 +1,114 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { BarChart3, Receipt, TrendingUp, Lock } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { BarChart3, FileDown, Loader2, Receipt, TrendingUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppPageShell } from "@/components/app-page-shell";
+import { ExpenseReportTab } from "@/components/expense-report-tab";
+import { PnlReportTab } from "@/components/pnl-report-tab";
+import { SalesReportTab } from "@/components/sales-report-tab";
+import type { ReportTabExportApi } from "@/components/report-tab-export";
 
-const reportCards = [
-  {
-    title: "Profit and Loss Report",
-    description: "Download your Profit & Loss statement for any period.",
-    icon: BarChart3,
-    href: "/app/reports",
-    locked: false,
-  },
-  {
-    title: "Sales Report",
-    description: "View and analyze your sales performance over time.",
-    icon: TrendingUp,
-    href: "/app/sales-report",
-    locked: false,
-  },
-  {
-    title: "Expense Report",
-    description: "Track and export your expense breakdown by period.",
-    icon: Receipt,
-    href: "/app/expense-report",
-    locked: false,
-  },
-];
+type ReportTab = "pnl" | "sales" | "expense";
+
+function parseTab(raw: string | null): ReportTab {
+  if (raw === "sales") return "sales";
+  if (raw === "expense") return "expense";
+  return "pnl";
+}
 
 export default function ReportingsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [mainTab, setMainTab] = useState<ReportTab>(() =>
+    parseTab(searchParams.get("tab")),
+  );
+  const [pnlExport, setPnlExport] = useState<ReportTabExportApi | null>(null);
+  const [salesExport, setSalesExport] = useState<ReportTabExportApi | null>(null);
+  const [expenseExport, setExpenseExport] = useState<ReportTabExportApi | null>(null);
+
+  useEffect(() => {
+    setMainTab(parseTab(searchParams.get("tab")));
+  }, [searchParams]);
+
+  const activeExport = useMemo(() => {
+    if (mainTab === "sales") return salesExport;
+    if (mainTab === "expense") return expenseExport;
+    return pnlExport;
+  }, [mainTab, pnlExport, salesExport, expenseExport]);
 
   return (
-    <AppPageShell subtitle="Pick profit & loss, sales, or expense reports—each opens in one click.">
-      <div className="grid grid-cols-1 gap-6">
-        {reportCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <Card
-              key={card.title}
-              className={cn(
-                "transition-colors",
-                card.locked
-                  ? "opacity-60 cursor-not-allowed"
-                  : "hover:bg-accent/50 cursor-pointer"
-              )}
-              onClick={() => !card.locked && card.href && router.push(card.href)}
-            >
-              <CardHeader className="flex flex-row items-start justify-between space-y-0">
-                <div className="space-y-1.5">
-                  <CardTitle className="flex items-center gap-2">
-                    {card.title}
-                    {card.locked && (
-                      <Lock className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </CardTitle>
-                  <CardDescription>{card.description}</CardDescription>
-                </div>
-                <div
-                  className={cn(
-                    "rounded-lg p-2",
-                    card.locked ? "bg-muted" : "bg-primary/10"
-                  )}
-                >
-                  <Icon
-                    className={cn(
-                      "h-5 w-5",
-                      card.locked ? "text-muted-foreground" : "text-primary"
-                    )}
-                  />
-                </div>
-              </CardHeader>
-              {card.locked && (
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">Coming soon</p>
-                </CardContent>
-              )}
-            </Card>
-          );
-        })}
-      </div>
+    <AppPageShell
+      fillHeight
+      compact
+      className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
+      actions={
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 shrink-0"
+          onClick={() => void activeExport?.exportPdf()}
+          disabled={!activeExport?.canExport || activeExport.exporting}
+        >
+          {activeExport?.exporting ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Exporting…
+            </>
+          ) : (
+            <>
+              <FileDown className="h-4 w-4" />
+              Export PDF
+            </>
+          )}
+        </Button>
+      }
+    >
+      <Tabs
+        value={mainTab}
+        onValueChange={(v) => {
+          const tab = parseTab(v);
+          setMainTab(tab);
+          router.replace(`/app/reportings?tab=${tab}`, { scroll: false });
+        }}
+        className="flex min-h-0 flex-1 flex-col gap-4"
+      >
+        <TabsList className="grid h-auto w-full shrink-0 grid-cols-3 gap-1 p-1 sm:inline-flex sm:w-auto">
+          <TabsTrigger value="pnl" className="gap-1.5 text-xs sm:text-sm">
+            <BarChart3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Profit &amp; loss
+          </TabsTrigger>
+          <TabsTrigger value="sales" className="gap-1.5 text-xs sm:text-sm">
+            <TrendingUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Sales
+          </TabsTrigger>
+          <TabsTrigger value="expense" className="gap-1.5 text-xs sm:text-sm">
+            <Receipt className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Expenses
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent
+          value="pnl"
+          className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        >
+          <PnlReportTab onExportReady={setPnlExport} />
+        </TabsContent>
+        <TabsContent
+          value="sales"
+          className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        >
+          <SalesReportTab onExportReady={setSalesExport} />
+        </TabsContent>
+        <TabsContent
+          value="expense"
+          className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        >
+          <ExpenseReportTab onExportReady={setExpenseExport} />
+        </TabsContent>
+      </Tabs>
     </AppPageShell>
   );
 }

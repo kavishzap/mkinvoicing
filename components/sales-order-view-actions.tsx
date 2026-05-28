@@ -209,7 +209,8 @@ export function SalesOrderViewActions({
     salesOrder != null &&
     fulfillmentNorm !== "delivered to customer" &&
     fulfillmentNorm !== "completed" &&
-    fulfillmentNorm !== "cancelled";
+    fulfillmentNorm !== "cancelled" &&
+    fulfillmentNorm !== "upselling";
 
   const renderPdf = async (mode: "download" | "print") => {
     if (busy) return;

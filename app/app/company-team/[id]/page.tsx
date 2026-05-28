@@ -1,4 +1,5 @@
 "use client";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
@@ -160,10 +161,7 @@ export default function CompanyTeamMemberViewPage() {
       }
     >
       {loading ? (
-        <div className="flex min-h-[40vh] items-center justify-center gap-2 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          Loading…
-        </div>
+        <DetailDocumentPageSkeleton />
       ) : !member ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">

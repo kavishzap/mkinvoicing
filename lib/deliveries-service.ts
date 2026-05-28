@@ -9,26 +9,24 @@ import {
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
 
+/** Fulfillment states whose order total counts toward driver cash for settlement. */
+const DRIVER_SETTLEMENT_CASH_FULFILLMENT_KEYS = new Set([
+  "delivered to customer",
+  "completed",
+  "upselling",
+]);
+
 /**
- * Sum order totals that should count as cash with the driver for route settlement.
- * Cancelled orders are excluded.
+ * Sum order totals for cash settlement: sales orders with fulfillment
+ * **Delivered to customer**, **Completed**, or **Upselling**.
  */
 function salesOrderCountsForDriverSettlementCash(
-  paymentStatus: string | null | undefined,
   fulfillmentStatus: string | null | undefined
 ): boolean {
   const fulfillment = normalizeSalesOrderFulfillmentStatus(fulfillmentStatus);
-  if (fulfillment === "cancelled") return false;
-  const payment = normalizeSalesOrderPaymentStatus(paymentStatus);
-  if (payment === "paid" || payment === "partial") return true;
-  if (payment === "unpaid") {
-    return (
-      fulfillment === "delivered to customer" ||
-      fulfillment === "completed" ||
-      fulfillment === "delivered to driver"
-    );
-  }
-  return false;
+  return DRIVER_SETTLEMENT_CASH_FULFILLMENT_KEYS.has(
+    String(fulfillment).trim().toLowerCase()
+  );
 }
 
 export const DELIVERY_NOTE_STATUSES = [
@@ -166,6 +164,51 @@ export async function precheckDeliveryDeliveredToDriver(params: {
   return { ok: true };
 }
 
+/** Postgres `mark_delivery_delivered_to_driver` stock error (product id in legacy messages). */
+const PRIMARY_WAREHOUSE_STOCK_ERROR_RE =
+  /Not enough stock in (?:the )?primary warehouse for product ([^.\s]+)\.\s*Required\s*([\d.]+),\s*available\s*([\d.]+)\./i;
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Replaces product id/uuid in RPC stock errors with catalog name (and SKU when helpful).
+ */
+async function humanizePrimaryWarehouseStockError(
+  message: string,
+  companyId: string,
+): Promise<string> {
+  const match = message.match(PRIMARY_WAREHOUSE_STOCK_ERROR_RE);
+  if (!match) return message;
+
+  const productRef = match[1];
+  const required = match[2];
+  const available = match[3];
+
+  let query = supabase
+    .from("products")
+    .select("id, name, sku")
+    .eq("company_id", companyId);
+
+  if (UUID_RE.test(productRef)) {
+    query = query.eq("id", productRef);
+  } else {
+    query = query.or(`id.eq.${productRef},sku.eq.${productRef}`);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error) return message;
+
+  const name = String(data?.name ?? "").trim();
+  const sku = String(data?.sku ?? "").trim();
+  const label =
+    name && sku && name !== sku
+      ? `${name} (${sku})`
+      : name || sku || productRef;
+
+  return `Not enough stock in primary warehouse for ${label}. Required ${required}, available ${available}.`;
+}
+
 export function getNextDeliveryNoteStatus(
   current: DeliveryNoteStatus
 ): DeliveryNoteStatus | null {
@@ -192,6 +235,7 @@ export type SalesOrderPickRow = {
   paymentStatus: SalesOrderPaymentStatus;
   fulfillmentStatus: SalesOrderFulfillmentStatus;
   clientName: string;
+  customerId: string | null;
   phone: string;
   email: string;
   /** Canonical city UUID when known (`sales_orders.city_id` or linked customer `city_id`). */
@@ -209,6 +253,8 @@ export type DeliveryListRow = {
   driverStatus: boolean;
   driverUserId: string;
   driverDisplay: string;
+  /** `company_users.id` for `/app/company-team/[id]` when the driver is a team member. */
+  driverMembershipId: string | null;
   createdByUserId: string;
   createdByDisplay: string;
   notes: string | null;
@@ -218,8 +264,8 @@ export type DeliveryListRow = {
   /** Sum of `sales_orders.total` for all orders linked to this delivery. */
   totalAmount: number;
   /**
-   * Sum of totals for orders counted as cash with the driver for settlement: paid or partial,
-   * or unpaid once fulfillment is at least `delivered to driver` (COD / status lag before paid).
+   * Sum of `sales_orders.total` for orders on this delivery with fulfillment
+   * **delivered to customer**, **completed**, or **upselling** (cash for settlement).
    */
   totalAmountCashForSettlement: number;
   /**
@@ -236,6 +282,7 @@ export type DeliveryDetailSalesOrder = {
   currency: string;
   total: number;
   clientName: string;
+  customerId: string | null;
   phone: string;
   email: string;
   addressLines: string;
@@ -257,10 +304,36 @@ export type DeliveryDetail = {
   updatedAt: string;
   driverUserId: string;
   driverDisplay: string;
+  driverMembershipId: string | null;
   createdByUserId: string;
   createdByDisplay: string;
   salesOrders: DeliveryDetailSalesOrder[];
+  /** Sum of `sales_orders.total` for all orders on this delivery. */
+  totalAmount: number;
+  /** Sum of totals for orders with fulfillment delivered to customer, completed, or upselling (cash for settlement). */
+  totalAmountCashForSettlement: number;
+  /**
+   * When `driver_status` is true and a settlement row exists: cash + bank paid to owner.
+   */
+  driverCollectedAmount: number | null;
 };
+
+export function deliverySettlementTotalsFromSalesOrders(
+  salesOrders: Pick<
+    DeliveryDetailSalesOrder,
+    "total" | "paymentStatus" | "fulfillmentStatus"
+  >[]
+): { totalAmount: number; totalAmountCashForSettlement: number } {
+  let totalAmount = 0;
+  let totalAmountCashForSettlement = 0;
+  for (const so of salesOrders) {
+    totalAmount += so.total;
+    if (salesOrderCountsForDriverSettlementCash(so.fulfillmentStatus)) {
+      totalAmountCashForSettlement += so.total;
+    }
+  }
+  return { totalAmount, totalAmountCashForSettlement };
+}
 
 function clientNameFromBill(bill: Record<string, unknown>) {
   const company = String(bill.company_name ?? "").trim();
@@ -375,6 +448,31 @@ async function profileDisplayMap(
   return map;
 }
 
+async function membershipIdsByUserId(
+  companyId: string,
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("company_users")
+    .select("id, user_id")
+    .eq("company_id", companyId)
+    .in("user_id", uniq);
+
+  if (error) throw new Error(error.message);
+
+  for (const row of data ?? []) {
+    const uid = String((row as { user_id?: unknown }).user_id ?? "");
+    const mid = String((row as { id?: unknown }).id ?? "");
+    if (uid && mid) map.set(uid, mid);
+  }
+
+  return map;
+}
+
 /** Team members whose role name includes “driver” (case-insensitive). */
 export async function listDriverTeamMembers(): Promise<TeamMemberRow[]> {
   return listDriverRoleTeamMembers();
@@ -441,6 +539,7 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
         row.fulfillment_status as string | null | undefined
       ),
       clientName,
+      customerId: (row.customer_id as string | null) ?? null,
       phone,
       email,
       cityId,
@@ -461,6 +560,7 @@ const SALES_ORDER_ROWS_FOR_DELIVERY_DETAIL = `
   number,
   currency,
   total,
+  customer_id,
   payment_status,
   bill_to_snapshot,
   fulfillment_status,
@@ -505,6 +605,10 @@ function deliveryDetailSalesOrderFromSoRecord(
     currency: String(so.currency ?? "MUR"),
     total: Number(so.total ?? 0),
     clientName,
+    customerId:
+      so.customer_id != null && String(so.customer_id).trim()
+        ? String(so.customer_id)
+        : null,
     phone,
     email,
     addressLines,
@@ -605,8 +709,17 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
           .eq("company_id", companyId)
           .in("delivery_id", deliveryIds);
 
-  const [names, pinnedRes, settlementsRes] = await Promise.all([
+  const driverUserIds = [
+    ...new Set(
+      rows
+        .map((r) => String((r as Record<string, unknown>).driver_user_id ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+
+  const [names, memberships, pinnedRes, settlementsRes] = await Promise.all([
     profileDisplayMap(userIds),
+    membershipIdsByUserId(companyId, driverUserIds),
     pinnedQuery,
     settlementsQuery,
   ]);
@@ -640,7 +753,6 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       totalAmount += Number(so?.total ?? 0);
       if (
         salesOrderCountsForDriverSettlementCash(
-          so?.payment_status as string | null | undefined,
           so?.fulfillment_status as string | null | undefined
         )
       ) {
@@ -699,12 +811,7 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
     let addSettlementCash = 0;
     for (const x of extras) {
       addTotal += x.total;
-      if (
-        salesOrderCountsForDriverSettlementCash(
-          x.payment_status,
-          x.fulfillment_status
-        )
-      ) {
+      if (salesOrderCountsForDriverSettlementCash(x.fulfillment_status)) {
         addSettlementCash += x.total;
       }
     }
@@ -723,6 +830,7 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       driverStatus: settled,
       driverUserId: p.driverId,
       driverDisplay: names.get(p.driverId) ?? p.driverId.slice(0, 8),
+      driverMembershipId: memberships.get(p.driverId) ?? null,
       createdByUserId: p.createdId,
       createdByDisplay: names.get(p.createdId) ?? p.createdId.slice(0, 8),
       notes: null,
@@ -758,6 +866,91 @@ export async function setDeliveryDriverStatus(
 
 function roundMoney2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+export type DeliveryUpsellingCommissionRow = {
+  salesOrderId: string;
+  commissionAmount: number;
+  currency: string;
+};
+
+export async function listDeliveryUpsellingCommissions(
+  deliveryId: string
+): Promise<DeliveryUpsellingCommissionRow[]> {
+  const companyId = await requireActiveCompanyId();
+  const { data, error } = await supabase
+    .from("delivery_upselling_commissions")
+    .select("sales_order_id, commission_amount, currency")
+    .eq("company_id", companyId)
+    .eq("delivery_id", deliveryId);
+
+  if (error) {
+    if (error.code === "42P01" || error.message.includes("does not exist")) {
+      return [];
+    }
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      salesOrderId: String(r.sales_order_id ?? ""),
+      commissionAmount: Number(r.commission_amount ?? 0),
+      currency: String(r.currency ?? "MUR").trim() || "MUR",
+    };
+  });
+}
+
+export async function upsertDeliveryUpsellingCommissions(
+  deliveryId: string,
+  rows: { salesOrderId: string; commissionAmount: number; currency?: string }[]
+): Promise<void> {
+  if (rows.length === 0) return;
+  const companyId = await requireActiveCompanyId();
+  const uid = await getCurrentUserId();
+  const now = new Date().toISOString();
+
+  const payload = rows.map((r) => ({
+    company_id: companyId,
+    delivery_id: deliveryId,
+    sales_order_id: r.salesOrderId,
+    commission_amount: roundMoney2(Number(r.commissionAmount)),
+    currency: (r.currency ?? "MUR").trim() || "MUR",
+    recorded_by: uid,
+    updated_at: now,
+  }));
+
+  const { error } = await supabase
+    .from("delivery_upselling_commissions")
+    .upsert(payload, { onConflict: "delivery_id,sales_order_id" });
+
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteDeliveryUpsellingCommissions(
+  deliveryId: string
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("delivery_upselling_commissions")
+    .delete()
+    .eq("company_id", companyId)
+    .eq("delivery_id", deliveryId);
+  if (error) {
+    if (error.code === "42P01" || error.message.includes("does not exist")) {
+      return;
+    }
+    throw new Error(error.message);
+  }
+}
+
+export function deliveryUpsellingSalesOrders(
+  salesOrders: DeliveryDetailSalesOrder[]
+): DeliveryDetailSalesOrder[] {
+  return salesOrders.filter((so) => {
+    const norm = normalizeSalesOrderFulfillmentStatus(so.fulfillmentStatus);
+    return String(norm).trim().toLowerCase() === "upselling";
+  });
 }
 
 export type InsertDeliveryDriverSettlementParams = {
@@ -796,7 +989,7 @@ export async function insertDeliveryDriverSettlement(
   }
   if (due > 0) {
     if (roundMoney2(cash + bank) !== due) {
-      throw new Error("Cash plus bank transfer must equal the amount to return to the owner.");
+      throw new Error("Cash plus bank transfer must equal the Return to Owner Amount.");
     }
     if (cash <= 0 && bank <= 0) {
       throw new Error("Enter at least one of cash or bank transfer amount.");
@@ -922,6 +1115,7 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
           number,
           currency,
           total,
+          customer_id,
           payment_status,
           bill_to_snapshot,
           fulfillment_status,
@@ -949,7 +1143,10 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
   const d = data as Record<string, unknown>;
   const driverId = d.driver_user_id as string;
   const createdId = d.created_by as string;
-  const names = await profileDisplayMap([driverId, createdId]);
+  const [names, memberships] = await Promise.all([
+    profileDisplayMap([driverId, createdId]),
+    membershipIdsByUserId(companyId, [driverId]),
+  ]);
 
   const links = (d.delivery_sales_orders ?? []) as Record<string, unknown>[];
   const salesOrders: DeliveryDetailSalesOrder[] = links.map((link) => {
@@ -974,10 +1171,23 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
   salesOrders.push(...pinned);
   salesOrders.sort((a, b) => a.number.localeCompare(b.number));
 
+  const { totalAmount, totalAmountCashForSettlement } =
+    deliverySettlementTotalsFromSalesOrders(salesOrders);
+  const settled = Boolean(d.driver_status);
+  let driverCollectedAmount: number | null = null;
+  if (settled) {
+    const settlement = await getDeliveryDriverSettlement(id);
+    if (settlement) {
+      driverCollectedAmount = roundMoney2(
+        settlement.cashAmount + settlement.bankTransferAmount
+      );
+    }
+  }
+
   return {
     id: d.id as string,
     status: normalizeDeliveryNoteStatus(d.status as string | null | undefined),
-    driverStatus: Boolean(d.driver_status),
+    driverStatus: settled,
     notes: (d.notes as string | null) ?? null,
     deliveryDate:
       d.delivery_date != null && String(d.delivery_date).trim()
@@ -987,9 +1197,13 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
     updatedAt: String(d.updated_at ?? ""),
     driverUserId: driverId,
     driverDisplay: names.get(driverId) ?? driverId.slice(0, 8),
+    driverMembershipId: memberships.get(driverId) ?? null,
     createdByUserId: createdId,
     createdByDisplay: names.get(createdId) ?? createdId.slice(0, 8),
     salesOrders,
+    totalAmount,
+    totalAmountCashForSettlement,
+    driverCollectedAmount,
   };
 }
 
@@ -1162,14 +1376,14 @@ async function getDriverLocationStockForProducts(
  */
 export async function getDriverStockReturnContext(
   deliveryId: string,
-  opts?: { p_days?: number }
+  opts?: { p_days?: number; delivery?: DeliveryDetail }
 ): Promise<DriverStockReturnContext> {
   const raw = opts?.p_days;
   const n = Math.floor(Number(raw));
   const p_days = Number.isFinite(n)
     ? Math.max(0, Math.min(366, n))
     : 0;
-  const d = await getDelivery(deliveryId);
+  const d = opts?.delivery ?? (await getDelivery(deliveryId));
   if (!d) {
     return { lines: [], availableByProduct: {}, p_days };
   }
@@ -1181,6 +1395,29 @@ export async function getDriverStockReturnContext(
     lines.map((l) => l.productId)
   );
   return { lines, availableByProduct, p_days };
+}
+
+export type DeliveryDetailPageData = {
+  delivery: DeliveryDetail;
+  drivers: TeamMemberRow[];
+  stockReturn: DriverStockReturnContext | null;
+};
+
+/** Single coordinated load for the delivery note detail page (one `getDelivery` call). */
+export async function loadDeliveryDetailPageData(
+  deliveryId: string
+): Promise<DeliveryDetailPageData | null> {
+  const delivery = await getDelivery(deliveryId);
+  if (!delivery) return null;
+
+  const [drivers, stockReturn] = await Promise.all([
+    listDriverTeamMembers(),
+    delivery.driverStatus
+      ? Promise.resolve(null)
+      : getDriverStockReturnContext(deliveryId, { p_days: 0, delivery }),
+  ]);
+
+  return { delivery, drivers, stockReturn };
 }
 
 /**
@@ -1269,10 +1506,11 @@ export async function advanceDeliveryNoteStatus(
     );
 
     if (rpcErr) {
-      throw new Error(
+      const raw =
         rpcErr.message ??
-          "Could not transfer stock for this delivery. Check primary warehouse stock and try again."
-      );
+        "Could not transfer stock for this delivery. Check primary warehouse stock and try again.";
+      const message = await humanizePrimaryWarehouseStockError(raw, companyId);
+      throw new Error(message);
     }
 
     if (salesOrderIds.length > 0) {
@@ -1353,6 +1591,43 @@ export async function advanceDeliveryNoteStatus(
   }
 
   return getDelivery(deliveryId);
+}
+
+/**
+ * Moves the delivery note to **completed** by advancing status as needed
+ * (e.g. delivered_to_driver → completed). No-op if already completed.
+ */
+export async function ensureDeliveryNoteCompleted(
+  deliveryId: string
+): Promise<DeliveryDetail | null> {
+  const companyId = await requireActiveCompanyId();
+  const { data: row, error } = await supabase
+    .from("deliveries")
+    .select("status")
+    .eq("id", deliveryId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!row) return null;
+
+  let current = normalizeDeliveryNoteStatus(
+    (row as { status?: string | null }).status
+  );
+  if (current === "completed") {
+    return getDelivery(deliveryId);
+  }
+
+  let latest: DeliveryDetail | null = null;
+  for (let step = 0; step < 2; step++) {
+    if (!getNextDeliveryNoteStatus(current)) break;
+    latest = await advanceDeliveryNoteStatus(deliveryId);
+    if (!latest) break;
+    current = latest.status;
+    if (current === "completed") break;
+  }
+
+  return latest ?? getDelivery(deliveryId);
 }
 
 export type CreateDeliveryPayload = {

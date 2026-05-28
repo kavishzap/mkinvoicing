@@ -1,4 +1,5 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
@@ -115,10 +116,7 @@ export default function EditPayrollEmployeePage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center gap-2 py-8 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              Loading…
-            </div>
+            <FormTwoColumnPageSkeleton withLineItems={false} className="border-0 p-0 shadow-none" />
           ) : notFound ? (
             <p className="text-sm text-muted-foreground">Employee not found.</p>
           ) : (

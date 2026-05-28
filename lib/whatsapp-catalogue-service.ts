@@ -10,6 +10,47 @@ export type CataloguePostPayload = {
   is_active?: boolean;
 };
 
+export type WhatsAppListStatus = "all" | "active" | "inactive";
+
+export type WhatsAppListFacets = {
+  companyTotal: number;
+  activeCount: number;
+  inactiveCount: number;
+};
+
+export async function fetchWhatsAppCatalogueListFacets(): Promise<WhatsAppListFacets> {
+  const companyId = await requireCompanyId();
+  const base = () =>
+    supabase
+      .from("whatsapp_catalogue_posts")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const [r0, r1, r2] = await Promise.all([
+    base(),
+    base().eq("is_active", true),
+    base().eq("is_active", false),
+  ]);
+
+  if (r0.error) throw new Error(r0.error.message);
+  if (r1.error) throw new Error(r1.error.message);
+  if (r2.error) throw new Error(r2.error.message);
+
+  return {
+    companyTotal: r0.count ?? 0,
+    activeCount: r1.count ?? 0,
+    inactiveCount: r2.count ?? 0,
+  };
+}
+
+function resolveCatalogueListStatus(opts?: {
+  status?: WhatsAppListStatus;
+  includeInactive?: boolean;
+}): WhatsAppListStatus {
+  if (opts?.status) return opts.status;
+  return opts?.includeInactive ? "all" : "active";
+}
+
 export type CataloguePostRow = {
   id: string;
   company_id: string;
@@ -70,6 +111,8 @@ function mapRow(r: Record<string, unknown>, includeImage: boolean): CataloguePos
 }
 
 export async function listCataloguePosts(opts?: {
+  search?: string;
+  status?: WhatsAppListStatus;
   includeInactive?: boolean;
   page?: number;
   pageSize?: number;
@@ -79,6 +122,7 @@ export async function listCataloguePosts(opts?: {
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
+  const status = resolveCatalogueListStatus(opts);
 
   let q = supabase
     .from("whatsapp_catalogue_posts")
@@ -87,8 +131,13 @@ export async function listCataloguePosts(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (!opts?.includeInactive) {
-    q = q.eq("is_active", true);
+  if (status === "active") q = q.eq("is_active", true);
+  else if (status === "inactive") q = q.eq("is_active", false);
+
+  const term = opts?.search?.trim();
+  if (term) {
+    const s = `%${term}%`;
+    q = q.ilike("description", s);
   }
 
   const { data, error, count } = await q;

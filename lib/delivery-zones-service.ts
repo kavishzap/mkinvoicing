@@ -551,6 +551,8 @@ export type DriverZoneCityFilter = {
   /** When false, the driver is not on any active zone — callers should not filter by zone. */
   hasZoneAssignment: boolean;
   cityIds: string[];
+  /** Display names for route cities (sorted). */
+  cityNames: string[];
   /** Lowercased trimmed city names for all cities in those zone(s). */
   cityNamesLower: string[];
 };
@@ -563,7 +565,12 @@ export async function getDriverZoneCityFilter(
   driverUserId: string
 ): Promise<DriverZoneCityFilter> {
   if (!driverUserId?.trim()) {
-    return { hasZoneAssignment: false, cityIds: [], cityNamesLower: [] };
+    return {
+      hasZoneAssignment: false,
+      cityIds: [],
+      cityNames: [],
+      cityNamesLower: [],
+    };
   }
   const companyId = await requireActiveCompanyId();
 
@@ -578,7 +585,12 @@ export async function getDriverZoneCityFilter(
 
   const zoneIds = (zones ?? []).map((z) => String((z as { id: unknown }).id));
   if (zoneIds.length === 0) {
-    return { hasZoneAssignment: false, cityIds: [], cityNamesLower: [] };
+    return {
+      hasZoneAssignment: false,
+      cityIds: [],
+      cityNames: [],
+      cityNamesLower: [],
+    };
   }
 
   const { data: links, error: lErr } = await supabase
@@ -591,6 +603,7 @@ export async function getDriverZoneCityFilter(
 
   const cityIds = new Set<string>();
   const nameSet = new Set<string>();
+  const displayNames = new Set<string>();
 
   for (const raw of links ?? []) {
     const r = raw as {
@@ -601,15 +614,21 @@ export async function getDriverZoneCityFilter(
     if (cid) cityIds.add(cid);
     const city = r.cities;
     const cityObj = Array.isArray(city) ? city[0] : city;
-    const nm = String(cityObj?.name ?? "")
-      .trim()
-      .toLowerCase();
-    if (nm) nameSet.add(nm);
+    const display = String(cityObj?.name ?? "").trim();
+    if (display) {
+      displayNames.add(display);
+      nameSet.add(display.toLowerCase());
+    }
   }
+
+  const cityNames = [...displayNames].sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  );
 
   return {
     hasZoneAssignment: true,
     cityIds: [...cityIds],
+    cityNames,
     cityNamesLower: [...nameSet],
   };
 }

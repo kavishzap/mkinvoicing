@@ -1,4 +1,5 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
@@ -255,10 +256,7 @@ export default function CompanyTeamEditMemberPage() {
     >
       <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
         {loading ? (
-          <div className="flex items-center gap-2 py-12 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Loading…
-          </div>
+          <FormTwoColumnPageSkeleton withLineItems={false} />
         ) : !member ? (
           <p className="text-sm text-muted-foreground">Member not found.</p>
         ) : (

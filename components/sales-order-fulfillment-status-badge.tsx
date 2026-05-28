@@ -2,13 +2,13 @@
 
 import { Badge } from "@/components/ui/badge";
 import {
-  SALES_ORDER_FULFILLMENT_LABELS,
+  salesOrderFulfillmentDisplayLabel,
   normalizeSalesOrderFulfillmentStatus,
   type SalesOrderFulfillmentStatus,
 } from "@/lib/sales-orders-service";
 import { cn } from "@/lib/utils";
 
-const styles: Record<SalesOrderFulfillmentStatus, string> = {
+const styles: Record<string, string> = {
   new: "bg-slate-100 text-slate-900 border-slate-200",
   pending: "bg-blue-100 text-blue-950 border-blue-200 dark:bg-blue-950/35 dark:text-blue-100 dark:border-blue-800",
   "delivery note created": "bg-violet-100 text-violet-900 border-violet-200",
@@ -17,6 +17,8 @@ const styles: Record<SalesOrderFulfillmentStatus, string> = {
   completed: "bg-green-100 text-green-900 border-green-200",
   cancelled: "bg-red-100 text-red-900 border-red-200",
   rescheduled: "bg-amber-100 text-amber-900 border-amber-200",
+  upselling:
+    "bg-purple-100 text-purple-950 border-purple-200 dark:bg-purple-950/40 dark:text-purple-100 dark:border-purple-800",
 };
 
 export function SalesOrderFulfillmentStatusBadge({
@@ -30,6 +32,9 @@ export function SalesOrderFulfillmentStatusBadge({
   const s = normalizeSalesOrderFulfillmentStatus(
     status === null || status === undefined ? undefined : String(status)
   );
+  const label = salesOrderFulfillmentDisplayLabel(
+    status === null || status === undefined ? "" : String(status),
+  );
   return (
     <Badge
       variant="outline"
@@ -39,7 +44,7 @@ export function SalesOrderFulfillmentStatusBadge({
         className
       )}
     >
-      {SALES_ORDER_FULFILLMENT_LABELS[s] ?? s}
+      {label}
     </Badge>
   );
 }

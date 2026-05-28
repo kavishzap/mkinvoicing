@@ -1,5 +1,6 @@
 "use client";
 
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -60,9 +61,11 @@ import {
   getActiveCompanyId,
 } from "@/lib/active-company";
 import {
+  getCompanyTeamSeatUsage,
   listTeamMembers,
   removeTeamMember,
   updateDriverRate,
+  type CompanyTeamSeatUsage,
   type TeamMemberRow,
 } from "@/lib/company-team-service";
 import { AppPageShell } from "@/components/app-page-shell";
@@ -247,6 +250,7 @@ export default function CompanyTeamPage() {
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
 
   const [allRows, setAllRows] = useState<TeamMemberRow[]>([]);
+  const [seatUsage, setSeatUsage] = useState<CompanyTeamSeatUsage | null>(null);
   const [listLoading, setListLoading] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -290,13 +294,18 @@ export default function CompanyTeamPage() {
     setCompanyReady(!!id);
     if (!id) {
       setAllRows([]);
+      setSeatUsage(null);
       setListLoading(false);
       return;
     }
     setListLoading(true);
     try {
-      const memberList = await listTeamMembers();
+      const [memberList, seats] = await Promise.all([
+        listTeamMembers(),
+        getCompanyTeamSeatUsage(id),
+      ]);
       setAllRows(memberList);
+      setSeatUsage(seats);
     } catch (err) {
       toast({
         title: "Failed to load team",
@@ -304,6 +313,7 @@ export default function CompanyTeamPage() {
         variant: "destructive",
       });
       setAllRows([]);
+      setSeatUsage(null);
     } finally {
       setListLoading(false);
     }
@@ -605,16 +615,23 @@ export default function CompanyTeamPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <Button
-          className="shrink-0 gap-2"
-          disabled={companyReady !== true}
-          asChild
-        >
-          <Link href="/app/company-team/new">
+        seatUsage?.canInvite === false ? (
+          <Button
+            className="shrink-0 gap-2"
+            disabled
+            title={`Team limit reached (${seatUsage.currentCount}/${seatUsage.effectiveLimit})`}
+          >
             <UserPlus className="h-4 w-4" />
             Invite team member
-          </Link>
-        </Button>
+          </Button>
+        ) : (
+          <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+            <Link href="/app/company-team/new">
+              <UserPlus className="h-4 w-4" />
+              Invite team member
+            </Link>
+          </Button>
+        )
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
@@ -638,6 +655,19 @@ export default function CompanyTeamPage() {
         ) : null
       }
     >
+      {seatUsage?.atLimit ? (
+        <Card className="mb-4 shrink-0 border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
+          <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
+            Team member limit reached ({seatUsage.currentCount} of{" "}
+            {seatUsage.effectiveLimit} seats).{" "}
+            {seatUsage.maxUsersOverride != null && seatUsage.maxUsersOverride > 0
+              ? `Plan allows ${seatUsage.planMaxUsers} users plus ${seatUsage.maxUsersOverride} extra. `
+              : `Plan allows ${seatUsage.effectiveLimit} user${seatUsage.effectiveLimit === 1 ? "" : "s"}. `}
+            Remove an inactive member or upgrade your subscription to invite more.
+          </CardContent>
+        </Card>
+      ) : null}
+
       {companyReady === false && (
         <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
           <CardContent className="pt-6 text-sm text-amber-900 dark:text-amber-100">
@@ -651,18 +681,8 @@ export default function CompanyTeamPage() {
         </Card>
       )}
 
-      {showInitialCompanyPulse ? (
-        <div
-          className="h-56 animate-pulse rounded-md bg-muted/60"
-          aria-hidden
-        />
-      ) : null}
-
-      {showSkeleton ? (
-        <div
-          className="h-56 animate-pulse rounded-md bg-muted/60"
-          aria-hidden
-        />
+      {showInitialCompanyPulse || showSkeleton ? (
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory ? (
@@ -719,6 +739,11 @@ export default function CompanyTeamPage() {
               </div>
               <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
                 {listRangeLabel}
+                {seatUsage ? (
+                  <span className="mt-0.5 block text-xs">
+                    Seats: {seatUsage.currentCount}/{seatUsage.effectiveLimit}
+                  </span>
+                ) : null}
               </p>
             </div>
             <div
@@ -768,12 +793,14 @@ export default function CompanyTeamPage() {
                       title="No team members yet"
                       description="Invite colleagues by email and assign a role so they only see what they should."
                       action={
-                        <Button className="gap-2" asChild>
-                          <Link href="/app/company-team/new">
-                            <UserPlus className="h-4 w-4" />
-                            Invite team member
-                          </Link>
-                        </Button>
+                        seatUsage?.canInvite !== false ? (
+                          <Button className="gap-2" asChild>
+                            <Link href="/app/company-team/new">
+                              <UserPlus className="h-4 w-4" />
+                              Invite team member
+                            </Link>
+                          </Button>
+                        ) : undefined
                       }
                       className="border-0 bg-transparent py-8"
                     />

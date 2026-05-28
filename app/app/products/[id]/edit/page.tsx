@@ -1,5 +1,9 @@
 "use client";
 
+import {
+  FormTwoColumnPageSkeleton,
+  TableBodyRowsSkeleton,
+} from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -32,14 +36,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppPageShell } from "@/components/app-page-shell";
@@ -60,7 +56,6 @@ import {
   type StockBalanceRow,
 } from "@/lib/inventory-stock-service";
 import {
-  deleteProduct,
   getProduct,
   type ProductPayload,
   updateProduct,
@@ -89,6 +84,7 @@ const MOV_EVENT_LABELS: Record<InventoryMovementRow["event_type"], string> = {
 };
 
 const PRODUCT_MOV_HISTORY_PAGE_SIZE = 15;
+const stockMovFormClass = "max-w-xl space-y-4";
 
 function formatMovementWhen(iso: string) {
   if (!iso) return "—";
@@ -271,7 +267,6 @@ export default function EditInventoryProductPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [productIsActive, setProductIsActive] = useState(true);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const refreshStockViews = useCallback(
@@ -414,24 +409,6 @@ export default function EditInventoryProductPage() {
       });
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleConfirmDelete() {
-    if (!productId) return;
-    try {
-      await deleteProduct(productId);
-      toast({ title: "Product deleted", description: "The product has been removed." });
-      router.push("/app/products");
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
-        title: "Delete failed",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setConfirmDeleteOpen(false);
     }
   }
 
@@ -640,14 +617,9 @@ export default function EditInventoryProductPage() {
         )
       }
     >
-      <div className="flex min-w-0 flex-col gap-4 overflow-x-hidden rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
         {loading ? (
-          <>
-            <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-            <div className="grid grid-cols-1 gap-6 lg:gap-8">
-              <div className="h-64 animate-pulse rounded-lg bg-muted" />
-            </div>
-          </>
+          <FormTwoColumnPageSkeleton withLineItems={false} />
         ) : loadError ? (
           <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">
             <p className="max-w-md text-sm text-muted-foreground">{loadError}</p>
@@ -795,18 +767,6 @@ export default function EditInventoryProductPage() {
                   />
                 </div>
 
-                <div className="border-t border-border/60 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => setConfirmDeleteOpen(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    Delete product
-                  </Button>
-                </div>
                 </div>
               </SectionCard>
             </div>
@@ -903,12 +863,20 @@ export default function EditInventoryProductPage() {
               )}
             </SectionCard>
 
-            <SectionCard icon={ArrowLeftRight} title="Stock movements">
-              <p className="text-xs text-muted-foreground">
+            <SectionCard
+              icon={ArrowLeftRight}
+              title="Stock movements"
+              className="w-full self-start"
+            >
+              <p className="max-w-xl text-xs text-muted-foreground">
                 Transfer between warehouses, record incoming stock (refill), or stock out.
                 Events appear in history and update balances automatically.
               </p>
-              <Tabs value={stockMovTab} onValueChange={setStockMovTab} className="space-y-4">
+              <Tabs
+                value={stockMovTab}
+                onValueChange={setStockMovTab}
+                className="w-full max-w-xl space-y-4"
+              >
                 <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/40 p-1">
                   <TabsTrigger value="transfer" className="gap-1.5 text-xs">
                     <ArrowRightLeft className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -928,9 +896,12 @@ export default function EditInventoryProductPage() {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="transfer" className="mt-0 space-y-3">
-                  <form onSubmit={handleTransfer} className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2">
+                <TabsContent
+                  value="transfer"
+                  className="mt-0 data-[state=inactive]:hidden"
+                >
+                  <form onSubmit={handleTransfer} className={stockMovFormClass}>
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label className={fieldLabelClass}>From location</Label>
                         <Select
@@ -977,36 +948,34 @@ export default function EditInventoryProductPage() {
                         </Select>
                       </div>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="transfer-qty" className={fieldLabelClass}>
-                          Quantity
-                        </Label>
-                        <Input
-                          id="transfer-qty"
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={transferQty}
-                          onChange={(e) => setTransferQty(e.target.value)}
-                          placeholder={transferFromRow ? `Max ${maxTransferQty}` : "0"}
-                          disabled={transferSubmitting}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="transfer-note" className={fieldLabelClass}>
-                          Note (optional)
-                        </Label>
-                        <Textarea
-                          id="transfer-note"
-                          rows={2}
-                          value={transferNote}
-                          onChange={(e) => setTransferNote(e.target.value)}
-                          placeholder="e.g. Rebalanced for branch display"
-                          disabled={transferSubmitting}
-                          className="min-h-[72px] resize-y rounded-sm py-2"
-                        />
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="transfer-qty" className={fieldLabelClass}>
+                        Quantity
+                      </Label>
+                      <Input
+                        id="transfer-qty"
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={transferQty}
+                        onChange={(e) => setTransferQty(e.target.value)}
+                        placeholder={transferFromRow ? `Max ${maxTransferQty}` : "0"}
+                        disabled={transferSubmitting}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="transfer-note" className={fieldLabelClass}>
+                        Note (optional)
+                      </Label>
+                      <Textarea
+                        id="transfer-note"
+                        rows={2}
+                        value={transferNote}
+                        onChange={(e) => setTransferNote(e.target.value)}
+                        placeholder="e.g. Rebalanced for branch display"
+                        disabled={transferSubmitting}
+                        className="min-h-[72px] resize-y rounded-sm py-2"
+                      />
                     </div>
                     <Button
                       type="submit"
@@ -1019,9 +988,12 @@ export default function EditInventoryProductPage() {
                   </form>
                 </TabsContent>
 
-                <TabsContent value="refill" className="mt-0 space-y-3">
-                  <form onSubmit={handleRefill} className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2">
+                <TabsContent
+                  value="refill"
+                  className="mt-0 data-[state=inactive]:hidden"
+                >
+                  <form onSubmit={handleRefill} className={stockMovFormClass}>
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label className={fieldLabelClass}>Receive into location</Label>
                         <Select
@@ -1088,9 +1060,12 @@ export default function EditInventoryProductPage() {
                   </form>
                 </TabsContent>
 
-                <TabsContent value="stock_out" className="mt-0 space-y-3">
-                  <form onSubmit={handleStockOut} className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2">
+                <TabsContent
+                  value="stock_out"
+                  className="mt-0 data-[state=inactive]:hidden"
+                >
+                  <form onSubmit={handleStockOut} className={stockMovFormClass}>
+                    <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
                         <Label className={fieldLabelClass}>From location</Label>
                         <Select
@@ -1154,7 +1129,10 @@ export default function EditInventoryProductPage() {
                   </form>
                 </TabsContent>
 
-                <TabsContent value="history" className="mt-0 space-y-4">
+                <TabsContent
+                  value="history"
+                  className="mt-0 w-full max-w-3xl space-y-4 data-[state=inactive]:hidden"
+                >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs text-muted-foreground">
                       Movement log for this product (newest first).
@@ -1189,14 +1167,7 @@ export default function EditInventoryProductPage() {
                       </thead>
                       <tbody>
                         {movLoading ? (
-                          <tr>
-                            <td
-                              colSpan={7}
-                              className="p-8 text-center text-muted-foreground"
-                            >
-                              Loading…
-                            </td>
-                          </tr>
+                          <TableBodyRowsSkeleton rowCount={4} colCount={7} />
                         ) : (
                           movements.map((m) => (
                             <tr key={m.id} className="border-t border-border/60">
@@ -1287,25 +1258,6 @@ export default function EditInventoryProductPage() {
           </>
         )}
       </div>
-
-      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete product</DialogTitle>
-            <DialogDescription>
-              This cannot be undone. Remove dependent records if your database requires it.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={() => void handleConfirmDelete()}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </AppPageShell>
   );
 }

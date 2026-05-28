@@ -1,5 +1,6 @@
 "use client";
 
+import { SettingsTwoColumnSkeleton, FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -106,19 +107,22 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="flex h-full min-h-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
+    <Card className="flex min-w-0 flex-col gap-0 overflow-hidden rounded-lg py-0 shadow-sm">
       <CardHeader className="flex shrink-0 flex-row items-center gap-2.5 rounded-none border-b bg-muted/40 px-4 py-3">
         <div className={sectionIconBoxClass}>
           <Icon className={sectionIconClass} aria-hidden />
         </div>
         <CardTitle className={sectionTitleClass}>{title}</CardTitle>
       </CardHeader>
-      <CardContent className="field-controls flex min-h-0 flex-1 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:text-xs [&_select]:text-xs [&_textarea]:text-xs">
+      <CardContent className="field-controls flex min-w-0 flex-col space-y-4 px-4 py-5 [&_input]:h-8 [&_input]:min-w-0 [&_input]:w-full [&_input]:text-xs [&_select]:text-xs [&_textarea]:min-w-0 [&_textarea]:w-full [&_textarea]:text-xs">
         {children}
       </CardContent>
     </Card>
   );
 }
+
+const primaryCardShellClass =
+  "flex w-full min-w-0 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6";
 
 export default function LocationDetailPage() {
   const params = useParams<{ id: string }>();
@@ -166,6 +170,7 @@ export default function LocationDetailPage() {
     (form.location_type || loc?.locationType) === "driver_location";
 
   const isProductsLineTab = tab === "products-line";
+  const isDetailsTab = tab === "details";
 
   useEffect(() => {
     const t = searchParams.get("tab");
@@ -253,7 +258,8 @@ export default function LocationDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
+  }, [id]);
 
   const resetFormFromLoc = useCallback((row: LocationRow, options: string[]) => {
     setForm({
@@ -334,16 +340,9 @@ export default function LocationDetailPage() {
 
   if (loading || !loc) {
     return (
-      <AppPageShell
-        fillHeight
-        className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
-      >
-        <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm">
-          <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-          <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
-          </div>
+      <AppPageShell className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
+        <div className={primaryCardShellClass}>
+          <FormTwoColumnPageSkeleton withLineItems={false} />
         </div>
       </AppPageShell>
     );
@@ -351,7 +350,6 @@ export default function LocationDetailPage() {
 
   return (
     <AppPageShell
-      fillHeight
       className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       titleBefore={
         <Button variant="ghost" size="icon" asChild aria-label="Back to locations">
@@ -402,7 +400,7 @@ export default function LocationDetailPage() {
         )
       }
     >
-      <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 lg:p-6">
+      <div className={primaryCardShellClass}>
         <div className="flex min-w-0 flex-col gap-1 border-b border-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
@@ -423,56 +421,21 @@ export default function LocationDetailPage() {
           {isProductsLineTab ? (
             <p className="max-w-md pt-2 text-xs text-muted-foreground sm:pt-0 sm:text-right">
               Read-only inventory for this location. To change stock, use{" "}
-              <span className="font-medium text-foreground">Inventory</span> in the sidebar.
+              <Link
+                href="/app/inventory"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Inventory
+              </Link>{" "}
+              in the sidebar.
             </p>
-          ) : (
-          <div className="flex flex-wrap items-center gap-4 pt-2 sm:pt-0">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="loc-active"
-                checked={isActive}
-                onCheckedChange={setIsActive}
-                disabled={!isEditing}
-                aria-label="Location active"
-              />
-              <Label htmlFor="loc-active" className="text-xs font-medium">
-                Active
-              </Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="loc-default"
-                checked={isDefault}
-                disabled={!isEditing}
-                onCheckedChange={(v) => setIsDefault(v === true)}
-                aria-label="Default location"
-              />
-              <Label htmlFor="loc-default" className="text-xs font-medium">
-                Default for company
-              </Label>
-            </div>
-            {form.location_type === "warehouse" ? (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="loc-primary-wh"
-                  checked={isPrimaryWarehouse}
-                  disabled={!isEditing}
-                  onCheckedChange={(v) => setIsPrimaryWarehouse(v === true)}
-                  aria-label="Primary warehouse for stock transfers"
-                />
-                <Label htmlFor="loc-primary-wh" className="text-xs font-medium">
-                  Primary warehouse
-                </Label>
-              </div>
-            ) : null}
-          </div>
-          )}
+          ) : null}
         </div>
 
         <Tabs
           value={tab}
           onValueChange={handleTabChange}
-          className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-4"
+          className="flex w-full min-w-0 flex-col gap-4"
         >
           <TabsList className={cn("w-full justify-start sm:w-auto")}>
             <TabsTrigger value="details">Details</TabsTrigger>
@@ -487,9 +450,9 @@ export default function LocationDetailPage() {
 
           <TabsContent
             value="details"
-            className="mt-0 flex min-h-0 min-w-0 w-full flex-1 flex-col data-[state=inactive]:hidden"
+            className="mt-0 w-full min-w-0 data-[state=inactive]:hidden"
           >
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2 lg:items-stretch lg:gap-8 xl:gap-10">
+            <div className="grid min-h-0 auto-rows-min grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start lg:gap-8 xl:gap-10">
               <SectionCard icon={Building2} title="Location basics">
                 <div className="space-y-2">
                   <ReqLabel htmlFor="loc-name">Display name</ReqLabel>
@@ -570,6 +533,57 @@ export default function LocationDetailPage() {
                     className="min-h-[120px] resize-y rounded-sm py-2"
                   />
                 </div>
+
+                {isDetailsTab ? (
+                  <div className="space-y-3 border-t border-border/60 pt-4">
+                    <p className={fieldLabelClass}>Location status</p>
+                    <div className="flex flex-wrap items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="loc-active"
+                          checked={isActive}
+                          onCheckedChange={setIsActive}
+                          disabled={!isEditing}
+                          aria-label="Location active"
+                        />
+                        <Label htmlFor="loc-active" className="text-xs font-medium">
+                          Active
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="loc-default"
+                          checked={isDefault}
+                          disabled={!isEditing}
+                          onCheckedChange={(v) => setIsDefault(v === true)}
+                          aria-label="Default location"
+                        />
+                        <Label htmlFor="loc-default" className="text-xs font-medium">
+                          Default for company
+                        </Label>
+                      </div>
+                      {form.location_type === "warehouse" ? (
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="loc-primary-wh"
+                            checked={isPrimaryWarehouse}
+                            disabled={!isEditing}
+                            onCheckedChange={(v) =>
+                              setIsPrimaryWarehouse(v === true)
+                            }
+                            aria-label="Primary warehouse for stock transfers"
+                          />
+                          <Label
+                            htmlFor="loc-primary-wh"
+                            className="text-xs font-medium"
+                          >
+                            Primary warehouse
+                          </Label>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </SectionCard>
 
               <SectionCard icon={MapPinned} title="Address & map">
@@ -677,7 +691,7 @@ export default function LocationDetailPage() {
           {isDriverLocation ? (
             <TabsContent
               value="routing"
-              className="mt-0 flex min-h-0 min-w-0 w-full flex-1 flex-col data-[state=inactive]:hidden"
+              className="mt-0 w-full min-w-0 data-[state=inactive]:hidden"
             >
               <LocationRoutingTab
                 locationId={id}
@@ -689,7 +703,7 @@ export default function LocationDetailPage() {
 
           <TabsContent
             value="products-line"
-            className="mt-0 flex min-h-0 min-w-0 w-full flex-1 flex-col data-[state=inactive]:hidden"
+            className="mt-0 w-full min-w-0 data-[state=inactive]:hidden"
           >
             <LocationProductsLineTab
               locationId={id}

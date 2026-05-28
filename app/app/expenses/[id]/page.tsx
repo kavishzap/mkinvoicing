@@ -13,6 +13,7 @@ import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { DetailWithSidebarSkeleton } from "@/components/page-skeletons";
 import { cn } from "@/lib/utils";
 
 const sectionTitleClass =
@@ -155,13 +156,12 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
       li.description || "",
       qty.toString(),
       money(unit),
-      `${tax || 0}%`,
       money(lineTotal),
     ];
   });
 
   autoTable(doc, {
-    head: [["Item", "Description", "Qty", "Unit Price", "Tax %", "Total"]],
+    head: [["Item", "Description", "Qty", "Unit Price", "Total"]],
     body: bodyRows,
     startY: y,
     styles: {
@@ -182,8 +182,7 @@ async function generateExpensePDF(expense: ExpenseRow, profile: Profile | null) 
     columnStyles: {
       2: { halign: "right", cellWidth: 40 },
       3: { halign: "right", cellWidth: 80 },
-      4: { halign: "right", cellWidth: 50 },
-      5: { halign: "right", cellWidth: 90 },
+      4: { halign: "right", cellWidth: 90 },
     },
     margin: { left: M, right: M },
   });
@@ -319,17 +318,7 @@ export default function ExpenseViewPage() {
   if (loading || !expense) {
     return (
       <AppPageShell {...shellCommon}>
-        <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-4">
-            <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-            <div className="h-9 w-36 animate-pulse rounded bg-muted" />
-          </div>
-          <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="h-56 animate-pulse rounded-lg bg-muted" />
-            <div className="h-56 animate-pulse rounded-lg bg-muted lg:col-span-1" />
-          </div>
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        </div>
+        <DetailWithSidebarSkeleton />
       </AppPageShell>
     );
   }
@@ -347,7 +336,6 @@ export default function ExpenseViewPage() {
           </Link>
         </Button>
       }
-      subtitle={`${fmtDate(expense.expense_date)}${expense.description ? ` · ${expense.description}` : ""}. Review line items or download a PDF.`}
       actions={
         <Button
           variant="outline"
@@ -374,12 +362,8 @@ export default function ExpenseViewPage() {
           <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
             {expense.description || "Expense"}
           </h2>
-          <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span className="tabular-nums">{fmtDate(expense.expense_date)}</span>
-            <span>·</span>
-            <span className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 font-medium tabular-nums">
-              {ccy}
-            </span>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {fmtDate(expense.expense_date)}
           </p>
         </div>
 
@@ -395,10 +379,6 @@ export default function ExpenseViewPage() {
               <div>
                 <p className="text-xs font-medium text-muted-foreground">Date</p>
                 <p className="mt-1 font-medium tabular-nums">{fmtDate(expense.expense_date)}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">Currency</p>
-                <p className="mt-1 font-medium">{ccy}</p>
               </div>
               <div className="sm:col-span-2">
                 <p className="text-xs font-medium text-muted-foreground">Total amount</p>
@@ -424,7 +404,6 @@ export default function ExpenseViewPage() {
                     <th className="text-left p-2.5 font-semibold">Description</th>
                     <th className="text-right p-2.5 font-semibold">Qty</th>
                     <th className="text-right p-2.5 font-semibold">Unit</th>
-                    <th className="text-right p-2.5 font-semibold">Tax %</th>
                     <th className="text-right p-2.5 font-semibold">Total</th>
                   </tr>
                 </thead>
@@ -452,11 +431,6 @@ export default function ExpenseViewPage() {
                         <td className="p-2.5 text-right tabular-nums align-top">
                           {fmtMoney(Number(li.unit_price ?? 0), ccy)}
                         </td>
-                        <td className="p-2.5 text-right tabular-nums align-top">
-                          {Number(li.tax_percent ?? 0).toLocaleString("en-US", {
-                            maximumFractionDigits: 2,
-                          })}
-                        </td>
                         <td className="p-2.5 text-right tabular-nums font-medium align-top">
                           {fmtMoney(Number(li.line_total ?? 0), ccy)}
                         </td>
@@ -464,7 +438,7 @@ export default function ExpenseViewPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={5} className="p-8 text-center text-muted-foreground">
                         No line items for this expense.
                       </td>
                     </tr>

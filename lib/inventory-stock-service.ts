@@ -230,6 +230,9 @@ export async function listInventoryMovements(opts?: {
   productId?: string;
   /** Movements where stock left or entered this location (transfer / refill / stock out). */
   locationId?: string;
+  eventType?: InventoryMovementRow["event_type"];
+  /** Matches product name/SKU or movement note. */
+  search?: string;
 }): Promise<{ rows: InventoryMovementRow[]; total: number }> {
   const companyId = await requireCompanyId();
   const page = Math.max(1, opts?.page ?? 1);
@@ -256,6 +259,29 @@ export async function listInventoryMovements(opts?: {
     query = query.or(
       `from_location_id.eq.${lid},to_location_id.eq.${lid}`
     );
+  }
+
+  if (opts?.eventType) {
+    query = query.eq("event_type", opts.eventType);
+  }
+
+  const term = opts?.search?.trim();
+  if (term) {
+    const s = `%${term}%`;
+    const { data: productHits, error: productErr } = await supabase
+      .from("products")
+      .select("id")
+      .eq("company_id", companyId)
+      .or(`name.ilike.${s},sku.ilike.${s}`);
+    if (productErr) throw productErr;
+    const productIds = (productHits ?? []).map((p) => String(p.id));
+    if (productIds.length > 0) {
+      query = query.or(
+        [`note.ilike.${s}`, `product_id.in.(${productIds.join(",")})`].join(",")
+      );
+    } else {
+      query = query.ilike("note", s);
+    }
   }
 
   const { data, error, count } = await query;

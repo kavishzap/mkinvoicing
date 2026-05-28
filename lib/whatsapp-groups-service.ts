@@ -23,6 +23,47 @@ export type WhatsAppGroupMemberRow = {
   email: string;
 };
 
+export type WhatsAppListStatus = "all" | "active" | "inactive";
+
+export type WhatsAppListFacets = {
+  companyTotal: number;
+  activeCount: number;
+  inactiveCount: number;
+};
+
+export async function fetchWhatsAppGroupListFacets(): Promise<WhatsAppListFacets> {
+  const companyId = await requireCompanyId();
+  const base = () =>
+    supabase
+      .from("whatsapp_groups")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const [r0, r1, r2] = await Promise.all([
+    base(),
+    base().eq("is_active", true),
+    base().eq("is_active", false),
+  ]);
+
+  if (r0.error) throw new Error(r0.error.message);
+  if (r1.error) throw new Error(r1.error.message);
+  if (r2.error) throw new Error(r2.error.message);
+
+  return {
+    companyTotal: r0.count ?? 0,
+    activeCount: r1.count ?? 0,
+    inactiveCount: r2.count ?? 0,
+  };
+}
+
+function resolveGroupListStatus(opts?: {
+  status?: WhatsAppListStatus;
+  includeInactive?: boolean;
+}): WhatsAppListStatus {
+  if (opts?.status) return opts.status;
+  return opts?.includeInactive ? "all" : "active";
+}
+
 const GROUP_COLUMNS =
   "id,company_id,user_id,name,description,is_active,created_at,updated_at";
 
@@ -86,6 +127,7 @@ export async function listWhatsAppGroups(opts?: {
  */
 export async function listWhatsAppGroupsWithMemberCounts(opts?: {
   search?: string;
+  status?: WhatsAppListStatus;
   includeInactive?: boolean;
   page?: number;
   pageSize?: number;
@@ -95,6 +137,7 @@ export async function listWhatsAppGroupsWithMemberCounts(opts?: {
   const pageSize = Math.max(1, opts?.pageSize ?? 10);
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
+  const status = resolveGroupListStatus(opts);
 
   const selectWithCount = `${GROUP_COLUMNS}, whatsapp_group_customers(count)`;
 
@@ -105,9 +148,8 @@ export async function listWhatsAppGroupsWithMemberCounts(opts?: {
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (!opts?.includeInactive) {
-    q = q.eq("is_active", true);
-  }
+  if (status === "active") q = q.eq("is_active", true);
+  else if (status === "inactive") q = q.eq("is_active", false);
 
   const term = opts?.search?.trim();
   if (term) {
@@ -142,13 +184,16 @@ export async function listWhatsAppGroupsWithMemberCounts(opts?: {
 }
 
 async function listWhatsAppGroupsFallback(
-  opts: { search?: string; includeInactive?: boolean } | undefined,
+  opts:
+    | { search?: string; status?: WhatsAppListStatus; includeInactive?: boolean }
+    | undefined,
   companyId: string,
   page: number,
   pageSize: number,
 ): Promise<{ rows: WhatsAppGroupRow[]; total: number }> {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
+  const status = resolveGroupListStatus(opts);
 
   let q = supabase
     .from("whatsapp_groups")
@@ -157,9 +202,8 @@ async function listWhatsAppGroupsFallback(
     .order("created_at", { ascending: false })
     .range(from, to);
 
-  if (!opts?.includeInactive) {
-    q = q.eq("is_active", true);
-  }
+  if (status === "active") q = q.eq("is_active", true);
+  else if (status === "inactive") q = q.eq("is_active", false);
 
   const term = opts?.search?.trim();
   if (term) {

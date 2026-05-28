@@ -3,16 +3,12 @@ import { requireActiveCompanyId } from "@/lib/active-company";
 
 export type DashboardStats = {
   netSales: number;
-  totalPaid: number; // Money In (Paid)
+  totalPaid: number;
   totalExpense: number;
-  /** Sum of purchase invoice totals (non-cancelled), same basis as reports */
   totalPurchases: number;
-  /** Gross profit (paid sales − purchases) minus operating expenses */
   profitableIncome: number;
   customerCount: number;
-  /** Non-cancelled sales invoices (same scope as net sales). */
   salesInvoiceCount: number;
-  /** Driver balance settlements recorded for this company (delivery_driver_settlements). */
   driverSettlementCount: number;
   driverSettlementsCashTotal: number;
   driverSettlementsBankTotal: number;
@@ -20,27 +16,14 @@ export type DashboardStats = {
 };
 
 export type IncomeByMonth = {
-  month: string; // "2024-01"
-  label: string; // "Jan 2024"
-  income: number;
-};
-
-export type ExpenseByMonth = {
   month: string;
   label: string;
-  expense: number;
+  income: number;
 };
 
 export type DashboardData = {
   stats: DashboardStats;
   incomeByMonth: IncomeByMonth[];
-  expenseByMonth: ExpenseByMonth[];
-};
-
-type RawInvoiceItem = {
-  quantity: number | string | null;
-  unit_price: number | string | null;
-  tax_percent: number | string | null;
 };
 
 type RawInvoice = {
@@ -48,7 +31,7 @@ type RawInvoice = {
   issue_date: string | null;
   due_date: string | null;
   currency: string | null;
-  invoice_items: RawInvoiceItem[] | null;
+  total: number | string | null;
 };
 
 type RawExpense = {
@@ -63,27 +46,14 @@ type RawPurchaseInvoice = {
   currency: string | null;
 };
 
-type RawDriverSettlement = {
-  cash_amount: number | string | null;
-  bank_transfer_amount: number | string | null;
-};
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const CACHE_MS = 45_000;
 
-/** Same formula as the invoices list (subtotal + tax, no discount). */
-function computeItemsTotal(items: RawInvoiceItem[] | null | undefined): number {
-  if (!items || items.length === 0) return 0;
-  let sum = 0;
-  for (const it of items) {
-    const qty = Number(it.quantity ?? 0);
-    const price = Number(it.unit_price ?? 0);
-    const tax = Number(it.tax_percent ?? 0);
-    const line = qty * price;
-    sum += line + (line * tax) / 100;
-  }
-  return sum;
-}
+const cache = new Map<string, { data: DashboardData; expires: number }>();
 
-function monthKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function invoiceTotal(inv: RawInvoice): number {
+  const n = Number(inv.total ?? 0);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function emptyMonthMap(year: number): Map<string, number> {
@@ -95,29 +65,20 @@ function emptyMonthMap(year: number): Map<string, number> {
 }
 
 function labelMonth(month: string): string {
-  const [yStr, mStr] = month.split("-");
-  const d = new Date(parseInt(yStr, 10), parseInt(mStr, 10) - 1, 1);
-  return d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+  const [, mStr] = month.split("-");
+  const mi = parseInt(mStr, 10) - 1;
+  const y = month.slice(0, 4);
+  return `${MONTH_SHORT[mi] ?? mStr} ${y}`;
 }
 
-/**
- * Fetches everything the dashboard needs in a single round-trip (4 parallel
- * Supabase requests, no `count: 'exact'`, slim column lists). Both the KPI
- * stats and the monthly income/expense charts are derived from the same data,
- * so invoices/expenses aren't fetched twice.
- */
-export async function getDashboardData(year?: number): Promise<DashboardData> {
-  const companyId = await requireActiveCompanyId();
-  const y = year ?? new Date().getFullYear();
-  const yearStart = `${y}-01-01`;
-  const yearEnd = `${y}-12-31`;
-
+async function fetchDashboardData(
+  companyId: string,
+  year: number,
+): Promise<DashboardData> {
   const [invRes, expRes, custRes, piRes, drvSetRes] = await Promise.all([
     supabase
       .from("invoices")
-      .select(
-        "status, issue_date, due_date, currency, invoice_items ( quantity, unit_price, tax_percent )",
-      )
+      .select("status, issue_date, due_date, currency, total")
       .or(`company_id.eq.${companyId},company_id.is.null`),
     supabase
       .from("expenses")
@@ -141,19 +102,20 @@ export async function getDashboardData(year?: number): Promise<DashboardData> {
   if (expRes.error) throw expRes.error;
   if (custRes.error) throw custRes.error;
   if (piRes.error) throw piRes.error;
+  if (drvSetRes.error) throw drvSetRes.error;
 
-  const invoices = (invRes.data ?? []) as unknown as RawInvoice[];
-  const expenses = (expRes.data ?? []) as unknown as RawExpense[];
-  const purchases = (piRes.data ?? []) as unknown as RawPurchaseInvoice[];
+  const invoices = (invRes.data ?? []) as RawInvoice[];
+  const expenses = (expRes.data ?? []) as RawExpense[];
+  const purchases = (piRes.data ?? []) as RawPurchaseInvoice[];
 
   let netSales = 0;
   let totalPaid = 0;
   let salesInvoiceCount = 0;
   let firstCurrency: string | undefined;
-  const incomeMap = emptyMonthMap(y);
+  const incomeMap = emptyMonthMap(year);
 
   for (const inv of invoices) {
-    const total = computeItemsTotal(inv.invoice_items);
+    const total = invoiceTotal(inv);
     if (!firstCurrency && inv.currency) firstCurrency = inv.currency;
     if (inv.status !== "cancelled") {
       netSales += total;
@@ -164,31 +126,21 @@ export async function getDashboardData(year?: number): Promise<DashboardData> {
       const d = inv.issue_date || inv.due_date;
       if (d) {
         const dt = new Date(d);
-        if (!Number.isNaN(dt.getTime()) && dt.getFullYear() === y) {
-          const key = monthKey(dt);
-          if (incomeMap.has(key)) {
-            incomeMap.set(key, (incomeMap.get(key) ?? 0) + total);
-          }
+        if (!Number.isNaN(dt.getTime()) && dt.getFullYear() === year) {
+          const key = `${year}-${String(dt.getMonth() + 1).padStart(2, "0")}`;
+          const prev = incomeMap.get(key);
+          if (prev !== undefined) incomeMap.set(key, prev + total);
         }
       }
     }
   }
 
   let totalExpense = 0;
-  const expenseMap = emptyMonthMap(y);
   for (const e of expenses) {
     const amount = Number(e.amount ?? 0);
+    if (!Number.isFinite(amount)) continue;
     totalExpense += amount;
     if (!firstCurrency && e.currency) firstCurrency = e.currency;
-    if (e.expense_date) {
-      const dt = new Date(e.expense_date);
-      if (!Number.isNaN(dt.getTime()) && dt.getFullYear() === y) {
-        const key = monthKey(dt);
-        if (expenseMap.has(key)) {
-          expenseMap.set(key, (expenseMap.get(key) ?? 0) + amount);
-        }
-      }
-    }
   }
 
   let totalPurchases = 0;
@@ -200,27 +152,30 @@ export async function getDashboardData(year?: number): Promise<DashboardData> {
   }
 
   const currency = firstCurrency || "MUR";
-  const grossProfit = totalPaid - totalPurchases;
-  const profitableIncome = grossProfit - totalExpense;
+  const profitableIncome = totalPaid - totalPurchases - totalExpense;
 
   let driverSettlementCount = 0;
   let driverSettlementsCashTotal = 0;
   let driverSettlementsBankTotal = 0;
-  if (!drvSetRes.error && drvSetRes.data) {
-    const rows = drvSetRes.data as unknown as RawDriverSettlement[];
-    for (const row of rows) {
-      driverSettlementCount += 1;
-      driverSettlementsCashTotal += Number(row.cash_amount ?? 0);
-      driverSettlementsBankTotal += Number(row.bank_transfer_amount ?? 0);
-    }
+  for (const row of drvSetRes.data ?? []) {
+    driverSettlementCount += 1;
+    driverSettlementsCashTotal += Number(
+      (row as { cash_amount?: number | string | null }).cash_amount ?? 0,
+    );
+    driverSettlementsBankTotal += Number(
+      (row as { bank_transfer_amount?: number | string | null }).bank_transfer_amount ?? 0,
+    );
   }
 
-  const toSorted = (m: Map<string, number>) =>
-    [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
-
-  // Suppress unused-var warning while keeping computed bounds for future filters.
-  void yearStart;
-  void yearEnd;
+  const incomeByMonth: IncomeByMonth[] = [];
+  for (let i = 1; i <= 12; i++) {
+    const month = `${year}-${String(i).padStart(2, "0")}`;
+    incomeByMonth.push({
+      month,
+      label: labelMonth(month),
+      income: incomeMap.get(month) ?? 0,
+    });
+  }
 
   return {
     stats: {
@@ -236,41 +191,29 @@ export async function getDashboardData(year?: number): Promise<DashboardData> {
       driverSettlementsBankTotal,
       currency,
     },
-    incomeByMonth: toSorted(incomeMap).map(([month, income]) => ({
-      month,
-      label: labelMonth(month),
-      income,
-    })),
-    expenseByMonth: toSorted(expenseMap).map(([month, expense]) => ({
-      month,
-      label: labelMonth(month),
-      expense,
-    })),
+    incomeByMonth,
   };
 }
 
-/* ----------------------- Back-compat wrappers ----------------------- */
-/*
- * Existing callers that only need one of the two outputs keep working, but
- * prefer `getDashboardData` to avoid refetching: the dashboard page already
- * uses the combined call.
- */
-
-export async function getDashboardStats(): Promise<DashboardStats> {
-  const { stats } = await getDashboardData();
-  return stats;
+export function invalidateDashboardCache(companyId?: string): void {
+  if (!companyId) {
+    cache.clear();
+    return;
+  }
+  const prefix = `${companyId}:`;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
 }
 
-export async function getIncomeOverTime(
-  year?: number,
-): Promise<IncomeByMonth[]> {
-  const { incomeByMonth } = await getDashboardData(year);
-  return incomeByMonth;
-}
+export async function getDashboardData(year?: number): Promise<DashboardData> {
+  const companyId = await requireActiveCompanyId();
+  const y = year ?? new Date().getFullYear();
+  const key = `${companyId}:${y}`;
+  const hit = cache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.data;
 
-export async function getExpenseOverTime(
-  year?: number,
-): Promise<ExpenseByMonth[]> {
-  const { expenseByMonth } = await getDashboardData(year);
-  return expenseByMonth;
+  const data = await fetchDashboardData(companyId, y);
+  cache.set(key, { data, expires: Date.now() + CACHE_MS });
+  return data;
 }

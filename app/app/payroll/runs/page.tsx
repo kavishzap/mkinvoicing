@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineTableRowsSkeleton } from "@/components/page-skeletons";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Calendar, Loader2, ChevronRight } from "lucide-react";
@@ -170,9 +171,7 @@ export default function PayrollRunsPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
+            <InlineTableRowsSkeleton rowCount={5} />
           ) : runs.length === 0 ? (
             <p className="text-sm text-muted-foreground py-8 text-center">
               No payroll runs yet.

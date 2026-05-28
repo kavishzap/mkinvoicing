@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 import { useAppFeatures } from "@/contexts/app-features-context";
 import {
   APP_NAV_ITEMS,
@@ -66,9 +66,8 @@ export function AppFeatureRouteGuard({
 
   if (status === "loading" && !hasEverBeenReady.current) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
-        <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
-        <span>Loading your workspace…</span>
+      <div className="mx-auto flex min-h-0 w-full max-w-none flex-1 flex-col px-4 py-6">
+        <DirectoryListPageSkeleton className="min-h-[360px] flex-1" showFilterPanel={false} />
       </div>
     );
   }

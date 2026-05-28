@@ -18,11 +18,25 @@ export function formatLocationTypeLabel(enumLabel: string): string {
  * Ordered labels for `public.location_type` from Postgres (`pg_enum`).
  * Requires RPC `location_type_enum_values` — see `sql/patch_location_type_enum_rpc.sql`.
  */
+let cachedLocationTypeEnumLabels: string[] | null = null;
+let cachedLocationTypeEnumAt = 0;
+const LOCATION_TYPE_ENUM_CACHE_MS = 5 * 60 * 1000;
+
 export async function fetchLocationTypeEnumValues(): Promise<string[]> {
+  if (
+    cachedLocationTypeEnumLabels &&
+    Date.now() - cachedLocationTypeEnumAt < LOCATION_TYPE_ENUM_CACHE_MS
+  ) {
+    return cachedLocationTypeEnumLabels;
+  }
+
   const { data, error } = await supabase.rpc("location_type_enum_values");
   if (error) throw error;
   if (!data || !Array.isArray(data)) return [];
-  return data.filter((x): x is string => typeof x === "string");
+  const labels = data.filter((x): x is string => typeof x === "string");
+  cachedLocationTypeEnumLabels = labels;
+  cachedLocationTypeEnumAt = Date.now();
+  return labels;
 }
 
 /**
@@ -92,8 +106,18 @@ export type LocationRow = {
   /** Stock source for delivery transfers when this warehouse is the company primary. */
   isPrimaryWarehouse: boolean;
   locationType: LocationType;
+  /** Active drivers from `location_drivers`, primary first; empty when none. */
+  assignedDrivers: LocationAssignedDriver[];
+  /** Comma-separated names for search / export. */
+  assignedDriversDisplay: string;
   created_at: string;
   updated_at: string;
+};
+
+export type LocationAssignedDriver = {
+  driverUserId: string;
+  name: string;
+  membershipId: string | null;
 };
 
 const COLUMNS =
@@ -238,8 +262,13 @@ export async function listLocations(opts?: {
   const { data, error, count } = await q;
   if (error) throw error;
 
+  const rows = await attachAssignedDriversDisplay(
+    companyId,
+    (data ?? []).map(mapRow),
+  );
+
   return {
-    rows: (data ?? []).map(mapRow),
+    rows,
     total: count ?? 0,
   };
 }
@@ -295,7 +324,7 @@ export async function listAllLocationsForExport(opts?: {
     from += BATCH;
   }
 
-  return out;
+  return attachAssignedDriversDisplay(companyId, out);
 }
 
 export async function getLocation(id: string): Promise<LocationRow> {
@@ -496,6 +525,127 @@ function parseLocationType(v: unknown): LocationType {
   return typeof v === "string" && v.length > 0 ? v : "";
 }
 
+async function fetchUserDisplayLabels(
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("id, full_name, email")
+    .in("id", uniq);
+
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    const id = String((row as { id?: unknown }).id ?? "");
+    const fullName = String(
+      (row as { full_name?: unknown }).full_name ?? "",
+    ).trim();
+    const email = String((row as { email?: unknown }).email ?? "").trim();
+    map.set(id, fullName || email || id.slice(0, 8));
+  }
+
+  return map;
+}
+
+async function fetchMembershipIdsByUserId(
+  companyId: string,
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("company_users")
+    .select("id, user_id")
+    .eq("company_id", companyId)
+    .in("user_id", uniq);
+
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    const uid = String((row as { user_id?: unknown }).user_id ?? "");
+    const mid = String((row as { id?: unknown }).id ?? "");
+    if (uid && mid) map.set(uid, mid);
+  }
+
+  return map;
+}
+
+async function attachAssignedDriversDisplay(
+  companyId: string,
+  rows: LocationRow[],
+): Promise<LocationRow[]> {
+  if (rows.length === 0) return rows;
+
+  const locationIds = rows.map((r) => r.id);
+  const { data, error } = await supabase
+    .from("location_drivers")
+    .select("location_id, driver_user_id, is_primary, is_active")
+    .eq("company_id", companyId)
+    .in("location_id", locationIds)
+    .eq("is_active", true);
+
+  if (error) throw error;
+
+  const driverIds = [
+    ...new Set(
+      (data ?? [])
+        .map((raw) =>
+          String((raw as { driver_user_id?: unknown }).driver_user_id ?? ""),
+        )
+        .filter(Boolean),
+    ),
+  ];
+  const [labelByUserId, membershipByUserId] = await Promise.all([
+    fetchUserDisplayLabels(driverIds),
+    fetchMembershipIdsByUserId(companyId, driverIds),
+  ]);
+
+  type DriverSlot = LocationAssignedDriver & { isPrimary: boolean };
+  const byLocation = new Map<string, DriverSlot[]>();
+
+  for (const raw of data ?? []) {
+    const locationId = String(
+      (raw as { location_id?: unknown }).location_id ?? "",
+    );
+    const driverUserId = String(
+      (raw as { driver_user_id?: unknown }).driver_user_id ?? "",
+    );
+    if (!locationId || !driverUserId) continue;
+    const name = labelByUserId.get(driverUserId) ?? driverUserId.slice(0, 8);
+    const list = byLocation.get(locationId) ?? [];
+    list.push({
+      driverUserId,
+      name,
+      membershipId: membershipByUserId.get(driverUserId) ?? null,
+      isPrimary: Boolean((raw as { is_primary?: unknown }).is_primary),
+    });
+    byLocation.set(locationId, list);
+  }
+
+  return rows.map((row) => {
+    const drivers = [...(byLocation.get(row.id) ?? [])];
+    drivers.sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
+    const assignedDrivers: LocationAssignedDriver[] = drivers.map(
+      ({ driverUserId, name, membershipId }) => ({
+        driverUserId,
+        name,
+        membershipId,
+      }),
+    );
+    return {
+      ...row,
+      assignedDrivers,
+      assignedDriversDisplay: assignedDrivers.map((d) => d.name).join(", "),
+    };
+  });
+}
+
 function mapRow(r: Record<string, unknown>): LocationRow {
   return {
     id: String(r.id),
@@ -514,6 +664,8 @@ function mapRow(r: Record<string, unknown>): LocationRow {
     isDefault: !!r.is_default,
     isPrimaryWarehouse: !!r.is_primary_warehouse,
     locationType: parseLocationType(r.location_type),
+    assignedDrivers: [],
+    assignedDriversDisplay: "",
     created_at: String(r.created_at ?? ""),
     updated_at: String(r.updated_at ?? ""),
   };

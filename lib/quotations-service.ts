@@ -3,6 +3,73 @@ import { requireActiveCompanyId } from "@/lib/active-company";
 import { ensureUserSettingsRow, type Profile } from "@/lib/settings-service";
 import type { CustomerRow } from "@/lib/customers-service";
 
+const LIST_TTL_MS = 45_000;
+const DETAIL_TTL_MS = 45_000;
+
+type QuotationListCacheEntry = {
+  key: string;
+  expires: number;
+  rows: QuotationListRow[];
+  total: number;
+};
+
+type QuotationDetailCacheEntry = {
+  companyId: string;
+  expires: number;
+  detail: QuotationDetail;
+};
+
+const listCache = new Map<string, QuotationListCacheEntry>();
+const detailCache = new Map<string, QuotationDetailCacheEntry>();
+
+function quotationListCacheKey(
+  companyId: string,
+  opts?: {
+    search?: string;
+    status?: QuotationStatus | "all";
+    customerId?: string;
+    page?: number;
+    pageSize?: number;
+  },
+) {
+  return [
+    companyId,
+    opts?.search ?? "",
+    opts?.status ?? "all",
+    opts?.customerId ?? "",
+    opts?.page ?? 1,
+    opts?.pageSize ?? 10,
+  ].join("|");
+}
+
+function quotationDetailCacheKey(companyId: string, id: string) {
+  return `${companyId}|${id}`;
+}
+
+export function getCachedQuotationList(
+  companyId: string,
+  opts?: Parameters<typeof quotationListCacheKey>[1],
+): { rows: QuotationListRow[]; total: number } | null {
+  const hit = listCache.get(quotationListCacheKey(companyId, opts));
+  if (!hit || hit.expires <= Date.now()) return null;
+  return { rows: hit.rows, total: hit.total };
+}
+
+export function getCachedQuotation(
+  companyId: string,
+  id: string,
+): QuotationDetail | null {
+  const hit = detailCache.get(quotationDetailCacheKey(companyId, id));
+  if (!hit || hit.companyId !== companyId) return null;
+  if (hit.expires <= Date.now()) return null;
+  return hit.detail;
+}
+
+export function invalidateQuotationCaches() {
+  listCache.clear();
+  detailCache.clear();
+}
+
 /** Only `active` (current) and `expired` (past valid_until or manual). */
 export type QuotationStatus = "active" | "expired";
 
@@ -192,8 +259,7 @@ export async function expireStaleQuotations(): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) {
-    // eslint-disable-next-line no-console
-    console.warn("expireStaleQuotations:", error.message);
+    /* non-fatal */
   }
 }
 
@@ -276,6 +342,7 @@ export async function createQuotation(
   } else {
     quotationId = String(data);
   }
+  invalidateQuotationCaches();
   return quotationId;
 }
 
@@ -286,8 +353,12 @@ export async function listQuotations(opts?: {
   customerId?: string;
   page?: number;
   pageSize?: number;
+  /** When true, skips `expireStaleQuotations()` (caller runs it once per list session). */
+  skipExpireStale?: boolean;
 }): Promise<{ rows: QuotationListRow[]; total: number }> {
-  await expireStaleQuotations();
+  if (!opts?.skipExpireStale) {
+    await expireStaleQuotations();
+  }
   const companyId = await requireActiveCompanyId();
 
   const page = Math.max(1, opts?.page ?? 1);
@@ -337,11 +408,19 @@ export async function listQuotations(opts?: {
     total: Number(r.total ?? 0),
   }));
 
-  return { rows, total: count ?? 0 };
+  const total = count ?? 0;
+  const cacheKey = quotationListCacheKey(companyId, opts);
+  listCache.set(cacheKey, {
+    key: cacheKey,
+    expires: Date.now() + LIST_TTL_MS,
+    rows,
+    total,
+  });
+
+  return { rows, total };
 }
 
 export async function getQuotation(id: string): Promise<QuotationDetail | null> {
-  await expireStaleQuotations();
   const companyId = await requireActiveCompanyId();
 
   const { data, error } = await supabase
@@ -365,7 +444,7 @@ export async function getQuotation(id: string): Promise<QuotationDetail | null> 
     (a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
   );
 
-  return {
+  const detail: QuotationDetail = {
     id: data.id,
     number: data.number,
     issue_date: data.issue_date,
@@ -386,6 +465,14 @@ export async function getQuotation(id: string): Promise<QuotationDetail | null> 
     terms: data.terms,
     items,
   };
+
+  detailCache.set(quotationDetailCacheKey(companyId, id), {
+    companyId,
+    expires: Date.now() + DETAIL_TTL_MS,
+    detail,
+  });
+
+  return detail;
 }
 
 export async function deleteQuotation(id: string): Promise<void> {
@@ -431,6 +518,7 @@ export async function deleteQuotation(id: string): Promise<void> {
     .eq("id", id)
     .eq("company_id", companyId);
   if (error) throw error;
+  invalidateQuotationCaches();
 }
 
 export type UpdateQuotationPayload = Omit<
@@ -518,4 +606,6 @@ export async function updateQuotation(
       .insert(rows);
     if (insErr) throw insErr;
   }
+
+  invalidateQuotationCaches();
 }

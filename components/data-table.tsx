@@ -7,6 +7,7 @@ import {
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
+  type OnChangeFn,
   type SortingState,
 } from "@tanstack/react-table";
 import { Search } from "lucide-react";
@@ -71,6 +72,10 @@ export type DataTableProps<TData> = {
   onRowClick?: (row: TData) => void;
   /** Hide the search field (toolbar shows only `toolbarLeft` when set). */
   hideSearch?: boolean;
+  /** Parent sorts full dataset; table only reflects sort UI on the current page slice. */
+  manualSorting?: boolean;
+  sorting?: SortingState;
+  onSortingChange?: OnChangeFn<SortingState>;
   /**
    * `minimal` — flat header, hairline row rules, light footer (dense list / SLA-style).
    * `default` — card chrome with muted toolbar/header bands.
@@ -95,6 +100,9 @@ export function DataTable<TData>({
   getRowId,
   onRowClick,
   hideSearch = false,
+  manualSorting = false,
+  sorting: controlledSorting,
+  onSortingChange,
   variant = "default",
 }: DataTableProps<TData>) {
   const isMinimal = variant === "minimal";
@@ -124,15 +132,18 @@ export function DataTable<TData>({
     );
   }, [data, search, manualFiltering, columns, getRowSearchString]);
 
-  const [sorting, setSorting] = React.useState<SortingState>([]);
+  const [internalSorting, setInternalSorting] = React.useState<SortingState>([]);
+  const sorting = controlledSorting ?? internalSorting;
+  const setSorting = onSortingChange ?? setInternalSorting;
 
   const table = useReactTable({
     data: filteredData,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
+    ...(manualSorting ? {} : { getSortedRowModel: getSortedRowModel() }),
     onSortingChange: setSorting,
     state: { sorting },
+    manualSorting,
     getRowId,
   });
 
@@ -198,13 +209,13 @@ export function DataTable<TData>({
               isMinimal
                 ? cn(
                     "border-b border-border/50 bg-transparent",
-                    "[&_button]:-ml-2 [&_button]:h-8 [&_button]:px-2 [&_button]:text-xs [&_button]:font-semibold [&_button]:text-foreground/85",
-                    "[&_button]:hover:bg-muted/50 [&_button]:hover:text-foreground",
+                    "[&_button:not([role=checkbox])]:-ml-2 [&_button:not([role=checkbox])]:h-8 [&_button:not([role=checkbox])]:px-2 [&_button:not([role=checkbox])]:text-xs [&_button:not([role=checkbox])]:font-semibold [&_button:not([role=checkbox])]:text-foreground/85",
+                    "[&_button:not([role=checkbox])]:hover:bg-muted/50 [&_button:not([role=checkbox])]:hover:text-foreground",
                   )
                 : cn(
                     "border-b border-border/60 bg-muted/15",
-                    "[&_button]:-ml-2 [&_button]:h-8 [&_button]:px-2 [&_button]:text-xs [&_button]:font-normal [&_button]:text-muted-foreground",
-                    "[&_button]:hover:bg-muted/60 [&_button]:hover:text-foreground",
+                    "[&_button:not([role=checkbox])]:-ml-2 [&_button:not([role=checkbox])]:h-8 [&_button:not([role=checkbox])]:px-2 [&_button:not([role=checkbox])]:text-xs [&_button:not([role=checkbox])]:font-normal [&_button:not([role=checkbox])]:text-muted-foreground",
+                    "[&_button:not([role=checkbox])]:hover:bg-muted/60 [&_button:not([role=checkbox])]:hover:text-foreground",
                   ),
             )}
           >

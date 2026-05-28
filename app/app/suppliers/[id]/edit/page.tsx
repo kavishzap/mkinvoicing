@@ -1,4 +1,5 @@
 "use client";
+import { FormTwoColumnPageSkeleton, SettingsTwoColumnSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
@@ -126,15 +127,8 @@ export default function EditSupplierPage() {
   if (loading) {
     return (
       <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl text-left`}>
-        <div className="h-10 w-64 animate-pulse rounded bg-muted" />
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="h-72 animate-pulse rounded-lg bg-muted" />
-          <div className="h-72 animate-pulse rounded-lg bg-muted" />
-        </div>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-          <div className="h-48 animate-pulse rounded-lg bg-muted" />
-        </div>
+        <FormTwoColumnPageSkeleton withLineItems={false} />
+        <SettingsTwoColumnSkeleton className="mt-6" />
       </div>
     );
   }

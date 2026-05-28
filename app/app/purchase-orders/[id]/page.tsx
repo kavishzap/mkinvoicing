@@ -1,4 +1,5 @@
 "use client";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 import Link from "next/link";
 import Image from "next/image";
@@ -94,11 +95,7 @@ export default function PurchaseOrderViewPage() {
   if (loading || !purchaseOrder) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
-        </div>
-        <div className="h-96 animate-pulse rounded bg-muted" />
+        <DetailDocumentPageSkeleton />
       </AppPageShell>
     );
   }

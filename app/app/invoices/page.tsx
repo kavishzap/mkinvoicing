@@ -1,7 +1,15 @@
 "use client";
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -18,6 +26,7 @@ import {
   FileText,
   MoreHorizontal,
   Plus,
+  Printer,
   Search,
   SlidersVertical,
 } from "lucide-react";
@@ -42,6 +51,7 @@ import {
   fetchInvoiceListFacets,
   getCachedInvoiceFacets,
   getCachedInvoiceList,
+  invalidateInvoiceCaches,
   type InvoiceListRow,
   type InvoiceListFacets,
   type InvoiceStatus,
@@ -56,7 +66,21 @@ import { cn } from "@/lib/utils";
 
 type PeriodFilter = "all" | "month" | "quarter" | "year";
 
-function InvoicesFilterSidebar({
+function formatListCurrency(amount: number, currency: string) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
+    amount,
+  );
+}
+
+function formatListDate(dateString: string) {
+  return new Date(dateString).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+const InvoicesFilterSidebar = memo(function InvoicesFilterSidebar({
   id,
   facets,
   statusFilter,
@@ -218,11 +242,13 @@ function InvoicesFilterSidebar({
       </div>
     </aside>
   );
-}
+});
 
 export default function InvoicesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [rows, setRows] = useState<InvoiceListRow[]>([]);
@@ -240,6 +266,7 @@ export default function InvoicesPage() {
   const [facetsLoading, setFacetsLoading] = useState(true);
   const [listLoading, setListLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const listRequestGen = useRef(0);
   const prevListDepsRef = useRef({
@@ -259,7 +286,10 @@ export default function InvoicesPage() {
   }, [searchQuery]);
 
   useEffect(() => {
-    const bump = () => setActiveCompanyScope((n) => n + 1);
+    const bump = () => {
+      invalidateInvoiceCaches();
+      setActiveCompanyScope((n) => n + 1);
+    };
     window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
     const onStorage = (e: StorageEvent) => {
       if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
@@ -303,7 +333,7 @@ export default function InvoicesPage() {
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load filters",
             description: msg,
             variant: "destructive",
@@ -383,7 +413,7 @@ export default function InvoicesPage() {
         setTotal(listRes.total);
       } catch (e: unknown) {
         if (cancelled || gen !== listRequestGen.current) return;
-        toast({
+        toastRef.current({
           title: "Failed to load invoices",
           description: e instanceof Error ? e.message : "Please try again.",
           variant: "destructive",
@@ -409,24 +439,17 @@ export default function InvoicesPage() {
     activeCompanyScope,
   ]);
 
-  const formatCurrency = (amount: number, currency: string) =>
-    new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
-
-  const formatDate = (dateString: string) =>
-    new Date(dateString).toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-
-  const fetchExportRows = async () =>
-    listAllInvoicesForExport({
-      search: debouncedSearch || undefined,
-      status: statusFilter,
-      period: periodFilter,
-      sortBy: "issueDate",
-      sort: "desc",
-    });
+  const fetchExportRows = useCallback(
+    async () =>
+      listAllInvoicesForExport({
+        search: debouncedSearch || undefined,
+        status: statusFilter,
+        period: periodFilter,
+        sortBy: "issueDate",
+        sort: "desc",
+      }),
+    [debouncedSearch, statusFilter, periodFilter],
+  );
 
   const exportFilenameStem = useMemo(() => {
     const d = new Date();
@@ -442,7 +465,7 @@ export default function InvoicesPage() {
       setExportingPdf(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to export",
           description: "No invoices match the current filters.",
         });
@@ -458,12 +481,12 @@ export default function InvoicesPage() {
       });
       const filename = `${exportFilenameStem}.pdf`;
       doc.save(filename);
-      toast({
+      toastRef.current({
         title: "PDF exported",
         description: `${data.length} invoice${data.length === 1 ? "" : "s"} exported.`,
       });
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Export failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -472,6 +495,51 @@ export default function InvoicesPage() {
       setExportingPdf(false);
     }
   };
+
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+    try {
+      setPrinting(true);
+      const data = await fetchExportRows();
+      if (data.length === 0) {
+        toastRef.current({
+          title: "Nothing to print",
+          description: "No invoices match the current filters.",
+        });
+        return;
+      }
+      const { buildInvoicesListPdfDoc } = await import("@/lib/invoices-list-pdf");
+      const doc = await buildInvoicesListPdfDoc({
+        rows: data,
+        statusFilter,
+        periodFilter,
+        searchQuery: debouncedSearch,
+      });
+      const filename = `${exportFilenameStem}.pdf`;
+      const pdfBlob = doc.output("blob");
+      const pdfUrl = URL.createObjectURL(pdfBlob);
+      const printWindow = window.open(pdfUrl, "_blank");
+      if (printWindow) {
+        printWindow.onload = () => {
+          setTimeout(() => printWindow.print(), 250);
+        };
+      } else {
+        doc.save(filename);
+        toastRef.current({
+          title: "Print blocked",
+          description: "Allow popups to print. PDF downloaded instead.",
+        });
+      }
+    } catch (e: unknown) {
+      toastRef.current({
+        title: "Print failed",
+        description: e instanceof Error ? e.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrinting(false);
+    }
+  }, [printing, fetchExportRows, exportFilenameStem]);
 
   const columns = useMemo<ColumnDef<InvoiceListRow>[]>(
     () => [
@@ -490,16 +558,54 @@ export default function InvoicesPage() {
         ),
       },
       {
-        id: "clientName",
+        id: "customer",
         accessorFn: (r) => r.clientName,
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Client" />
+          <DataTableColumnHeader column={column} title="Customer" />
         ),
         meta: {
           searchValue: (row: InvoiceListRow) => row.clientName,
+          stopRowClick: true,
           tdClassName: "text-muted-foreground",
         },
-        cell: ({ row }) => row.original.clientName || "—",
+        cell: ({ row }) => {
+          const { customerId, clientName } = row.original;
+          if (!customerId) return clientName || "—";
+          return (
+            <Link
+              href={`/app/customers/${customerId}/edit`}
+              className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {clientName || "View customer"}
+            </Link>
+          );
+        },
+      },
+      {
+        id: "salesOrder",
+        accessorFn: (r) => r.salesOrderNumber ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Sales order" />
+        ),
+        meta: {
+          searchValue: (row: InvoiceListRow) => row.salesOrderNumber ?? "",
+          stopRowClick: true,
+          tdClassName: "text-muted-foreground",
+        },
+        cell: ({ row }) => {
+          const { salesOrderId, salesOrderNumber } = row.original;
+          if (!salesOrderId) return "—";
+          return (
+            <Link
+              href={`/app/sales-orders/${salesOrderId}`}
+              className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {salesOrderNumber || "View sales order"}
+            </Link>
+          );
+        },
       },
       {
         id: "issueDate",
@@ -511,7 +617,7 @@ export default function InvoicesPage() {
           searchValue: (row: InvoiceListRow) => row.issueDate,
           tdClassName: "text-muted-foreground",
         },
-        cell: ({ row }) => formatDate(row.original.issueDate),
+        cell: ({ row }) => formatListDate(row.original.issueDate),
       },
       {
         id: "dueDate",
@@ -523,7 +629,7 @@ export default function InvoicesPage() {
           searchValue: (row: InvoiceListRow) => row.dueDate,
           tdClassName: "text-muted-foreground",
         },
-        cell: ({ row }) => formatDate(row.original.dueDate),
+        cell: ({ row }) => formatListDate(row.original.dueDate),
       },
       {
         id: "status",
@@ -556,7 +662,7 @@ export default function InvoicesPage() {
             String(row.total) + " " + row.currency,
         },
         cell: ({ row }) =>
-          formatCurrency(row.original.total, row.original.currency),
+          formatListCurrency(row.original.total, row.original.currency),
       },
       {
         id: "actions",
@@ -641,11 +747,34 @@ export default function InvoicesPage() {
           <Button
             type="button"
             variant="outline"
-            className="shrink-0"
-            disabled={companyReady !== true || exportingPdf}
-            onClick={handleExportPdf}
+            className="shrink-0 gap-2"
+            disabled={
+              companyReady !== true ||
+              exportingPdf ||
+              printing ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handleExportPdf()}
           >
+            <FileText className="h-4 w-4" />
             {exportingPdf ? "Exporting…" : "Export PDF"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0 gap-2"
+            disabled={
+              companyReady !== true ||
+              printing ||
+              exportingPdf ||
+              listLoading ||
+              facetsLoading
+            }
+            onClick={() => void handlePrint()}
+          >
+            <Printer className="h-4 w-4" />
+            {printing ? "Preparing…" : "Print"}
           </Button>
           <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
             <Link href="/app/invoices/new">
@@ -689,7 +818,7 @@ export default function InvoicesPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory ? (

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ThreeCardStripSkeleton } from "@/components/page-skeletons";
 import {
   Collapsible,
   CollapsibleContent,
@@ -221,9 +222,7 @@ export function CustomerRelatedDocuments({
   if (loading) {
     return (
       <div className="grid min-w-0 gap-6 lg:grid-cols-1">
-        <div className="h-36 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
-        <div className="h-36 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
-        <div className="h-36 animate-pulse rounded-lg border border-border/60 bg-muted/40" />
+        <ThreeCardStripSkeleton />
       </div>
     );
   }

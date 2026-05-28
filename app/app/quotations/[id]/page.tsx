@@ -1,61 +1,134 @@
 "use client";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import nextDynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { QuotationStatusBadge } from "@/components/quotation-status-badge";
-import { QuotationViewActions } from "@/components/quotation-view-actions";
 import { CompactBillToSummary } from "@/components/compact-bill-to-summary";
 import {
   getQuotation,
+  getCachedQuotation,
   computeQuotationTotals,
+  invalidateQuotationCaches,
   type QuotationDetail,
 } from "@/lib/quotations-service";
+import {
+  ACTIVE_COMPANY_CHANGED_EVENT,
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { useToast } from "@/hooks/use-toast";
+
+const QuotationViewActions = nextDynamic(
+  () =>
+    import("@/components/quotation-view-actions").then(
+      (m) => m.QuotationViewActions,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-9 w-48 animate-pulse rounded-md bg-muted/70" />
+    ),
+  },
+);
 
 export default function QuotationViewPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [quotation, setQuotation] = useState<QuotationDetail | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const bump = () => {
+      invalidateQuotationCaches();
+      setRefreshKey((n) => n + 1);
+    };
+    window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!id) return;
     let cancelled = false;
+
     (async () => {
-      try {
+      setError(null);
+      const companyId = await getActiveCompanyId();
+      const cached = companyId ? getCachedQuotation(companyId, id) : null;
+      if (cancelled) return;
+
+      if (cached) {
+        setQuotation(cached);
+        setLoading(false);
+      } else {
         setLoading(true);
-        setError(null);
-        const [q, prof] = await Promise.all([getQuotation(id), fetchProfile()]);
-        if (cancelled) return;
-        if (!q) {
-          setQuotation(null);
-          setError("Quotation not found.");
-        } else {
-          setQuotation(q);
-        }
-        setProfile(prof);
-      } catch (e: unknown) {
-        if (!cancelled) {
+        setQuotation(null);
+      }
+
+      const quotationPromise = getQuotation(id);
+      const profilePromise = fetchProfile();
+
+      quotationPromise
+        .then((q) => {
+          if (cancelled) return;
+          if (!q) {
+            setQuotation(null);
+            setError("Quotation not found.");
+          } else {
+            setQuotation(q);
+          }
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
           setError(e instanceof Error ? e.message : "Failed to load.");
           setQuotation(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+          toastRef.current({
+            title: "Failed to load quotation",
+            description:
+              e instanceof Error ? e.message : "Please try again.",
+            variant: "destructive",
+          });
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+
+      profilePromise
+        .then((prof) => {
+          if (!cancelled) setProfile(prof);
+        })
+        .catch(() => {
+          if (!cancelled) setProfile(null);
+        });
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, refreshKey]);
 
   const orderedItems = useMemo(
     () =>
@@ -95,8 +168,7 @@ export default function QuotationViewPage() {
   if (loading || !quotation) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-        <div className="mt-4 h-96 animate-pulse rounded bg-muted" />
+        <DetailDocumentPageSkeleton />
       </AppPageShell>
     );
   }

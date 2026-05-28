@@ -1,6 +1,86 @@
 import { supabase } from "@/lib/supabaseClient";
 import { getActiveCompanyId } from "@/lib/active-company";
 
+const FACET_TTL_MS = 45_000;
+const LIST_TTL_MS = 45_000;
+const DETAIL_TTL_MS = 45_000;
+
+type ProductFacetCacheEntry = {
+  companyId: string;
+  expires: number;
+  facets: ProductListFacets;
+};
+
+type ProductListCacheEntry = {
+  key: string;
+  expires: number;
+  rows: ProductRow[];
+  total: number;
+};
+
+type ProductDetailCacheEntry = {
+  companyId: string;
+  expires: number;
+  row: ProductRow;
+};
+
+let facetCache: ProductFacetCacheEntry | null = null;
+const listCache = new Map<string, ProductListCacheEntry>();
+const detailCache = new Map<string, ProductDetailCacheEntry>();
+
+function productListCacheKey(
+  companyId: string,
+  opts?: {
+    search?: string;
+    status?: ProductListStatus;
+    page?: number;
+    pageSize?: number;
+    onlyWithPositiveStock?: boolean;
+  },
+) {
+  return [
+    companyId,
+    opts?.search ?? "",
+    opts?.status ?? "active",
+    opts?.page ?? 1,
+    opts?.pageSize ?? 10,
+    opts?.onlyWithPositiveStock ? "stock+" : "",
+  ].join("|");
+}
+
+export function getCachedProductListFacets(
+  companyId: string,
+): ProductListFacets | null {
+  if (!facetCache || facetCache.companyId !== companyId) return null;
+  if (facetCache.expires <= Date.now()) return null;
+  return facetCache.facets;
+}
+
+export function getCachedProductList(
+  companyId: string,
+  opts?: Parameters<typeof productListCacheKey>[1],
+): { rows: ProductRow[]; total: number } | null {
+  const hit = listCache.get(productListCacheKey(companyId, opts));
+  if (!hit || hit.expires <= Date.now()) return null;
+  return { rows: hit.rows, total: hit.total };
+}
+
+export function getCachedProduct(
+  companyId: string,
+  id: string,
+): ProductRow | null {
+  const hit = detailCache.get(`${companyId}|${id}`);
+  if (!hit || hit.companyId !== companyId) return null;
+  if (hit.expires <= Date.now()) return null;
+  return hit.row;
+}
+
+export function invalidateProductCaches() {
+  facetCache = null;
+  listCache.clear();
+  detailCache.clear();
+}
+
 export type ProductPayload = {
   name: string;
   sku?: string | null;
@@ -78,11 +158,34 @@ export async function fetchProductListFacets(): Promise<ProductListFacets> {
   if (r1.error) throw new Error(r1.error.message);
   if (r2.error) throw new Error(r2.error.message);
 
-  return {
+  const facets: ProductListFacets = {
     companyTotal: r0.count ?? 0,
     activeCount: r1.count ?? 0,
     inactiveCount: r2.count ?? 0,
   };
+
+  facetCache = {
+    companyId,
+    expires: Date.now() + FACET_TTL_MS,
+    facets,
+  };
+
+  return facets;
+}
+
+function storeProductListCache(
+  companyId: string,
+  opts: Parameters<typeof productListCacheKey>[1],
+  rows: ProductRow[],
+  total: number,
+) {
+  const cacheKey = productListCacheKey(companyId, opts);
+  listCache.set(cacheKey, {
+    key: cacheKey,
+    expires: Date.now() + LIST_TTL_MS,
+    rows,
+    total,
+  });
 }
 
 function resolveListStatus(opts?: {
@@ -187,6 +290,7 @@ export async function listProducts(opts?: {
     );
     const total = dedup.length;
     const rows = dedup.slice(from, from + pageSize);
+    storeProductListCache(companyId, opts, rows, total);
     return { rows, total };
   }
 
@@ -216,10 +320,10 @@ export async function listProducts(opts?: {
   const { data, error, count } = await q;
   if (error) throw error;
 
-  return {
-    rows: (data ?? []).map((r) => mapRow(r, false)),
-    total: count ?? 0,
-  };
+  const rows = (data ?? []).map((r) => mapRow(r, false));
+  const total = count ?? 0;
+  storeProductListCache(companyId, opts, rows, total);
+  return { rows, total };
 }
 
 /**
@@ -286,7 +390,13 @@ export async function getProduct(id: string): Promise<ProductRow> {
 
   if (error) throw error;
   if (!data) throw new Error("Product not found or not accessible");
-  return mapRow(data, true);
+  const row = mapRow(data, true);
+  detailCache.set(`${companyId}|${id}`, {
+    companyId,
+    expires: Date.now() + DETAIL_TTL_MS,
+    row,
+  });
+  return row;
 }
 
 export async function addProduct(payload: ProductPayload): Promise<ProductRow> {
@@ -320,6 +430,7 @@ export async function addProduct(payload: ProductPayload): Promise<ProductRow> {
     .single();
 
   if (error) throw error;
+  invalidateProductCaches();
   return mapRow(data, true);
 }
 
@@ -353,6 +464,7 @@ export async function addProductsBulk(
 
   const { error } = await supabase.from("products").insert(rows);
   if (error) throw error;
+  invalidateProductCaches();
   return { inserted: rows.length };
 }
 
@@ -454,6 +566,7 @@ export async function updateProduct(
 
   if (error) throw error;
   if (!data) throw new Error("Product not found or not accessible");
+  invalidateProductCaches();
   return mapRow(data, true);
 }
 
@@ -473,6 +586,7 @@ export async function setProductActive(
 
   if (error) throw error;
   if (!data) throw new Error("Product not found or not accessible");
+  invalidateProductCaches();
   return mapRow(data, false);
 }
 
@@ -486,6 +600,7 @@ export async function deleteProduct(id: string): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) throw error;
+  invalidateProductCaches();
 }
 
 function normalizeImageFields(

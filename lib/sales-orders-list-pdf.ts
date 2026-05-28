@@ -1,9 +1,12 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
-  SALES_ORDER_FULFILLMENT_LABELS,
   SALES_ORDER_PAYMENT_LABELS,
+  salesOrderFulfillmentDisplayLabel,
+  salesOrderFulfillmentFilterLabel,
+  salesOrderPaymentFilterLabel,
   type SalesOrderFulfillmentStatus,
+  type SalesOrderPaymentStatusDb,
   type SalesOrderListRow,
 } from "@/lib/sales-orders-service";
 import { fetchProfile } from "@/lib/settings-service";
@@ -76,9 +79,10 @@ const tableHeadColor: [number, number, number] = [59, 130, 246];
 export async function buildSalesOrdersListPdfDoc(params: {
   rows: SalesOrderListRow[];
   fulfillmentFilter: SalesOrderFulfillmentStatus | "all";
+  paymentFilter: SalesOrderPaymentStatusDb | "all";
   searchQuery: string;
 }): Promise<jsPDF> {
-  const { rows, fulfillmentFilter, searchQuery } = params;
+  const { rows, fulfillmentFilter, paymentFilter, searchQuery } = params;
   const [prof, brandingRes] = await Promise.all([fetchProfile(), fetchBranding()]);
   const branding = brandingRes ?? {};
   const brandColor = branding.brandColor || "#0F172A";
@@ -125,7 +129,12 @@ export async function buildSalesOrdersListPdfDoc(params: {
   const filterBits: string[] = [];
   if (fulfillmentFilter !== "all") {
     filterBits.push(
-      `Fulfillment: ${SALES_ORDER_FULFILLMENT_LABELS[fulfillmentFilter] ?? fulfillmentFilter}`,
+      `Fulfillment: ${salesOrderFulfillmentFilterLabel(fulfillmentFilter)}`,
+    );
+  }
+  if (paymentFilter !== "all") {
+    filterBits.push(
+      `Payment: ${salesOrderPaymentFilterLabel(paymentFilter)}`,
     );
   }
   const q = searchQuery.trim();
@@ -147,7 +156,7 @@ export async function buildSalesOrdersListPdfDoc(params: {
     r.cityName || "—",
     r.createdByName || "—",
     formatListDate(r.deliveryDate),
-    SALES_ORDER_FULFILLMENT_LABELS[r.fulfillmentStatus] ?? r.fulfillmentStatus,
+    salesOrderFulfillmentDisplayLabel(r.fulfillmentStatus),
     SALES_ORDER_PAYMENT_LABELS[r.paymentStatus] ?? r.paymentStatus,
     formatMoney(r.total, r.currency),
   ]);
@@ -157,7 +166,7 @@ export async function buildSalesOrdersListPdfDoc(params: {
     head: [
       [
         "Order #",
-        "Client",
+        "Customer",
         "City",
         "Created by",
         "Delivery date",

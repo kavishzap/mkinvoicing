@@ -17,6 +17,7 @@ import {
 } from "@/lib/purchase-invoices-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { DetailDocumentPageSkeleton } from "@/components/page-skeletons";
 
 export default function PurchaseInvoiceViewPage() {
   const params = useParams<{ id: string }>();
@@ -112,11 +113,7 @@ export default function PurchaseInvoiceViewPage() {
   if (loading || !purchaseInvoice) {
     return (
       <AppPageShell className="max-w-7xl">
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-64 animate-pulse rounded bg-muted" />
-          <div className="h-9 w-40 animate-pulse rounded bg-muted" />
-        </div>
-        <div className="h-96 animate-pulse rounded bg-muted" />
+        <DetailDocumentPageSkeleton />
       </AppPageShell>
     );
   }

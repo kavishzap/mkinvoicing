@@ -1,4 +1,5 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -104,6 +105,8 @@ function NewQuotationPageContent() {
   const searchParams = useSearchParams();
   const [duplicateSourceId] = useState(() => searchParams.get("duplicate"));
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -163,10 +166,22 @@ function NewQuotationPageContent() {
     let cancelled = false;
     (async () => {
       try {
-        const [p, prefs] = await Promise.all([
+        const duplicatePromise = duplicateSourceId
+          ? getQuotation(duplicateSourceId)
+          : Promise.resolve(null);
+
+        const [p, prefs, customerRes, duplicateQ] = await Promise.all([
           fetchProfile(),
           fetchPreferences(),
+          listCustomers({
+            search: "",
+            includeInactive: false,
+            page: 1,
+            pageSize: 100,
+          }),
+          duplicatePromise,
         ]);
+
         if (cancelled) return;
         setProfile(p);
         setPreferences(prefs);
@@ -187,19 +202,12 @@ function NewQuotationPageContent() {
         setNotes(prefs.defaultNotes || "");
         setTerms(prefs.defaultTerms || "");
 
-        const { rows } = await listCustomers({
-          search: "",
-          includeInactive: false,
-          page: 1,
-          pageSize: 100,
-        });
-        if (cancelled) return;
+        const rows = customerRes.rows;
         setCustomers(rows);
 
         if (duplicateSourceId && !duplicateHandledRef.current) {
           duplicateHandledRef.current = true;
-          const q = await getQuotation(duplicateSourceId);
-          if (cancelled) return;
+          const q = duplicateQ;
           if (q) {
             const ci = clientInfoFromBillSnapshot(q.bill_to_snapshot);
             setClientInfo({
@@ -243,12 +251,12 @@ function NewQuotationPageContent() {
               if (match) setSelectedCustomer(match);
             }
             setDuplicatedFromNumber(q.number);
-            toast({
+            toastRef.current({
               title: "Form filled from quotation",
               description: `Edit as needed, then save to create ${qp}-${String(qn).padStart(qpad, "0")}.`,
             });
           } else {
-            toast({
+            toastRef.current({
               title: "Could not load quotation",
               description: "Starting with a blank form.",
               variant: "destructive",
@@ -259,7 +267,7 @@ function NewQuotationPageContent() {
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load data",
             description: msg,
             variant: "destructive",
@@ -272,7 +280,7 @@ function NewQuotationPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [toast, duplicateSourceId, router]);
+  }, [duplicateSourceId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -511,17 +519,7 @@ function NewQuotationPageContent() {
   if (loading) {
     return (
       <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-        <div className="flex items-center justify-between">
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="flex gap-2">
-            <div className="h-9 w-28 rounded bg-muted animate-pulse" />
-          </div>
-        </div>
-        <div className="grid lg:grid-cols-2 gap-6">
-          <div className="h-56 rounded bg-muted animate-pulse" />
-          <div className="h-56 rounded bg-muted animate-pulse" />
-        </div>
-        <div className="h-64 rounded bg-muted animate-pulse" />
+        <FormTwoColumnPageSkeleton withLineItems />
       </div>
     );
   }
@@ -1120,9 +1118,6 @@ function NewQuotationPageContent() {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Select Customer</DialogTitle>
-            <DialogDescription>
-              Choose a customer from your database
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
@@ -1181,11 +1176,7 @@ export default function NewQuotationPage() {
     <Suspense
       fallback={
         <div className={`${APP_PAGE_SHELL_CLASS} max-w-7xl`}>
-          <div className="h-8 w-56 rounded bg-muted animate-pulse" />
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="h-56 rounded bg-muted animate-pulse" />
-            <div className="h-56 rounded bg-muted animate-pulse" />
-          </div>
+          <FormTwoColumnPageSkeleton withLineItems />
         </div>
       }
     >

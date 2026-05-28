@@ -1,5 +1,13 @@
 import { supabase } from "@/lib/supabaseClient";
 import { requireActiveCompanyId } from "@/lib/active-company";
+import {
+  buildCompanyTeamSeatUsage,
+  formatTeamInviteLimitMessage,
+  type CompanyTeamSeatUsage,
+} from "@/lib/company-team-limit";
+
+export type { CompanyTeamSeatUsage } from "@/lib/company-team-limit";
+export { formatTeamInviteLimitMessage } from "@/lib/company-team-limit";
 
 export type TeamMemberProfile = {
   full_name: string | null;
@@ -60,6 +68,44 @@ function mapCompanyUserRowsToTeamMembers(
       driverRate: (m.driver_rate as number | null) ?? null,
       profile: prof,
     } satisfies TeamMemberRow;
+  });
+}
+
+type PlanMaxUsersEmbed = { max_users: number };
+
+/** Seat usage for the active company (plan limit + override vs current memberships). */
+export async function getCompanyTeamSeatUsage(
+  companyId?: string,
+): Promise<CompanyTeamSeatUsage> {
+  const cid = companyId ?? (await requireActiveCompanyId());
+
+  const { data: company, error: cErr } = await supabase
+    .from("companies")
+    .select("max_users_override, plans ( max_users )")
+    .eq("id", cid)
+    .maybeSingle();
+
+  if (cErr) throw new Error(cErr.message);
+  if (!company) throw new Error("Company not found.");
+
+  const rawPlans = (company as { plans?: PlanMaxUsersEmbed | PlanMaxUsersEmbed[] | null })
+    .plans;
+  const planRow = Array.isArray(rawPlans) ? rawPlans[0] ?? null : rawPlans ?? null;
+  const planMaxUsers = planRow ? Number(planRow.max_users) : 0;
+  const maxUsersOverride = (company as { max_users_override: number | null })
+    .max_users_override;
+
+  const { count, error: countErr } = await supabase
+    .from("company_users")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", cid);
+
+  if (countErr) throw new Error(countErr.message);
+
+  return buildCompanyTeamSeatUsage({
+    planMaxUsers,
+    maxUsersOverride,
+    currentMemberCount: count ?? 0,
   });
 }
 

@@ -1,9 +1,10 @@
 "use client";
+import { FormTwoColumnPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Building2, Mail, Save, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,9 +12,11 @@ import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import {
   getCustomer,
+  getCachedCustomer,
   updateCustomer,
   type CustomerRow,
 } from "@/lib/customers-service";
+import { getActiveCompanyId } from "@/lib/active-company";
 import {
   CustomerDirectoryFormFields,
   customerDirectoryFormToPayload,
@@ -86,6 +89,8 @@ export default function EditCustomerPage() {
   const router = useRouter();
   const id = typeof params.id === "string" ? params.id : "";
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState<CustomerDirectoryFormData>(() =>
@@ -114,11 +119,20 @@ export default function EditCustomerPage() {
     let cancelled = false;
     (async () => {
       try {
-        setLoading(true);
+        const companyId = await getActiveCompanyId();
+        const cached = companyId ? getCachedCustomer(companyId, id) : null;
+        if (cancelled) return;
+        if (cached) {
+          setFormData(rowToForm(cached));
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
+
         const row = await getCustomer(id);
         if (cancelled) return;
         if (!row) {
-          toast({
+          toastRef.current({
             title: "Customer not found",
             description: "Check the link or open the customer from the list.",
             variant: "destructive",
@@ -129,7 +143,7 @@ export default function EditCustomerPage() {
         setFormData(rowToForm(row));
       } catch (e: unknown) {
         if (!cancelled) {
-          toast({
+          toastRef.current({
             title: "Could not load customer",
             description: e instanceof Error ? e.message : "Please try again.",
             variant: "destructive",
@@ -143,14 +157,14 @@ export default function EditCustomerPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, router, toast]);
+  }, [id, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const next = validateCustomerDirectoryForm(formData);
     setErrors(next);
     if (Object.keys(next).length > 0) {
-      toast({
+      toastRef.current({
         title: "Check the form",
         description: "Fix the highlighted fields.",
         variant: "destructive",
@@ -165,12 +179,12 @@ export default function EditCustomerPage() {
       );
       setFormData(rowToForm(updated));
       setRelatedDocsReload((n) => n + 1);
-      toast({
+      toastRef.current({
         title: "Customer saved",
         description: "Your changes have been saved.",
       });
     } catch (err: unknown) {
-      toast({
+      toastRef.current({
         title: "Could not save",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
@@ -189,11 +203,7 @@ export default function EditCustomerPage() {
     return (
       <AppPageShell className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6">
         <div className={primaryCardShellClass}>
-          <div className="h-10 w-56 animate-pulse rounded bg-muted" />
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
-            <div className="h-64 animate-pulse rounded-lg bg-muted" />
-          </div>
+          <FormTwoColumnPageSkeleton withLineItems={false} />
         </div>
       </AppPageShell>
     );

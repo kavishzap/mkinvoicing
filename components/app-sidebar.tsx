@@ -4,9 +4,8 @@ import { Fragment, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { ChevronDown, Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Loader2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { initialsFromDisplayName } from "@/lib/user-display";
 import {
   APP_NAV_ITEMS,
   getNavDisplayLabel,
@@ -18,18 +17,13 @@ import { useAppFeatures } from "@/contexts/app-features-context";
 import { useAppAccount } from "@/contexts/app-account-context";
 import { useSidebarCollapse } from "@/contexts/sidebar-collapse-context";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { AccountPopoverPanel } from "@/components/account-popover-panel";
+import { AccountMenuPopover } from "@/components/account-menu-popover";
+import { useHydrated } from "@/hooks/use-hydrated";
 
 /** Navbar brand (black on transparent — best on light sidebar `bg-card`). */
 const NAVBAR_LOGO = "/moledger_black_transparent_hd.png";
@@ -41,16 +35,9 @@ type SidebarProps = {
 
 export function AppSidebar({ className, onNavigate }: SidebarProps) {
   const pathname = usePathname();
+  const hydrated = useHydrated();
   const { collapsed, toggleCollapsed } = useSidebarCollapse();
-  const {
-    userChip,
-    systemRoleLabel,
-    companyRoleLabel,
-    accountAnchor,
-    setAccountAnchor,
-    companyLogoUrl,
-    companyName,
-  } = useAppAccount();
+  const { companyLogoUrl, companyName } = useAppAccount();
   const { status, has, featureName } = useAppFeatures();
 
   /** Mobile sheet uses full labels; collapse is desktop-only. */
@@ -123,28 +110,46 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
           </Link>
         ) : null}
         {!onNavigate ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground"
-                onClick={toggleCollapsed}
-                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                aria-pressed={!collapsed}
-              >
-                {collapsed ? (
-                  <PanelLeftOpen className="h-4 w-4" />
-                ) : (
-                  <PanelLeftClose className="h-4 w-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right" sideOffset={6}>
-              {collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            </TooltipContent>
-          </Tooltip>
+          hydrated ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-muted-foreground"
+                  onClick={toggleCollapsed}
+                  aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  aria-pressed={!collapsed}
+                >
+                  {collapsed ? (
+                    <PanelLeftOpen className="h-4 w-4" />
+                  ) : (
+                    <PanelLeftClose className="h-4 w-4" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={6}>
+                {collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground"
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-pressed={!collapsed}
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </Button>
+          )
         ) : null}
       </div>
 
@@ -238,7 +243,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                     </Link>
                   );
 
-                  if (narrow) {
+                  if (narrow && hydrated) {
                     return (
                       <Tooltip key={item.href}>
                         <TooltipTrigger asChild>{link}</TooltipTrigger>
@@ -282,71 +287,7 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
           narrow ? "px-1.5 py-2" : "px-2 pb-2 pt-1"
         )}
       >
-        <Popover
-          open={accountAnchor === "sidebar"}
-          onOpenChange={(open) =>
-            setAccountAnchor(open ? "sidebar" : "closed")
-          }
-        >
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                "flex w-full items-center rounded-lg outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                narrow ? "justify-center p-1.5" : "gap-2.5 p-2 text-left"
-              )}
-              aria-haspopup="dialog"
-              aria-expanded={accountAnchor === "sidebar"}
-              aria-label={
-                userChip ? `${userChip.name}, open account menu` : "Account"
-              }
-            >
-              <Avatar className="size-9 shrink-0 border border-border/60">
-                {userChip?.avatarUrl ? (
-                  <AvatarImage src={userChip.avatarUrl} alt="" />
-                ) : null}
-                <AvatarFallback
-                  className={cn(
-                    "text-xs font-semibold",
-                    "bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200"
-                  )}
-                >
-                  {userChip ? initialsFromDisplayName(userChip.name) : "…"}
-                </AvatarFallback>
-              </Avatar>
-              {!narrow && userChip && (
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold leading-tight text-foreground">
-                    {userChip.name}
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {[systemRoleLabel, companyRoleLabel]
-                      .filter(Boolean)
-                      .join(" · ") || "—"}
-                  </p>
-                </div>
-              )}
-              {!narrow && (
-                <ChevronDown
-                  className={cn(
-                    "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                    accountAnchor === "sidebar" && "rotate-180"
-                  )}
-                  aria-hidden
-                />
-              )}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent
-            side="right"
-            align="end"
-            sideOffset={8}
-            className="w-[min(20rem,calc(100vw-1.5rem))] p-4"
-            onCloseAutoFocus={(e) => e.preventDefault()}
-          >
-            <AccountPopoverPanel />
-          </PopoverContent>
-        </Popover>
+        <AccountMenuPopover anchor="sidebar" variant="sidebar" narrow={narrow} />
       </footer>
 
     </aside>

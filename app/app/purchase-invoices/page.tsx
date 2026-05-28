@@ -1,4 +1,5 @@
 "use client";
+import { TableListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -308,9 +309,7 @@ export default function PurchaseInvoicesPage() {
           </Button>
         }
       >
-        <Card className="p-6">
-          <div className="h-40 rounded bg-muted animate-pulse" />
-        </Card>
+        <TableListPageSkeleton />
       </AppPageShell>
     );
   }

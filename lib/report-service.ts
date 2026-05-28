@@ -88,7 +88,10 @@ export async function getReportData(
     status: "paid" as const,
     currency: r.currency,
     clientName: nameFromBillTo(r.bill_to_snapshot),
+    customerId: null,
     total: computeItemsTotal(r.invoice_items ?? []),
+    salesOrderId: null,
+    salesOrderNumber: null,
   }));
 
   const expenses: ExpenseRow[] = expData.map((r: any) => ({

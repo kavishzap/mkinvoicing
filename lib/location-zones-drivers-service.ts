@@ -2,9 +2,8 @@ import { supabase } from "@/lib/supabaseClient";
 import { getActiveCompanyId } from "@/lib/active-company";
 import { getCurrentUserId } from "@/lib/settings-service";
 import {
-  listTeamMembers,
+  listDriverRoleTeamMembers,
   type TeamMemberRow,
-  isDriverRoleTeamMember,
 } from "@/lib/company-team-service";
 
 async function requireCompanyId(): Promise<string> {
@@ -51,8 +50,9 @@ export type ZoneForDriverRow = {
 
 export async function listZonesForDriverUserIds(
   driverUserIds: string[],
+  companyId?: string,
 ): Promise<Record<string, ZoneForDriverRow[]>> {
-  const companyId = await requireCompanyId();
+  const cid = companyId ?? (await requireCompanyId());
   const unique = [...new Set(driverUserIds.filter(Boolean))];
   const byDriver: Record<string, ZoneForDriverRow[]> = {};
   for (const id of unique) {
@@ -63,7 +63,7 @@ export async function listZonesForDriverUserIds(
   const { data, error } = await supabase
     .from("zones")
     .select("id, name, description, is_active, driver_user_id")
-    .eq("company_id", companyId)
+    .eq("company_id", cid)
     .in("driver_user_id", unique)
     .order("name", { ascending: true });
 
@@ -94,12 +94,72 @@ export type LocationDriverLinkRow = {
   assignedUntil: string | null;
 };
 
+/** UI list row — driver name + zones only (no active/primary toggles). */
+export type LocationDriverLinkDisplayRow = {
+  id: string;
+  driverUserId: string;
+  displayName: string;
+  /** When set, links to `/app/company-team/[membershipId]`. */
+  membershipId: string | null;
+};
+
 function memberLabel(m: TeamMemberRow): string {
   return (
     m.profile?.full_name?.trim() ||
     m.profile?.email?.trim() ||
     m.userId.slice(0, 8)
   );
+}
+
+async function fetchMembershipIdsByUserId(
+  companyId: string,
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("company_users")
+    .select("id, user_id")
+    .eq("company_id", companyId)
+    .in("user_id", uniq);
+
+  if (error) throw new Error(error.message);
+
+  for (const row of data ?? []) {
+    const uid = String((row as { user_id?: unknown }).user_id ?? "");
+    const mid = String((row as { id?: unknown }).id ?? "");
+    if (uid && mid) map.set(uid, mid);
+  }
+
+  return map;
+}
+
+async function fetchUserDisplayLabels(
+  userIds: string[],
+): Promise<Map<string, string>> {
+  const uniq = [...new Set(userIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (uniq.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("id, full_name, email")
+    .in("id", uniq);
+
+  if (error) throw new Error(error.message);
+
+  for (const row of data ?? []) {
+    const id = String((row as { id?: unknown }).id ?? "");
+    const fullName = String(
+      (row as { full_name?: unknown }).full_name ?? "",
+    ).trim();
+    const email = String((row as { email?: unknown }).email ?? "").trim();
+    map.set(id, fullName || email || id.slice(0, 8));
+  }
+
+  return map;
 }
 
 /** Locations linked to a driver via `location_drivers` (any location type). */
@@ -187,25 +247,44 @@ function mapLocationDriverRows(
   }));
 }
 
+function mapLocationDriverDisplayRows(
+  rows: Record<string, unknown>[],
+  labelByUserId: Map<string, string>,
+  membershipByUserId: Map<string, string>,
+): LocationDriverLinkDisplayRow[] {
+  return rows.map((r) => {
+    const driverUserId = String(r.driver_user_id);
+    return {
+      id: String(r.id),
+      driverUserId,
+      displayName:
+        labelByUserId.get(driverUserId) ?? driverUserId.slice(0, 8),
+      membershipId: membershipByUserId.get(driverUserId) ?? null,
+    };
+  });
+}
+
 export type LocationRoutingTabChoice = { userId: string; label: string };
 
 /** One round-trip batch for the location routing UI (avoids duplicate team / link fetches). */
 export async function loadLocationRoutingTabData(
   locationId: string,
+  opts?: { driverMembers?: TeamMemberRow[] },
 ): Promise<{
-  driverLinks: LocationDriverLinkRow[];
+  driverLinks: LocationDriverLinkDisplayRow[];
   zonesByDriverId: Record<string, ZoneForDriverRow[]>;
   driverChoices: LocationRoutingTabChoice[];
+  /** Pass back into the next refresh to skip re-listing the driver team. */
+  driverMembers: TeamMemberRow[];
 }> {
   const companyId = await requireCompanyId();
+  const driverMembers =
+    opts?.driverMembers ?? (await listDriverRoleTeamMembers());
 
-  const [members, linksResult, busyElsewhere] = await Promise.all([
-    listTeamMembers(),
+  const [linksResult, busyElsewhere] = await Promise.all([
     supabase
       .from("location_drivers")
-      .select(
-        "id, driver_user_id, is_primary, is_active, assigned_from, assigned_until, created_at",
-      )
+      .select("id, driver_user_id, created_at")
       .eq("company_id", companyId)
       .eq("location_id", locationId)
       .order("created_at", { ascending: true }),
@@ -214,47 +293,78 @@ export async function loadLocationRoutingTabData(
 
   if (linksResult.error) throw new Error(linksResult.error.message);
 
-  const labelByUserId = new Map(members.map((m) => [m.userId, memberLabel(m)]));
+  const labelByUserId = new Map(
+    driverMembers.map((m) => [m.userId, memberLabel(m)]),
+  );
+  const membershipByUserId = new Map(
+    driverMembers.map((m) => [m.userId, m.membershipId]),
+  );
   const rawLinks = (linksResult.data ?? []) as Record<string, unknown>[];
-  const driverLinks = mapLocationDriverRows(rawLinks, labelByUserId);
-  const driverIds = driverLinks.map((d) => d.driverUserId);
+  const driverIds = [
+    ...new Set(
+      rawLinks
+        .map((r) => String(r.driver_user_id ?? ""))
+        .filter(Boolean),
+    ),
+  ];
+  const missingIds = driverIds.filter((id) => !labelByUserId.has(id));
 
-  const zonesByDriverId = await listZonesForDriverUserIds(driverIds);
+  const [extraLabels, extraMemberships, zonesByDriverId] = await Promise.all([
+    missingIds.length > 0
+      ? fetchUserDisplayLabels(missingIds)
+      : Promise.resolve(new Map<string, string>()),
+    missingIds.length > 0
+      ? fetchMembershipIdsByUserId(companyId, missingIds)
+      : Promise.resolve(new Map<string, string>()),
+    listZonesForDriverUserIds(driverIds, companyId),
+  ]);
 
+  for (const [id, label] of extraLabels) {
+    labelByUserId.set(id, label);
+  }
+  for (const [id, membershipId] of extraMemberships) {
+    membershipByUserId.set(id, membershipId);
+  }
+
+  const driverLinks = mapLocationDriverDisplayRows(
+    rawLinks,
+    labelByUserId,
+    membershipByUserId,
+  );
   const assigned = new Set(driverIds);
-  const driverChoices: LocationRoutingTabChoice[] = members
+  const driverChoices: LocationRoutingTabChoice[] = driverMembers
     .filter(
-      (m) =>
-        isDriverRoleTeamMember(m) &&
-        !assigned.has(m.userId) &&
-        !busyElsewhere.has(m.userId),
+      (m) => !assigned.has(m.userId) && !busyElsewhere.has(m.userId),
     )
     .map((m) => ({ userId: m.userId, label: memberLabel(m) }));
 
-  return { driverLinks, zonesByDriverId, driverChoices };
+  return { driverLinks, zonesByDriverId, driverChoices, driverMembers };
 }
 
 export async function listLocationDriverLinks(
   locationId: string,
 ): Promise<LocationDriverLinkRow[]> {
   const companyId = await requireCompanyId();
-  const [members, { data, error }] = await Promise.all([
-    listTeamMembers(),
-    supabase
-      .from("location_drivers")
-      .select(
-        "id, driver_user_id, is_primary, is_active, assigned_from, assigned_until, created_at",
-      )
-      .eq("company_id", companyId)
-      .eq("location_id", locationId)
-      .order("created_at", { ascending: true }),
-  ]);
+  const { data, error } = await supabase
+    .from("location_drivers")
+    .select(
+      "id, driver_user_id, is_primary, is_active, assigned_from, assigned_until, created_at",
+    )
+    .eq("company_id", companyId)
+    .eq("location_id", locationId)
+    .order("created_at", { ascending: true });
 
   if (error) throw new Error(error.message);
 
-  const labelByUserId = new Map(members.map((m) => [m.userId, memberLabel(m)]));
+  const rawLinks = (data ?? []) as Record<string, unknown>[];
+  const driverIds = [
+    ...new Set(
+      rawLinks.map((r) => String(r.driver_user_id ?? "")).filter(Boolean),
+    ),
+  ];
+  const labelByUserId = await fetchUserDisplayLabels(driverIds);
 
-  return mapLocationDriverRows((data ?? []) as Record<string, unknown>[], labelByUserId);
+  return mapLocationDriverRows(rawLinks, labelByUserId);
 }
 
 export async function addLocationDriverLink(
@@ -263,8 +373,20 @@ export async function addLocationDriverLink(
 ): Promise<void> {
   const companyId = await requireCompanyId();
   const createdBy = await getCurrentUserId();
-  const existing = await listLocationDriverLinks(locationId);
-  if (existing.some((l) => l.driverUserId === driverUserId)) {
+  const { data: existingRows, error: existingErr } = await supabase
+    .from("location_drivers")
+    .select("id, driver_user_id")
+    .eq("company_id", companyId)
+    .eq("location_id", locationId);
+
+  if (existingErr) throw new Error(existingErr.message);
+
+  const existing = existingRows ?? [];
+  if (
+    existing.some(
+      (r) => String((r as { driver_user_id?: unknown }).driver_user_id ?? "") === driverUserId,
+    )
+  ) {
     throw new Error("This driver is already assigned to the location.");
   }
 
@@ -351,16 +473,24 @@ export async function listUnassignedDriversForLocation(
   locationId: string,
 ): Promise<TeamMemberRow[]> {
   const companyId = await requireCompanyId();
-  const [members, assigned, busyElsewhere] = await Promise.all([
-    listTeamMembers(),
-    listLocationDriverLinks(locationId),
+  const [driverMembers, assignedResult, busyElsewhere] = await Promise.all([
+    listDriverRoleTeamMembers(),
+    supabase
+      .from("location_drivers")
+      .select("driver_user_id")
+      .eq("company_id", companyId)
+      .eq("location_id", locationId),
     driverUserIdsAssignedElsewhere(companyId, locationId),
   ]);
-  const ids = new Set(assigned.map((a) => a.driverUserId));
-  return members.filter(
-    (m) =>
-      isDriverRoleTeamMember(m) &&
-      !ids.has(m.userId) &&
-      !busyElsewhere.has(m.userId),
+
+  if (assignedResult.error) throw new Error(assignedResult.error.message);
+
+  const ids = new Set(
+    (assignedResult.data ?? [])
+      .map((r) => String((r as { driver_user_id?: unknown }).driver_user_id ?? ""))
+      .filter(Boolean),
+  );
+  return driverMembers.filter(
+    (m) => !ids.has(m.userId) && !busyElsewhere.has(m.userId),
   );
 }

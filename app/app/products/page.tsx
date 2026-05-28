@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -30,6 +38,9 @@ import {
 import { AppPageShell } from "@/components/app-page-shell";
 import {
   fetchProductListFacets,
+  getCachedProductList,
+  getCachedProductListFacets,
+  invalidateProductCaches,
   listAllProductsForExport,
   listProducts,
   type ProductListFacets,
@@ -50,7 +61,7 @@ function formatMoney(amount: number, currency: string) {
   }
 }
 
-function ProductsFilterSidebar({
+const ProductsFilterSidebar = memo(function ProductsFilterSidebar({
   id,
   facets,
   statusFilter,
@@ -133,11 +144,13 @@ function ProductsFilterSidebar({
       </div>
     </aside>
   );
-}
+});
 
 export default function ProductsPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
 
   const [rows, setRows] = useState<ProductRow[]>([]);
@@ -177,7 +190,10 @@ export default function ProductsPage() {
   }, [searchQuery]);
 
   useEffect(() => {
-    const bump = () => setActiveCompanyScope((n) => n + 1);
+    const bump = () => {
+      invalidateProductCaches();
+      setActiveCompanyScope((n) => n + 1);
+    };
     window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, bump);
     const onStorage = (e: StorageEvent) => {
       if (e.key === ACTIVE_COMPANY_ID_STORAGE_KEY) bump();
@@ -193,7 +209,6 @@ export default function ProductsPage() {
     let cancelled = false;
 
     (async () => {
-      setFacetsLoading(true);
       const id = await getActiveCompanyId();
       if (cancelled) return;
 
@@ -206,18 +221,26 @@ export default function ProductsPage() {
         return;
       }
 
+      const cachedFacets = getCachedProductListFacets(id);
+      if (cachedFacets) {
+        setFacets(cachedFacets);
+        setFacetsLoading(false);
+      } else {
+        setFacetsLoading(true);
+      }
+
       try {
         const facetData = await fetchProductListFacets();
         if (!cancelled) setFacets(facetData);
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
-          toast({
+          toastRef.current({
             title: "Failed to load filters",
             description: msg,
             variant: "destructive",
           });
-          setFacets(null);
+          if (!cachedFacets) setFacets(null);
         }
       } finally {
         if (!cancelled) setFacetsLoading(false);
@@ -256,21 +279,36 @@ export default function ProductsPage() {
     let cancelled = false;
 
     (async () => {
-      setListLoading(true);
+      const companyId = await getActiveCompanyId();
+      if (cancelled || gen !== listRequestGen.current) return;
+
+      const listOpts = {
+        search: debouncedSearch || undefined,
+        status: statusFilter,
+        page,
+        pageSize,
+      };
+
+      const cached = companyId
+        ? getCachedProductList(companyId, listOpts)
+        : null;
+      if (cached) {
+        setRows(cached.rows);
+        setTotal(cached.total);
+        setListLoading(false);
+      } else {
+        setListLoading(true);
+      }
+
       try {
-        const listRes = await listProducts({
-          search: debouncedSearch || undefined,
-          status: statusFilter,
-          page,
-          pageSize,
-        });
+        const listRes = await listProducts(listOpts);
         if (cancelled || gen !== listRequestGen.current) return;
         setRows(listRes.rows);
         setTotal(listRes.total);
       } catch (e: unknown) {
         if (cancelled || gen !== listRequestGen.current) return;
         const msg = e instanceof Error ? e.message : "Please try again.";
-        toast({
+        toastRef.current({
           title: "Failed to load products",
           description: msg,
           variant: "destructive",
@@ -318,7 +356,7 @@ export default function ProductsPage() {
       setExportingCsv(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to export",
           description: "No products match the current filters.",
         });
@@ -362,12 +400,12 @@ export default function ProductsPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast({
+      toastRef.current({
         title: "CSV exported",
         description: `${data.length} product${data.length === 1 ? "" : "s"} exported.`,
       });
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Export failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -383,7 +421,7 @@ export default function ProductsPage() {
       setPrinting(true);
       const data = await fetchExportRows();
       if (data.length === 0) {
-        toast({
+        toastRef.current({
           title: "Nothing to print",
           description: "No products match the current filters.",
         });
@@ -405,13 +443,13 @@ export default function ProductsPage() {
         };
       } else {
         doc.save(filename);
-        toast({
+        toastRef.current({
           title: "Print blocked",
           description: "Allow popups to print. PDF downloaded instead.",
         });
       }
     } catch (e: unknown) {
-      toast({
+      toastRef.current({
         title: "Print failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
@@ -610,7 +648,7 @@ export default function ProductsPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory ? (

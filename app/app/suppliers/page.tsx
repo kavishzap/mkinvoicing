@@ -1,4 +1,5 @@
 "use client";
+import { TableListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
@@ -111,8 +112,9 @@ export default function SuppliersPage() {
       }
     >
       {loading ? (
-        <div className="h-24 rounded-md border bg-muted/30 animate-pulse" />
+        <TableListPageSkeleton className="mt-0" />
       ) : (
+        <>
         <Card>
           <CardContent className="pt-6 space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -148,11 +150,7 @@ export default function SuppliersPage() {
             </div>
           </CardContent>
         </Card>
-      )}
 
-      {loading ? (
-        <div className="h-64 rounded-md border bg-muted/30 animate-pulse" />
-      ) : (
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-sm">
             <thead className="bg-muted/50 text-muted-foreground">
@@ -246,6 +244,7 @@ export default function SuppliersPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {!loading && (

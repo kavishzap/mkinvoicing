@@ -1,4 +1,5 @@
 "use client";
+import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -670,18 +671,6 @@ export default function ExpensesPage() {
         ),
       },
       {
-        id: "currency",
-        accessorFn: (r) => r.currency ?? "",
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Currency" />
-        ),
-        cell: ({ row }) => (
-          <span className="inline-flex rounded-md border border-border/70 bg-muted/40 px-2 py-0.5 text-xs font-medium tabular-nums">
-            {row.original.currency || "MUR"}
-          </span>
-        ),
-      },
-      {
         id: "amount",
         accessorFn: (r) => Number(r.amount ?? 0),
         header: ({ column }) => (
@@ -846,7 +835,7 @@ export default function ExpensesPage() {
       )}
 
       {showSkeleton ? (
-        <div className="h-56 animate-pulse rounded-md bg-muted/60" aria-hidden />
+        <DirectoryListPageSkeleton className="min-h-0 flex-1" />
       ) : null}
 
       {showDirectory ? (
