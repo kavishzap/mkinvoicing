@@ -153,6 +153,7 @@ export async function buildSalesOrdersListPdfDoc(params: {
   const body = rows.map((r) => [
     r.number,
     r.clientName || "—",
+    r.address || "—",
     r.cityName || "—",
     r.createdByName || "—",
     formatListDate(r.deliveryDate),
@@ -167,6 +168,7 @@ export async function buildSalesOrdersListPdfDoc(params: {
       [
         "Order #",
         "Customer",
+        "Address",
         "City",
         "Created by",
         "Delivery date",

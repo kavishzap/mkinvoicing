@@ -333,7 +333,7 @@ export default function SalesOrdersPage() {
   useEffect(() => {
     const t = window.setTimeout(
       () => setDebouncedSearch(searchQuery.trim()),
-      350,
+      280,
     );
     return () => window.clearTimeout(t);
   }, [searchQuery]);
@@ -358,36 +358,22 @@ export default function SalesOrdersPage() {
     let cancelled = false;
 
     (async () => {
-      const id = await getActiveCompanyId();
+      const companyId = await getActiveCompanyId();
       if (cancelled) return;
 
-      setCompanyReady(!!id);
-      if (!id) {
+      setCompanyReady(!!companyId);
+      if (!companyId) {
         setRows([]);
         setTotal(0);
         setFacets(null);
         setFacetsLoading(false);
         setListLoading(false);
+        return;
       }
-    })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeCompanyScope]);
+      void expireStaleSalesOrders();
 
-  useEffect(() => {
-    if (companyReady !== true) return;
-
-    let cancelled = false;
-
-    (async () => {
-      const companyId = await getActiveCompanyId();
-      if (cancelled) return;
-
-      const cachedFacets = companyId
-        ? getCachedSalesOrderListFacets(companyId)
-        : null;
+      const cachedFacets = getCachedSalesOrderListFacets(companyId);
       if (cachedFacets) {
         setFacets(cachedFacets);
         setFacetsLoading(false);
@@ -396,10 +382,8 @@ export default function SalesOrdersPage() {
       }
 
       try {
-        await expireStaleSalesOrders();
         const facetData = await getSalesOrderListFacets();
-        if (cancelled) return;
-        setFacets(facetData);
+        if (!cancelled) setFacets(facetData);
       } catch (e: unknown) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : "Please try again.";
@@ -419,7 +403,7 @@ export default function SalesOrdersPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toast identity is unstable; errors only
-  }, [activeCompanyScope, companyReady]);
+  }, [activeCompanyScope]);
 
   useEffect(() => {
     if (companyReady !== true) return;
@@ -595,6 +579,7 @@ export default function SalesOrdersPage() {
       const headers = [
         "Order #",
         "Customer",
+        "Address",
         "City",
         "Created by",
         "Delivery date",
@@ -609,6 +594,7 @@ export default function SalesOrdersPage() {
           [
             r.number,
             r.clientName || "",
+            r.address || "",
             r.cityName || "",
             r.createdByName || "",
             r.deliveryDate ? formatListDate(r.deliveryDate) : "",
@@ -769,6 +755,19 @@ export default function SalesOrdersPage() {
             </Link>
           );
         },
+      },
+      {
+        id: "address",
+        accessorFn: (r) => r.address ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Address" />
+        ),
+        cell: ({ row }) => (
+          <span className="max-w-[200px] truncate block">
+            {row.original.address || "—"}
+          </span>
+        ),
+        meta: { tdClassName: "text-muted-foreground max-w-[200px]" },
       },
       {
         id: "city",

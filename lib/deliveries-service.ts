@@ -9,6 +9,17 @@ import {
   type SalesOrderPaymentStatus,
 } from "@/lib/sales-orders-service";
 
+/** Fulfillment values allowed when picking sales orders for a new delivery note. */
+export const DELIVERY_NOTE_ELIGIBLE_FULFILLMENT_STATUSES: SalesOrderFulfillmentStatus[] =
+  ["new", "rescheduled"];
+
+export function salesOrderEligibleForDeliveryNote(
+  status: SalesOrderFulfillmentStatus | string | null | undefined,
+): boolean {
+  const normalized = normalizeSalesOrderFulfillmentStatus(status);
+  return DELIVERY_NOTE_ELIGIBLE_FULFILLMENT_STATUSES.includes(normalized);
+}
+
 /** Fulfillment states whose order total counts toward driver cash for settlement. */
 const DRIVER_SETTLEMENT_CASH_FULFILLMENT_KEYS = new Set([
   "delivered to customer",
@@ -279,6 +290,8 @@ export type DeliveryDetailSalesOrder = {
   linkId: string;
   salesOrderId: string;
   number: string;
+  /** ISO `YYYY-MM-DD` from `sales_orders.delivery_date`. */
+  deliveryDate: string | null;
   currency: string;
   total: number;
   clientName: string;
@@ -478,14 +491,7 @@ export async function listDriverTeamMembers(): Promise<TeamMemberRow[]> {
   return listDriverRoleTeamMembers();
 }
 
-/** Active sales orders with fulfillment **New**, **Pending**, or **Rescheduled**, including line items for the picker. */
-export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]> {
-  const companyId = await requireActiveCompanyId();
-
-  const { data, error } = await supabase
-    .from("sales_orders")
-    .select(
-      `
+const SALES_ORDER_PICK_SELECT = `
       id, number, issue_date, valid_until, currency, total, payment_status, fulfillment_status, bill_to_snapshot, city_id, cities(name),
       delivery_date,
       customer_id,
@@ -495,69 +501,124 @@ export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]>
         cities ( name )
       ),
       sales_order_items ( product_id, item, description, quantity, unit_price, tax_percent, sort_order )
-    `
-    )
+    `;
+
+function mapSalesOrderRowToPickRow(row: Record<string, unknown>): SalesOrderPickRow {
+  const bill = (row.bill_to_snapshot ?? {}) as Record<string, unknown>;
+  const { clientName, phone, email, addressLines } = billSnapshotToContact(bill);
+  const cityId = pickCityIdForDeliveryRow(row);
+  const city = pickCityDisplayForDeliveryRow(row, bill);
+  const rawItems = (row.sales_order_items ?? []) as Record<string, unknown>[];
+  const items: DeliveryLineItem[] = [...rawItems]
+    .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0))
+    .map((it) => ({
+      product_id: it.product_id != null ? String(it.product_id) : null,
+      item: String(it.item ?? ""),
+      description: (it.description as string | null) ?? null,
+      quantity: Number(it.quantity ?? 0),
+      unit_price: Number(it.unit_price ?? 0),
+      tax_percent: Number(it.tax_percent ?? 0),
+    }));
+
+  return {
+    id: row.id as string,
+    number: String(row.number ?? ""),
+    issueDate: String(row.issue_date ?? ""),
+    validUntil: String(row.valid_until ?? ""),
+    currency: String(row.currency ?? "MUR"),
+    total: Number(row.total ?? 0),
+    paymentStatus: normalizeSalesOrderPaymentStatus(
+      row.payment_status as string | null | undefined,
+    ),
+    fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
+      row.fulfillment_status as string | null | undefined,
+    ),
+    clientName,
+    customerId: (row.customer_id as string | null) ?? null,
+    phone,
+    email,
+    cityId,
+    city,
+    deliveryDate:
+      row.delivery_date != null && String(row.delivery_date).trim()
+        ? String(row.delivery_date).slice(0, 10)
+        : null,
+    addressLines,
+    items,
+  };
+}
+
+async function querySalesOrderPickRowsByIds(
+  companyId: string,
+  ids: string[],
+): Promise<SalesOrderPickRow[]> {
+  if (ids.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select(SALES_ORDER_PICK_SELECT)
     .eq("company_id", companyId)
-    .in("fulfillment_status", ["new", "pending", "rescheduled"])
+    .eq("status", "active")
+    .in("id", ids);
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) =>
+    mapSalesOrderRowToPickRow(row as Record<string, unknown>),
+  );
+}
+
+/** Active sales orders with fulfillment **New** or **Rescheduled**, including line items for the picker. */
+export async function listSalesOrdersForDelivery(): Promise<SalesOrderPickRow[]> {
+  const companyId = await requireActiveCompanyId();
+
+  const { data, error } = await supabase
+    .from("sales_orders")
+    .select(SALES_ORDER_PICK_SELECT)
+    .eq("company_id", companyId)
+    .in("fulfillment_status", DELIVERY_NOTE_ELIGIBLE_FULFILLMENT_STATUSES)
     .eq("status", "active")
     .order("issue_date", { ascending: false })
     .limit(300);
 
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((row: Record<string, unknown>) => {
-    const bill = (row.bill_to_snapshot ?? {}) as Record<string, unknown>;
-    const { clientName, phone, email, addressLines } = billSnapshotToContact(bill);
-    const cityId = pickCityIdForDeliveryRow(row);
-    const city = pickCityDisplayForDeliveryRow(row, bill);
-    const rawItems = (row.sales_order_items ?? []) as Record<string, unknown>[];
-    const items: DeliveryLineItem[] = [...rawItems]
-      .sort(
-        (a, b) =>
-          Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)
-      )
-      .map((it) => ({
-        product_id: it.product_id != null ? String(it.product_id) : null,
-        item: String(it.item ?? ""),
-        description: (it.description as string | null) ?? null,
-        quantity: Number(it.quantity ?? 0),
-        unit_price: Number(it.unit_price ?? 0),
-        tax_percent: Number(it.tax_percent ?? 0),
-      }));
+  return (data ?? []).map((row) =>
+    mapSalesOrderRowToPickRow(row as Record<string, unknown>),
+  );
+}
 
-    return {
-      id: row.id as string,
-      number: String(row.number ?? ""),
-      issueDate: String(row.issue_date ?? ""),
-      validUntil: String(row.valid_until ?? ""),
-      currency: String(row.currency ?? "MUR"),
-      total: Number(row.total ?? 0),
-      paymentStatus: normalizeSalesOrderPaymentStatus(
-        row.payment_status as string | null | undefined
-      ),
-      fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
-        row.fulfillment_status as string | null | undefined
-      ),
-      clientName,
-      customerId: (row.customer_id as string | null) ?? null,
-      phone,
-      email,
-      cityId,
-      city,
-      deliveryDate:
-        row.delivery_date != null && String(row.delivery_date).trim()
-          ? String(row.delivery_date).slice(0, 10)
-          : null,
-      addressLines,
-      items,
-    };
-  });
+/**
+ * Orders on this delivery note plus eligible **New** / **Rescheduled** orders to add (status **new**).
+ */
+export async function listSalesOrdersForDeliveryEdit(
+  deliveryId: string,
+): Promise<SalesOrderPickRow[]> {
+  const companyId = await requireActiveCompanyId();
+  const delivery = await getDelivery(deliveryId);
+  if (!delivery || delivery.status !== "new") {
+    throw new Error("Only delivery notes with status New can be edited.");
+  }
+
+  const linkedIds = delivery.salesOrders.map((so) => so.salesOrderId);
+  const [eligible, linked] = await Promise.all([
+    listSalesOrdersForDelivery(),
+    querySalesOrderPickRowsByIds(companyId, linkedIds),
+  ]);
+
+  const byId = new Map<string, SalesOrderPickRow>();
+  for (const row of linked) byId.set(row.id, row);
+  for (const row of eligible) byId.set(row.id, row);
+
+  return [...byId.values()].sort((a, b) =>
+    b.issueDate.localeCompare(a.issueDate),
+  );
 }
 
 /** Nested shape aligned with `getDelivery` / pinned-order fetch. */
 const SALES_ORDER_ROWS_FOR_DELIVERY_DETAIL = `
   id,
   number,
+  delivery_date,
   currency,
   total,
   customer_id,
@@ -602,6 +663,10 @@ function deliveryDetailSalesOrderFromSoRecord(
     linkId,
     salesOrderId: String(so.id ?? salesOrderIdFallback ?? ""),
     number: String(so.number ?? ""),
+    deliveryDate:
+      so.delivery_date != null && String(so.delivery_date).trim()
+        ? String(so.delivery_date).slice(0, 10)
+        : null,
     currency: String(so.currency ?? "MUR"),
     total: Number(so.total ?? 0),
     clientName,
@@ -1113,6 +1178,7 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
         sales_orders (
           id,
           number,
+          delivery_date,
           currency,
           total,
           customer_id,
@@ -1444,6 +1510,57 @@ export async function returnDriverStockToWarehouse(params: {
   if (error) throw new Error(error.message);
 }
 
+/** Fulfillment values updated to **delivered to customer** when a delivery note is completed. */
+const SALES_ORDER_FULFILLMENT_ON_DN_COMPLETE: SalesOrderFulfillmentStatus[] = [
+  "new",
+  "pending",
+  "rescheduled",
+  "delivery note created",
+  "delivered to driver",
+];
+
+/** Sets linked (and driver-pinned) sales orders to **delivered to customer**. */
+async function markLinkedSalesOrdersDeliveredToCustomer(
+  companyId: string,
+  deliveryId: string,
+  linkedSalesOrderIds: string[],
+  now: string,
+): Promise<void> {
+  const idsForCustomerUpdate = new Set(
+    linkedSalesOrderIds.filter(Boolean),
+  );
+
+  const { data: pinnedForCompletion, error: pinErr } = await supabase
+    .from("sales_orders")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("active_driver_delivery_id", deliveryId)
+    .in("fulfillment_status", SALES_ORDER_FULFILLMENT_ON_DN_COMPLETE);
+
+  if (pinErr) throw new Error(pinErr.message);
+
+  for (const row of pinnedForCompletion ?? []) {
+    idsForCustomerUpdate.add(String((row as { id: string }).id));
+  }
+
+  if (idsForCustomerUpdate.size === 0) return;
+
+  const { error: soErr } = await supabase
+    .from("sales_orders")
+    .update({
+      fulfillment_status: "delivered to customer",
+      updated_at: now,
+      active_driver_delivery_id: null,
+    })
+    .in("id", [...idsForCustomerUpdate])
+    .eq("company_id", companyId)
+    .in("fulfillment_status", SALES_ORDER_FULFILLMENT_ON_DN_COMPLETE);
+
+  if (soErr) {
+    throw new Error(soErr.message ?? "Failed to update sales orders.");
+  }
+}
+
 /**
  * Advance delivery note status one step (new → delivered_to_driver → completed)
  * and align linked sales orders’ fulfillment when possible.
@@ -1537,6 +1654,15 @@ export async function advanceDeliveryNoteStatus(
     return getDelivery(deliveryId);
   }
 
+  if (next === "completed") {
+    await markLinkedSalesOrdersDeliveredToCustomer(
+      companyId,
+      deliveryId,
+      salesOrderIds,
+      now,
+    );
+  }
+
   const { data: updatedRow, error: upErr } = await supabase
     .from("deliveries")
     .update({ status: next, updated_at: now })
@@ -1553,57 +1679,27 @@ export async function advanceDeliveryNoteStatus(
     );
   }
 
-  const idsForCustomerUpdate = new Set(salesOrderIds);
-  const { data: pinnedForCompletion } = await supabase
-    .from("sales_orders")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("active_driver_delivery_id", deliveryId)
-    .in("fulfillment_status", ["delivered to driver", "delivery note created"]);
-
-  for (const row of pinnedForCompletion ?? []) {
-    idsForCustomerUpdate.add(String((row as { id: string }).id));
-  }
-
-  if (idsForCustomerUpdate.size > 0) {
-    const { error: soErr } = await supabase
-      .from("sales_orders")
-      .update({
-        fulfillment_status: "delivered to customer",
-        updated_at: now,
-        active_driver_delivery_id: null,
-      })
-      .in("id", [...idsForCustomerUpdate])
-      .eq("company_id", companyId)
-      .in("fulfillment_status", ["delivered to driver", "delivery note created"]);
-
-    if (soErr) {
-      await supabase
-        .from("deliveries")
-        .update({
-          status: current,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", deliveryId)
-        .eq("company_id", companyId);
-      throw new Error(soErr.message ?? "Failed to update sales orders.");
-    }
-  }
-
   return getDelivery(deliveryId);
 }
 
 /**
- * Moves the delivery note to **completed** by advancing status as needed
- * (e.g. delivered_to_driver → completed). No-op if already completed.
+ * Marks the delivery note **completed** and linked sales orders **delivered to customer**.
+ * Does not require an intermediate “delivered to driver” step or stock transfer (used by settlement).
  */
 export async function ensureDeliveryNoteCompleted(
   deliveryId: string
 ): Promise<DeliveryDetail | null> {
   const companyId = await requireActiveCompanyId();
+
   const { data: row, error } = await supabase
     .from("deliveries")
-    .select("status")
+    .select(
+      `
+      id,
+      status,
+      delivery_sales_orders ( sales_order_id )
+    `
+    )
     .eq("id", deliveryId)
     .eq("company_id", companyId)
     .maybeSingle();
@@ -1611,23 +1707,42 @@ export async function ensureDeliveryNoteCompleted(
   if (error) throw new Error(error.message);
   if (!row) return null;
 
-  let current = normalizeDeliveryNoteStatus(
+  const current = normalizeDeliveryNoteStatus(
     (row as { status?: string | null }).status
   );
   if (current === "completed") {
     return getDelivery(deliveryId);
   }
 
-  let latest: DeliveryDetail | null = null;
-  for (let step = 0; step < 2; step++) {
-    if (!getNextDeliveryNoteStatus(current)) break;
-    latest = await advanceDeliveryNoteStatus(deliveryId);
-    if (!latest) break;
-    current = latest.status;
-    if (current === "completed") break;
+  const links = (row as { delivery_sales_orders?: { sales_order_id: string }[] })
+    .delivery_sales_orders ?? [];
+  const salesOrderIds = links.map((l) => l.sales_order_id).filter(Boolean);
+  const now = new Date().toISOString();
+
+  await markLinkedSalesOrdersDeliveredToCustomer(
+    companyId,
+    deliveryId,
+    salesOrderIds,
+    now,
+  );
+
+  const { data: updatedRow, error: upErr } = await supabase
+    .from("deliveries")
+    .update({ status: "completed", updated_at: now })
+    .eq("id", deliveryId)
+    .eq("company_id", companyId)
+    .neq("status", "completed")
+    .select("id")
+    .maybeSingle();
+
+  if (upErr) throw new Error(upErr.message);
+  if (!updatedRow) {
+    throw new Error(
+      "Could not mark delivery note completed (it may have changed). Refresh and try again."
+    );
   }
 
-  return latest ?? getDelivery(deliveryId);
+  return getDelivery(deliveryId);
 }
 
 export type CreateDeliveryPayload = {
@@ -1699,9 +1814,9 @@ export async function createDelivery(
     const fs = normalizeSalesOrderFulfillmentStatus(
       (row as { fulfillment_status?: string | null }).fulfillment_status
     );
-    if (fs !== "new" && fs !== "pending" && fs !== "rescheduled") {
+    if (!salesOrderEligibleForDeliveryNote(fs)) {
       throw new Error(
-        "Each sales order must have fulfillment New, Pending, or Rescheduled.",
+        "Each sales order must have fulfillment New or Rescheduled.",
       );
     }
     previousFulfillmentById.set(id, fs);
@@ -1752,7 +1867,7 @@ export async function createDelivery(
     })
     .in("id", ids)
     .eq("company_id", companyId)
-    .in("fulfillment_status", ["new", "pending", "rescheduled"])
+    .in("fulfillment_status", DELIVERY_NOTE_ELIGIBLE_FULFILLMENT_STATUSES)
     .select("id");
 
   if (upErr) {
@@ -1780,9 +1895,238 @@ export async function createDelivery(
     await supabase.from("delivery_sales_orders").delete().eq("delivery_id", deliveryId);
     await supabase.from("deliveries").delete().eq("id", deliveryId);
     throw new Error(
-      "Some sales orders are no longer eligible. They must be active with fulfillment New, Pending, or Rescheduled."
+      "Some sales orders are no longer eligible. They must be active with fulfillment New or Rescheduled."
     );
   }
 
   return deliveryId;
+}
+
+export type UpdateDeliveryPayload = CreateDeliveryPayload;
+
+/** Update a delivery note while status is **new** (driver, date, notes, linked sales orders). */
+export async function updateDelivery(
+  deliveryId: string,
+  payload: UpdateDeliveryPayload,
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+
+  const { data: deliveryRow, error: delErr } = await supabase
+    .from("deliveries")
+    .select("id, status")
+    .eq("id", deliveryId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  if (delErr) {
+    throw new Error(delErr.message ?? "Could not load delivery note.");
+  }
+  if (!deliveryRow) {
+    throw new Error("Delivery note not found.");
+  }
+  if ((deliveryRow as { status: string }).status !== "new") {
+    throw new Error("Only delivery notes with status New can be edited.");
+  }
+
+  const drivers = await listDriverTeamMembers();
+  if (!drivers.some((d) => d.userId === payload.driverUserId)) {
+    throw new Error("Select an active driver from the company team.");
+  }
+
+  const nextIds = [...new Set(payload.salesOrderIds.filter(Boolean))];
+  if (nextIds.length === 0) {
+    throw new Error("Select at least one sales order.");
+  }
+
+  const deliveryDateIso =
+    payload.deliveryDate?.trim()
+      ? payload.deliveryDate.trim().slice(0, 10)
+      : null;
+  if (!deliveryDateIso) {
+    throw new Error("Choose a delivery date.");
+  }
+
+  const { data: linkRows, error: linkErr } = await supabase
+    .from("delivery_sales_orders")
+    .select("sales_order_id")
+    .eq("delivery_id", deliveryId);
+
+  if (linkErr) {
+    throw new Error(linkErr.message ?? "Could not load linked sales orders.");
+  }
+
+  const currentIds = new Set(
+    (linkRows ?? []).map((r) =>
+      String((r as { sales_order_id: string }).sales_order_id),
+    ),
+  );
+  const nextIdSet = new Set(nextIds);
+  const toRemove = [...currentIds].filter((id) => !nextIdSet.has(id));
+  const toAdd = nextIds.filter((id) => !currentIds.has(id));
+
+  const { data: soCheckRows, error: soCheckErr } = await supabase
+    .from("sales_orders")
+    .select("id, delivery_date, fulfillment_status")
+    .eq("company_id", companyId)
+    .in("id", nextIds);
+
+  if (soCheckErr) {
+    throw new Error(soCheckErr.message ?? "Could not validate sales orders.");
+  }
+  const foundIds = new Set(
+    (soCheckRows ?? []).map((r: { id: string }) => String(r.id)),
+  );
+  if (foundIds.size !== nextIds.length) {
+    throw new Error(
+      "One or more sales orders were not found or do not belong to this company.",
+    );
+  }
+
+  const previousFulfillmentById = new Map<string, SalesOrderFulfillmentStatus>();
+
+  for (const row of soCheckRows ?? []) {
+    const id = String((row as { id: string }).id);
+    const fs = normalizeSalesOrderFulfillmentStatus(
+      (row as { fulfillment_status?: string | null }).fulfillment_status,
+    );
+    const onThisDelivery = currentIds.has(id);
+    const isAdd = toAdd.includes(id);
+
+    if (isAdd) {
+      if (!salesOrderEligibleForDeliveryNote(fs)) {
+        throw new Error(
+          "Each added sales order must have fulfillment New or Rescheduled.",
+        );
+      }
+      previousFulfillmentById.set(id, fs);
+    } else if (onThisDelivery && nextIdSet.has(id)) {
+      if (fs !== "delivery note created") {
+        throw new Error(
+          "A linked sales order is no longer on this delivery note.",
+        );
+      }
+    } else {
+      throw new Error(
+        "One or more sales orders are not valid for this delivery note.",
+      );
+    }
+  }
+
+  const now = new Date().toISOString();
+
+  const { error: updDelErr } = await supabase
+    .from("deliveries")
+    .update({
+      driver_user_id: payload.driverUserId,
+      notes: payload.notes?.trim() || null,
+      delivery_date: deliveryDateIso,
+      updated_at: now,
+    })
+    .eq("id", deliveryId)
+    .eq("company_id", companyId)
+    .eq("status", "new");
+
+  if (updDelErr) {
+    throw new Error(updDelErr.message ?? "Failed to update delivery note.");
+  }
+
+  if (toRemove.length > 0) {
+    const { error: unlinkErr } = await supabase
+      .from("delivery_sales_orders")
+      .delete()
+      .eq("delivery_id", deliveryId)
+      .in("sales_order_id", toRemove);
+
+    if (unlinkErr) {
+      throw new Error(unlinkErr.message ?? "Failed to unlink sales orders.");
+    }
+
+    await supabase
+      .from("sales_orders")
+      .update({
+        fulfillment_status: "new",
+        delivery_date: null,
+        updated_at: now,
+      })
+      .in("id", toRemove)
+      .eq("company_id", companyId)
+      .eq("fulfillment_status", "delivery note created");
+  }
+
+  if (toAdd.length > 0) {
+    const lineRows = toAdd.map((sales_order_id) => ({
+      delivery_id: deliveryId,
+      sales_order_id,
+      created_at: now,
+    }));
+
+    const { error: lineErr } = await supabase
+      .from("delivery_sales_orders")
+      .insert(lineRows);
+
+    if (lineErr) {
+      throw new Error(lineErr.message ?? "Failed to link sales orders.");
+    }
+
+    const { data: updated, error: upErr } = await supabase
+      .from("sales_orders")
+      .update({
+        fulfillment_status: "delivery note created",
+        delivery_date: deliveryDateIso,
+        updated_at: now,
+      })
+      .in("id", toAdd)
+      .eq("company_id", companyId)
+      .in("fulfillment_status", DELIVERY_NOTE_ELIGIBLE_FULFILLMENT_STATUSES)
+      .select("id");
+
+    if (upErr) {
+      throw new Error(upErr.message ?? "Failed to update sales orders.");
+    }
+
+    const updatedCount = updated?.length ?? 0;
+    if (updatedCount !== toAdd.length) {
+      for (const rid of toAdd) {
+        const prev = previousFulfillmentById.get(rid);
+        if (!prev) continue;
+        await supabase
+          .from("sales_orders")
+          .update({
+            fulfillment_status: prev,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", rid)
+          .eq("company_id", companyId);
+      }
+      await supabase
+        .from("delivery_sales_orders")
+        .delete()
+        .eq("delivery_id", deliveryId)
+        .in("sales_order_id", toAdd);
+      throw new Error(
+        "Some added sales orders are no longer eligible. They must be active with fulfillment New or Rescheduled.",
+      );
+    }
+  }
+
+  const { error: dateSyncErr } = await supabase
+    .from("sales_orders")
+    .update({
+      delivery_date: deliveryDateIso,
+      updated_at: now,
+    })
+    .in("id", nextIds)
+    .eq("company_id", companyId);
+
+  if (dateSyncErr) {
+    throw new Error(
+      dateSyncErr.message ?? "Failed to update sales order delivery dates.",
+    );
+  }
+}
+
+export function deliveryNoteAllowsEditing(
+  status: DeliveryNoteStatus,
+): boolean {
+  return status === "new";
 }

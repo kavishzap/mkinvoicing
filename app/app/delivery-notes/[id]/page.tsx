@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Check, Truck } from "lucide-react";
+import { ArrowLeft, Check, Pencil, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -26,6 +26,7 @@ import { DeliveryDriverBalancePanel } from "@/components/delivery-driver-balance
 import {
   advanceDeliveryNoteStatus,
   DELIVERY_NOTE_STATUS_LABELS,
+  deliveryNoteAllowsEditing,
   getDriverStockReturnContext,
   getNextDeliveryNoteStatus,
   loadDeliveryDetailPageData,
@@ -236,6 +237,19 @@ export default function DeliveryDetailPage() {
         titleBefore={backButton}
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2 print:hidden">
+            {deliveryNoteAllowsEditing(delivery.status) ? (
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="gap-2 rounded font-semibold shadow-sm"
+              >
+                <Link href={`/app/delivery-notes/${id}/edit`}>
+                  <Pencil className="size-3.5 shrink-0" aria-hidden />
+                  Edit
+                </Link>
+              </Button>
+            ) : null}
             {nextStatus === "delivered_to_driver" ? (
               <Button
                 type="button"
@@ -330,6 +344,7 @@ export default function DeliveryDetailPage() {
               <thead className="bg-muted/40">
                 <tr>
                   <th className="border px-3 py-2 text-left font-semibold">SO Number</th>
+                  <th className="border px-3 py-2 text-left font-semibold">Delivery date</th>
                   <th className="border px-3 py-2 text-left font-semibold">Customer</th>
                   <th className="border px-3 py-2 text-left font-semibold">Phone</th>
                   <th className="border px-3 py-2 text-left font-semibold">Address</th>
@@ -368,6 +383,12 @@ export default function DeliveryDetailPage() {
                             ) : (
                               so.number
                             )}
+                          </td>
+                          <td
+                            className="border px-3 py-2 font-bold tabular-nums"
+                            rowSpan={items.length}
+                          >
+                            {fmtScheduleDay(so.deliveryDate)}
                           </td>
                           <td className="border px-3 py-2" rowSpan={items.length}>
                             {so.clientName ? (

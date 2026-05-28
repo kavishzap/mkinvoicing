@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   getCoreRowModel,
   getSortedRowModel,
@@ -57,9 +57,10 @@ import { SalesOrderPaymentStatusBadge } from "@/components/sales-order-payment-s
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { useToast } from "@/hooks/use-toast";
 import {
-  createDelivery,
+  getDelivery,
   listDriverTeamMembers,
-  listSalesOrdersForDelivery,
+  listSalesOrdersForDeliveryEdit,
+  updateDelivery,
   type SalesOrderPickRow,
 } from "@/lib/deliveries-service";
 import type { TeamMemberRow } from "@/lib/company-team-service";
@@ -214,7 +215,9 @@ function SectionCard({
   );
 }
 
-export default function NewDeliveryPage() {
+export default function EditDeliveryPage() {
+  const params = useParams<{ id: string }>();
+  const deliveryId = params.id;
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -233,6 +236,8 @@ export default function NewDeliveryPage() {
   const [ordersDebouncedSearch, setOrdersDebouncedSearch] = useState("");
   const [ordersSorting, setOrdersSorting] = useState<SortingState>([]);
   const zoneReq = useRef(0);
+  /** Orders already on this note — always shown when changing delivery date. */
+  const linkedOnNoteIdsRef = useRef<Set<string>>(new Set());
   const [zoneForDriver, setZoneForDriver] = useState<{
     driverUserId: string;
     filter: DriverZoneCityFilter;
@@ -240,15 +245,46 @@ export default function NewDeliveryPage() {
   const [zoneLoading, setZoneLoading] = useState(false);
 
   useEffect(() => {
+    if (!deliveryId) return;
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        const [o, d] = await Promise.all([
-          listSalesOrdersForDelivery(),
+        const [delivery, o, d] = await Promise.all([
+          getDelivery(deliveryId),
+          listSalesOrdersForDeliveryEdit(deliveryId),
           listDriverTeamMembers(),
         ]);
         if (cancelled) return;
+        if (!delivery) {
+          toast({
+            title: "Not found",
+            description: "This delivery note could not be loaded.",
+            variant: "destructive",
+          });
+          router.replace("/app/delivery-notes");
+          return;
+        }
+        if (delivery.status !== "new") {
+          toast({
+            title: "Cannot edit",
+            description: "Only delivery notes with status New can be edited.",
+            variant: "destructive",
+          });
+          router.replace(`/app/delivery-notes/${deliveryId}`);
+          return;
+        }
+        setDriverId(delivery.driverUserId);
+        setNotes(delivery.notes ?? "");
+        setDeliveryDate(
+          delivery.deliveryDate?.trim() ||
+            new Date().toISOString().split("T")[0],
+        );
+        const linkedIds = delivery.salesOrders
+          .map((so) => so.salesOrderId)
+          .filter((id) => id.trim());
+        linkedOnNoteIdsRef.current = new Set(linkedIds);
+        setSelected(new Set(linkedIds));
         setOrders(o);
         setDrivers(d);
       } catch (e: unknown) {
@@ -267,7 +303,7 @@ export default function NewDeliveryPage() {
     return () => {
       cancelled = true;
     };
-  }, [toast]);
+  }, [deliveryId, router, toast]);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -320,11 +356,12 @@ export default function NewDeliveryPage() {
   const resolvedZoneFilter =
     zoneForDriver?.driverUserId === driverId ? zoneForDriver.filter : undefined;
 
-  /** Orders with no SO delivery date always show; if SO has a date it must match the note date. */
   const dateFilteredOrders = useMemo(() => {
     const noteDate = deliveryDate.trim().slice(0, 10);
+    const linked = linkedOnNoteIdsRef.current;
     if (!noteDate) return orders;
     return orders.filter((o) => {
+      if (linked.has(o.id)) return true;
       const so = o.deliveryDate?.trim();
       if (!so) return true;
       return so.slice(0, 10) === noteDate;
@@ -332,9 +369,12 @@ export default function NewDeliveryPage() {
   }, [orders, deliveryDate]);
 
   const visibleOrders = useMemo(() => {
+    const linked = linkedOnNoteIdsRef.current;
     if (!driverId.trim()) return dateFilteredOrders;
 
-    if (zoneLoading && resolvedZoneFilter === undefined) return [];
+    if (zoneLoading && resolvedZoneFilter === undefined) {
+      return dateFilteredOrders.filter((o) => linked.has(o.id));
+    }
 
     if (!resolvedZoneFilter || !resolvedZoneFilter.hasZoneAssignment) {
       return dateFilteredOrders;
@@ -351,6 +391,7 @@ export default function NewDeliveryPage() {
     const nameSet = new Set(resolvedZoneFilter.cityNamesLower);
 
     return dateFilteredOrders.filter((o) => {
+      if (linkedOnNoteIdsRef.current.has(o.id)) return true;
       if (o.cityId && idSet.has(o.cityId)) return true;
       const label = o.city.trim().toLowerCase();
       if (!o.cityId && label && nameSet.has(label)) return true;
@@ -367,11 +408,12 @@ export default function NewDeliveryPage() {
 
   useEffect(() => {
     const allow = new Set(searchFilteredOrders.map((o) => o.id));
+    const linked = linkedOnNoteIdsRef.current;
     setSelected((prev) => {
       let dropped = false;
       const next = new Set<string>();
       for (const id of prev) {
-        if (allow.has(id)) next.add(id);
+        if (allow.has(id) || linked.has(id)) next.add(id);
         else dropped = true;
       }
       if (!dropped && next.size === prev.size) return prev;
@@ -441,7 +483,7 @@ export default function NewDeliveryPage() {
       toast({
         title: "Select sales orders",
         description:
-          "Pick at least one order with fulfillment New or Rescheduled.",
+          "Select at least one order on this delivery note (existing or New / Rescheduled).",
         variant: "destructive",
       });
       return;
@@ -456,19 +498,21 @@ export default function NewDeliveryPage() {
       return;
     }
 
+    if (!deliveryId) return;
+
     try {
       setSaving(true);
-      const id = await createDelivery({
+      await updateDelivery(deliveryId, {
         driverUserId: driverId,
         salesOrderIds: [...selected],
         notes: notes.trim() || null,
         deliveryDate: deliveryDate.trim(),
       });
       toast({
-        title: "Delivery saved",
-        description: "Sales orders are now marked delivery note created.",
+        title: "Delivery updated",
+        description: "Changes to this delivery note were saved.",
       });
-      router.push(`/app/delivery-notes/${id}`);
+      router.push(`/app/delivery-notes/${deliveryId}`);
     } catch (e: unknown) {
       const err = e as { message?: string };
       toast({
@@ -494,7 +538,7 @@ export default function NewDeliveryPage() {
                 allSelected ? true : someSelected ? "indeterminate" : false
               }
               onCheckedChange={(c) => toggleAll(c === true)}
-              aria-label="Select all eligible sales orders"
+              aria-label="Select all visible sales orders"
             />
           </div>
         ),
@@ -727,9 +771,8 @@ export default function NewDeliveryPage() {
     if (orders.length === 0) {
       return (
         <div className={ordersEmptyStateClass}>
-          No eligible sales orders. Orders must be active with fulfillment New
-          or Rescheduled (for example, not Pending and not already on a delivery
-          note).
+          No eligible sales orders. Orders on this note plus New or Rescheduled
+          orders can be added.
         </div>
       );
     }
@@ -747,9 +790,8 @@ export default function NewDeliveryPage() {
             <>No sales orders match your search.</>
           ) : orders.length > 0 && dateFilteredOrders.length === 0 ? (
             <>
-              No sales orders match this delivery date. Change the date, or clear or
-              align delivery dates on sales orders — orders without a delivery date
-              always appear here.
+              No additional orders match this delivery date. Orders already on
+              this note stay visible; change the date to add others.
             </>
           ) : driverId.trim() &&
             resolvedZoneFilter?.hasZoneAssignment &&
@@ -810,8 +852,19 @@ export default function NewDeliveryPage() {
         fillHeight
         className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
         titleBefore={
-          <Button variant="ghost" size="icon" asChild aria-label="Back to delivery notes">
-            <Link href="/app/delivery-notes">
+          <Button
+            variant="ghost"
+            size="icon"
+            asChild
+            aria-label="Back to delivery note"
+          >
+            <Link
+              href={
+                deliveryId
+                  ? `/app/delivery-notes/${deliveryId}`
+                  : "/app/delivery-notes"
+              }
+            >
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -831,8 +884,19 @@ export default function NewDeliveryPage() {
       fillHeight
       className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
       titleBefore={
-        <Button variant="ghost" size="icon" asChild aria-label="Back to delivery notes">
-          <Link href="/app/delivery-notes">
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
+          aria-label="Back to delivery note"
+        >
+          <Link
+            href={
+              deliveryId
+                ? `/app/delivery-notes/${deliveryId}`
+                : "/app/delivery-notes"
+            }
+          >
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
@@ -841,11 +905,11 @@ export default function NewDeliveryPage() {
         <Button
           type="button"
           onClick={() => void handleSave()}
-          disabled={saving}
+          disabled={saving || !deliveryId}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Save delivery"}
+          {saving ? "Saving…" : "Save changes"}
         </Button>
       }
     >

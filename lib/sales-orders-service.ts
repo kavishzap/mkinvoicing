@@ -56,9 +56,9 @@ let cachedDeliveryCitiesByCompany: {
 } | null = null;
 const DELIVERY_CITIES_CACHE_MS = 5 * 60 * 1000;
 
-/** List table projection — embed city name to avoid a separate cities fetch per list request. */
+/** List table projection — embed city name; omit unused date columns. */
 const SALES_ORDER_LIST_SELECT =
-  "id, number, issue_date, valid_until, delivery_date, created_at, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, cities(name), user_id, notes, customer_id, customers!sales_orders_customer_id_fkey(type, company_name, full_name, contact_name)";
+  "id, number, issue_date, delivery_date, status, fulfillment_status, payment_status, currency, bill_to_snapshot, total, city_id, cities(name), user_id, notes, customer_id, customers!sales_orders_customer_id_fkey(type, company_name, full_name, contact_name, address_line_1, street)";
 
 const userDisplayLabelCache = new Map<string, string>();
 
@@ -525,12 +525,10 @@ export type SalesOrderDetail = {
 export type SalesOrderListRow = {
   id: string;
   number: string;
+  /** ISO `YYYY-MM-DD` from `issue_date`. */
   issueDate: string;
-  validUntil: string;
   /** ISO `YYYY-MM-DD` or null when not set. */
   deliveryDate: string | null;
-  /** ISO timestamp from `sales_orders.created_at`. */
-  createdAt: string;
   /** Delivery catalog city name (`cities.name` via `city_id`), else bill-to snapshot city. */
   cityName: string;
   status: SalesOrderStatus;
@@ -539,6 +537,8 @@ export type SalesOrderListRow = {
   currency: string;
   /** Bill-to / linked customer display name. */
   clientName: string;
+  /** Bill-to address on the order, else linked customer address. */
+  address: string;
   customerId: string | null;
   total: number;
   /** Display label for the user who created the order (full name → email → short id). */
@@ -554,6 +554,38 @@ function nameFromBillTo(bill?: Record<string, unknown>) {
     return String(bill.company_name ?? bill.name ?? "");
   }
   return String(bill.full_name ?? bill.name ?? "");
+}
+
+function addressFromRecord(
+  record?: {
+    address_line_1?: string | null;
+    street?: string | null;
+  } | null,
+): string {
+  if (!record) return "";
+  const line1 = String(record.address_line_1 ?? "").trim();
+  if (line1) return line1;
+  return String(record.street ?? "").trim();
+}
+
+/** Order bill-to address first, then linked customer record. */
+function salesOrderListAddress(
+  bill?: Record<string, unknown>,
+  customer?: {
+    address_line_1?: string | null;
+    street?: string | null;
+  } | null,
+): string {
+  const fromBill = addressFromRecord(
+    bill
+      ? {
+          address_line_1: bill.address_line_1 as string | null | undefined,
+          street: bill.street as string | null | undefined,
+        }
+      : null,
+  );
+  if (fromBill) return fromBill;
+  return addressFromRecord(customer ?? null);
 }
 
 function nameFromCustomerRecord(
@@ -670,24 +702,26 @@ async function finishSalesOrderListRows(
   const creatorIds = rawRows
     .map((r) => (r.user_id != null ? String(r.user_id) : ""))
     .filter(Boolean);
-  const creatorNames = await userDisplayMap(creatorIds);
+  const creatorNames =
+    creatorIds.length > 0 ? await userDisplayMap(creatorIds) : new Map();
 
   return rawRows.map((r: Record<string, unknown>) => {
     const creatorId = r.user_id != null ? String(r.user_id) : "";
     const createdByName = creatorId
       ? creatorNames.get(creatorId) ?? creatorId.slice(0, 8)
       : "";
+    const bill = r.bill_to_snapshot as Record<string, unknown> | undefined;
     const { customerId, clientName } = customerLinkFromSalesOrderRow(r);
+    const custRel = r.customers;
+    const custRow = Array.isArray(custRel) ? custRel[0] : custRel;
     return {
       id: String(r.id),
       number: String(r.number ?? ""),
-      issueDate: String(r.issue_date ?? ""),
-      validUntil: String(r.valid_until ?? ""),
+      issueDate: String(r.issue_date ?? "").slice(0, 10),
       deliveryDate:
         r.delivery_date != null && String(r.delivery_date).trim()
           ? String(r.delivery_date).slice(0, 10)
           : null,
-      createdAt: r.created_at != null ? String(r.created_at) : "",
       cityName: cityLabelFromListRow(r, cityById),
       status: normalizeSalesOrderStatus(String(r.status)),
       fulfillmentStatus: normalizeSalesOrderFulfillmentStatus(
@@ -698,6 +732,13 @@ async function finishSalesOrderListRows(
       ),
       currency: String(r.currency ?? ""),
       clientName,
+      address: salesOrderListAddress(
+        bill,
+        custRow as {
+          address_line_1?: string | null;
+          street?: string | null;
+        } | null,
+      ),
       customerId,
       total: Number(r.total ?? 0),
       createdByName,
@@ -1092,6 +1133,60 @@ export function invalidateSalesOrderCaches() {
   detailCache.clear();
 }
 
+function facetCountMap(
+  enumLabels: string[],
+  raw: Record<string, unknown> | null | undefined,
+): Record<string, number> {
+  const src =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return Object.fromEntries(
+    enumLabels.map((s) => [s, Number(src[s] ?? 0)]),
+  );
+}
+
+async function fetchSalesOrderListFacetsLegacy(
+  companyId: string,
+  fulfillmentEnum: SalesOrderFulfillmentStatus[],
+  paymentEnum: SalesOrderPaymentStatusDb[],
+): Promise<Pick<SalesOrderListFacets, "total" | "byFulfillment" | "byPayment">> {
+  const head = () =>
+    supabase
+      .from("sales_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
+  const countOf = async (
+    builder: ReturnType<typeof head>,
+  ): Promise<number> => {
+    const { count, error } = await builder;
+    if (error) throw error;
+    return count ?? 0;
+  };
+
+  const [total, ...statusCounts] = await Promise.all([
+    countOf(head()),
+    ...fulfillmentEnum.map((s) =>
+      countOf(head().eq("fulfillment_status", s)),
+    ),
+    ...paymentEnum.map((s) => countOf(head().eq("payment_status", s))),
+  ]);
+
+  const fulfillmentCounts = statusCounts.slice(0, fulfillmentEnum.length);
+  const paymentCounts = statusCounts.slice(fulfillmentEnum.length);
+
+  return {
+    total,
+    byFulfillment: Object.fromEntries(
+      fulfillmentEnum.map((s, i) => [s, fulfillmentCounts[i] ?? 0]),
+    ),
+    byPayment: Object.fromEntries(
+      paymentEnum.map((s, i) => [s, paymentCounts[i] ?? 0]),
+    ),
+  };
+}
+
 export async function getSalesOrderListFacets(opts?: {
   force?: boolean;
 }): Promise<SalesOrderListFacets> {
@@ -1106,40 +1201,44 @@ export async function getSalesOrderListFacets(opts?: {
     return cachedListFacets.data;
   }
 
-  const head = () =>
-    supabase
-      .from("sales_orders")
-      .select("*", { count: "exact", head: true })
-      .eq("company_id", companyId);
-
-  const countOf = async (
-    builder: ReturnType<typeof head>,
-  ): Promise<number> => {
-    const { count, error } = await builder;
-    if (error) throw error;
-    return count ?? 0;
-  };
-
-  const [fulfillmentEnum, paymentEnum, total] = await Promise.all([
+  const [fulfillmentEnum, paymentEnum, rpcRes] = await Promise.all([
     fetchSalesOrderFulfillmentStatusEnumValues(),
     fetchSalesOrderPaymentStatusEnumValues(),
-    countOf(head()),
+    supabase.rpc("get_sales_order_list_facets", {
+      p_company_id: companyId,
+    }),
   ]);
 
-  const statusCounts = await Promise.all([
-    ...fulfillmentEnum.map((s) => countOf(head().eq("fulfillment_status", s))),
-    ...paymentEnum.map((s) => countOf(head().eq("payment_status", s))),
-  ]);
+  let total = 0;
+  let byFulfillment: Record<string, number> = {};
+  let byPayment: Record<string, number> = {};
 
-  const fulfillmentCounts = statusCounts.slice(0, fulfillmentEnum.length);
-  const paymentCounts = statusCounts.slice(fulfillmentEnum.length);
-
-  const byFulfillment = Object.fromEntries(
-    fulfillmentEnum.map((s, i) => [s, fulfillmentCounts[i] ?? 0]),
-  );
-  const byPayment = Object.fromEntries(
-    paymentEnum.map((s, i) => [s, paymentCounts[i] ?? 0]),
-  );
+  if (
+    !rpcRes.error &&
+    rpcRes.data &&
+    typeof rpcRes.data === "object" &&
+    !Array.isArray(rpcRes.data)
+  ) {
+    const d = rpcRes.data as Record<string, unknown>;
+    total = Number(d.total ?? 0);
+    byFulfillment = facetCountMap(
+      fulfillmentEnum,
+      d.byFulfillment as Record<string, unknown> | undefined,
+    );
+    byPayment = facetCountMap(
+      paymentEnum,
+      d.byPayment as Record<string, unknown> | undefined,
+    );
+  } else {
+    const legacy = await fetchSalesOrderListFacetsLegacy(
+      companyId,
+      fulfillmentEnum,
+      paymentEnum,
+    );
+    total = legacy.total;
+    byFulfillment = legacy.byFulfillment;
+    byPayment = legacy.byPayment;
+  }
 
   const data: SalesOrderListFacets = {
     total,

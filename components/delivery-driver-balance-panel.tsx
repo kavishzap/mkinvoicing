@@ -348,12 +348,6 @@ function validateDriverSettlementPrerequisites(
     if (!message) message = text;
   };
 
-  if (input.delivery.status === "new") {
-    note(
-      "Deliver this note to the driver before settling (use Delivered to Driver on the delivery)."
-    );
-  }
-
   if (!Number.isFinite(input.driverRate) || input.driverRate < 0) {
     note("Driver daily rate is missing or invalid. Set it in Company Team first.");
   }
