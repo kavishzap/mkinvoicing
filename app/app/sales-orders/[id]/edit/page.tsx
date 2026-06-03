@@ -50,6 +50,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
 import {
@@ -236,6 +246,7 @@ export default function EditSalesOrderPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
@@ -779,7 +790,7 @@ export default function EditSalesOrderPage() {
       subtitleClassName="w-full min-w-0 max-w-none"
       actions={
         <Button
-          onClick={saveSalesOrder}
+          onClick={() => setSaveConfirmOpen(true)}
           disabled={saving}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -1528,6 +1539,34 @@ export default function EditSalesOrderPage() {
             </div>
           </DialogContent>
         </Dialog>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will update sales order {salesOrderNumber}
+              {preferences?.currency
+                ? ` (${preferences.currency} ${total.toFixed(2)})`
+                : ""}
+              . You will be taken to the sales order detail page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void saveSalesOrder();
+              }}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

@@ -17,12 +17,35 @@ import {
   Search,
   SlidersVertical,
   Warehouse,
+  ChevronUp,
+  ChevronDown,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -47,6 +70,7 @@ import { listProducts, type ProductRow } from "@/lib/products-service";
 import {
   listStockBalances,
   listStockBalancesForProduct,
+  listStockBalancesForLocation,
   listInventoryMovements,
   recordInventoryTransfer,
   recordInventoryRefill,
@@ -66,6 +90,19 @@ const EVENT_LABELS: Record<InventoryMovementRow["event_type"], string> = {
 };
 
 type MovEventFilter = "all" | InventoryMovementRow["event_type"];
+
+type TransferLine = {
+  id: string;
+  productId: string;
+  productName: string;
+  productSku: string;
+  maxQty: number;
+  qty: string;
+};
+
+function newTransferLineId() {
+  return `tl-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
 const LIST_PANEL_CLASS =
   "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50";
@@ -393,19 +430,28 @@ export default function InventoryPage() {
   const balanceListGen = useRef(0);
   const movListGen = useRef(0);
 
-  const [transferProductId, setTransferProductId] = useState("");
   const [transferFromId, setTransferFromId] = useState("");
   const [transferToId, setTransferToId] = useState("");
-  const [transferQty, setTransferQty] = useState("");
   const [transferNote, setTransferNote] = useState("");
-  const [transferAtLoc, setTransferAtLoc] = useState<StockBalanceRow[]>([]);
+  const [transferLines, setTransferLines] = useState<TransferLine[]>([]);
+  const [transferStockAtFrom, setTransferStockAtFrom] = useState<StockBalanceRow[]>([]);
+  const [transferStockLoading, setTransferStockLoading] = useState(false);
+  const [transferPickerSelected, setTransferPickerSelected] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [transferPickerQtys, setTransferPickerQtys] = useState<Record<string, string>>(
+    {},
+  );
+  const [transferPickerSearchQuery, setTransferPickerSearchQuery] = useState("");
   const [transferSubmitting, setTransferSubmitting] = useState(false);
+  const [transferConfirmOpen, setTransferConfirmOpen] = useState(false);
 
   const [refillProductId, setRefillProductId] = useState("");
   const [refillLocationId, setRefillLocationId] = useState("");
   const [refillQty, setRefillQty] = useState("");
   const [refillNote, setRefillNote] = useState("");
   const [refillSubmitting, setRefillSubmitting] = useState(false);
+  const [refillConfirmOpen, setRefillConfirmOpen] = useState(false);
 
   const [adjProductId, setAdjProductId] = useState("");
   const [adjFromId, setAdjFromId] = useState("");
@@ -413,6 +459,7 @@ export default function InventoryPage() {
   const [adjNote, setAdjNote] = useState("");
   const [adjAtLoc, setAdjAtLoc] = useState<StockBalanceRow[]>([]);
   const [adjSubmitting, setAdjSubmitting] = useState(false);
+  const [adjustConfirmOpen, setAdjustConfirmOpen] = useState(false);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -643,27 +690,45 @@ export default function InventoryPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!transferProductId) {
-        setTransferAtLoc([]);
-        setTransferFromId("");
+      if (!transferFromId) {
+        setTransferStockAtFrom([]);
+        setTransferLines([]);
+        setTransferPickerSelected(new Set());
+        setTransferPickerQtys({});
+        setTransferPickerSearchQuery("");
         return;
       }
+      setTransferStockLoading(true);
       try {
-        const rows = await listStockBalancesForProduct(transferProductId);
+        const rows = await listStockBalancesForLocation(transferFromId);
         if (!cancelled) {
-          setTransferAtLoc(rows);
-          setTransferFromId((prev) =>
-            prev && rows.some((r) => r.location_id === prev) ? prev : "",
+          setTransferStockAtFrom(rows);
+          setTransferLines((prev) =>
+            prev.filter((line) =>
+              rows.some(
+                (r) => r.product_id === line.productId && r.quantity > 0,
+              ),
+            ),
           );
+          setTransferPickerSelected(new Set());
+          setTransferPickerQtys({});
+          setTransferPickerSearchQuery("");
         }
       } catch {
-        if (!cancelled) setTransferAtLoc([]);
+        if (!cancelled) {
+          setTransferStockAtFrom([]);
+          setTransferLines([]);
+          setTransferPickerQtys({});
+          setTransferPickerSearchQuery("");
+        }
+      } finally {
+        if (!cancelled) setTransferStockLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [transferProductId]);
+  }, [transferFromId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -690,11 +755,32 @@ export default function InventoryPage() {
     };
   }, [adjProductId]);
 
-  const transferFromRow = useMemo(
-    () => transferAtLoc.find((r) => r.location_id === transferFromId),
-    [transferAtLoc, transferFromId],
+  const transferLineProductIds = useMemo(
+    () => new Set(transferLines.map((l) => l.productId)),
+    [transferLines],
   );
-  const maxTransferQty = transferFromRow?.quantity ?? 0;
+
+  const transferProductsAvailableToPick = useMemo(
+    () =>
+      transferStockAtFrom.filter(
+        (r) => r.quantity > 0 && !transferLineProductIds.has(r.product_id),
+      ),
+    [transferStockAtFrom, transferLineProductIds],
+  );
+
+  const transferPickerSearchNorm = transferPickerSearchQuery.trim().toLowerCase();
+
+  const transferProductsFilteredToPick = useMemo(() => {
+    if (!transferPickerSearchNorm) return transferProductsAvailableToPick;
+    return transferProductsAvailableToPick.filter((r) => {
+      const name = r.product_name.toLowerCase();
+      const sku = (r.product_sku ?? "").toLowerCase();
+      return (
+        name.includes(transferPickerSearchNorm) ||
+        sku.includes(transferPickerSearchNorm)
+      );
+    });
+  }, [transferProductsAvailableToPick, transferPickerSearchNorm]);
 
   const adjFromRow = useMemo(
     () => adjAtLoc.find((r) => r.location_id === adjFromId),
@@ -707,12 +793,112 @@ export default function InventoryPage() {
     return locations.filter((l) => l.id !== transferFromId);
   }, [locations, transferFromId]);
 
-  async function handleTransfer(e: React.FormEvent) {
+  function toggleTransferPickerProduct(productId: string, checked: boolean) {
+    setTransferPickerSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(productId);
+      else next.delete(productId);
+      return next;
+    });
+    if (checked) {
+      setTransferPickerQtys((prev) => ({
+        ...prev,
+        [productId]: prev[productId]?.trim() ? prev[productId] : "1",
+      }));
+    }
+  }
+
+  function updateTransferPickerQty(productId: string, qty: string) {
+    setTransferPickerQtys((prev) => ({ ...prev, [productId]: qty }));
+    if (qty.trim()) {
+      setTransferPickerSelected((prev) => {
+        const next = new Set(prev);
+        next.add(productId);
+        return next;
+      });
+    }
+  }
+
+  function addSelectedProductsToTransferLines() {
+    const toAdd = transferStockAtFrom.filter((r) =>
+      transferPickerSelected.has(r.product_id),
+    );
+    if (toAdd.length === 0) return;
+
+    for (const r of toAdd) {
+      const raw = transferPickerQtys[r.product_id] ?? "1";
+      const q = parseFloat(raw);
+      if (Number.isNaN(q) || q <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: `Enter a quantity for “${r.product_name}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (q > r.quantity) {
+        toast({
+          title: "Not enough stock",
+          description: `Only ${formatQty(r.quantity)} available for “${r.product_name}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setTransferLines((prev) => [
+      ...prev,
+      ...toAdd.map((r) => {
+        const raw = transferPickerQtys[r.product_id] ?? "1";
+        const q = parseFloat(raw);
+        return {
+          id: newTransferLineId(),
+          productId: r.product_id,
+          productName: r.product_name,
+          productSku: r.product_sku,
+          maxQty: r.quantity,
+          qty: String(q),
+        };
+      }),
+    ]);
+    setTransferPickerSelected(new Set());
+    setTransferPickerQtys({});
+  }
+
+  function updateTransferLineQty(lineId: string, qty: string) {
+    setTransferLines((prev) =>
+      prev.map((l) => (l.id === lineId ? { ...l, qty } : l)),
+    );
+  }
+
+  function removeTransferLine(lineId: string) {
+    setTransferLines((prev) => prev.filter((l) => l.id !== lineId));
+  }
+
+  function moveTransferLineUp(index: number) {
+    if (index <= 0) return;
+    setTransferLines((prev) => {
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next;
+    });
+  }
+
+  function moveTransferLineDown(index: number) {
+    setTransferLines((prev) => {
+      if (index >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next;
+    });
+  }
+
+  function requestTransfer(e: React.FormEvent) {
     e.preventDefault();
-    if (!transferProductId || !transferFromId || !transferToId) {
+    if (!transferFromId || !transferToId) {
       toast({
         title: "Missing fields",
-        description: "Choose product, source, and destination.",
+        description: "Choose source and destination locations.",
         variant: "destructive",
       });
       return;
@@ -725,42 +911,81 @@ export default function InventoryPage() {
       });
       return;
     }
-    const q = parseFloat(transferQty);
-    if (Number.isNaN(q) || q <= 0) {
-      toast({ title: "Invalid quantity", variant: "destructive" });
-      return;
-    }
-    if (q > maxTransferQty) {
+    if (transferLines.length === 0) {
       toast({
-        title: "Not enough stock",
-        description: `Only ${maxTransferQty} available at the source location.`,
+        title: "No products",
+        description: "Add at least one product to transfer.",
         variant: "destructive",
       });
       return;
     }
+
+    for (const line of transferLines) {
+      const q = parseFloat(line.qty);
+      if (Number.isNaN(q) || q <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: `Enter a quantity for “${line.productName}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (q > line.maxQty) {
+        toast({
+          title: "Not enough stock",
+          description: `Only ${formatQty(line.maxQty)} available for “${line.productName}” at the source.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setTransferConfirmOpen(true);
+  }
+
+  async function performTransfer() {
     try {
       setTransferSubmitting(true);
-      await recordInventoryTransfer({
-        productId: transferProductId,
-        fromLocationId: transferFromId,
-        toLocationId: transferToId,
-        quantity: q,
-        note: transferNote || null,
+      const note = transferNote.trim() || null;
+      for (const line of transferLines) {
+        await recordInventoryTransfer({
+          productId: line.productId,
+          fromLocationId: transferFromId,
+          toLocationId: transferToId,
+          quantity: parseFloat(line.qty),
+          note,
+        });
+      }
+      const n = transferLines.length;
+      toast({
+        title: n === 1 ? "Transfer recorded" : "Transfers recorded",
+        description:
+          n === 1
+            ? "Balances and history were updated."
+            : `${n} products transferred. Balances and history were updated.`,
       });
-      toast({ title: "Transfer recorded", description: "Balances and history were updated." });
-      setTransferQty("");
+      setTransferLines([]);
+      setTransferPickerSelected(new Set());
+      setTransferPickerQtys({});
       setTransferNote("");
-      setTransferToId("");
       await Promise.all([refreshBalances(), refreshMovements()]);
+      if (transferFromId) {
+        const rows = await listStockBalancesForLocation(transferFromId);
+        setTransferStockAtFrom(rows);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Please try again.";
-      toast({ title: "Transfer failed", description: msg, variant: "destructive" });
+      toast({
+        title: "Transfer failed",
+        description: msg,
+        variant: "destructive",
+      });
     } finally {
       setTransferSubmitting(false);
     }
   }
 
-  async function handleRefill(e: React.FormEvent) {
+  function requestRefill(e: React.FormEvent) {
     e.preventDefault();
     if (!refillProductId || !refillLocationId) {
       toast({
@@ -775,6 +1000,11 @@ export default function InventoryPage() {
       toast({ title: "Invalid quantity", variant: "destructive" });
       return;
     }
+    setRefillConfirmOpen(true);
+  }
+
+  async function performRefill() {
+    const q = parseFloat(refillQty);
     try {
       setRefillSubmitting(true);
       await recordInventoryRefill({
@@ -795,7 +1025,7 @@ export default function InventoryPage() {
     }
   }
 
-  async function handleAdjustOut(e: React.FormEvent) {
+  function requestAdjustOut(e: React.FormEvent) {
     e.preventDefault();
     if (!adjProductId || !adjFromId) {
       toast({
@@ -818,6 +1048,11 @@ export default function InventoryPage() {
       });
       return;
     }
+    setAdjustConfirmOpen(true);
+  }
+
+  async function performAdjustOut() {
+    const q = parseFloat(adjQty);
     try {
       setAdjSubmitting(true);
       await recordInventoryAdjustmentOut({
@@ -837,6 +1072,26 @@ export default function InventoryPage() {
       setAdjSubmitting(false);
     }
   }
+
+  const locationLabel = useCallback(
+    (id: string) => locations.find((l) => l.id === id)?.name ?? "location",
+    [locations],
+  );
+
+  const productLabel = useCallback(
+    (id: string) => products.find((p) => p.id === id)?.name ?? "product",
+    [products],
+  );
+
+  const transferConfirmSummary = useMemo(() => {
+    const from = locationLabel(transferFromId);
+    const to = locationLabel(transferToId);
+    const lineSummary =
+      transferLines.length === 1
+        ? `${formatQty(parseFloat(transferLines[0]?.qty ?? "0"))} × ${transferLines[0]?.productName ?? "product"}`
+        : `${transferLines.length} products`;
+    return { from, to, lineSummary };
+  }, [transferFromId, transferToId, transferLines, locationLabel]);
 
   const balanceColumns = useMemo<ColumnDef<StockBalanceRow>[]>(
     () => [
@@ -1098,7 +1353,7 @@ export default function InventoryPage() {
           className="shrink-0 gap-2"
           disabled={disabled || transferSubmitting}
         >
-          {transferSubmitting ? "Saving…" : "Record transfer"}
+          {transferSubmitting ? "Saving…" : "Record transfers"}
         </Button>
       );
     }
@@ -1323,7 +1578,7 @@ export default function InventoryPage() {
                         pageSize={balancePageSize}
                         onPageChange={setBalancePage}
                         onPageSizeChange={setBalancePageSize}
-                        pageSizeOptions={[10, 25, 50]}
+                        pageSizeOptions={[10, 50, 100, 200]}
                       />
                     }
                   />
@@ -1338,49 +1593,33 @@ export default function InventoryPage() {
           >
             <InventoryFormPanel
               title="Transfer between locations"
-              description="Moves quantity from one warehouse to another for the same product. Creates a history entry and updates balances automatically."
+              description="Choose source and destination, add one or more products, set quantities, and reorder lines. Each line is recorded as a transfer in history."
             >
               <form
                 id="inventory-form-transfer"
-                onSubmit={handleTransfer}
-                className="max-w-xl space-y-4"
+                onSubmit={requestTransfer}
+                className="w-full max-w-4xl space-y-4"
               >
-                <div className="space-y-2">
-                  <Label>Product</Label>
-                  <Select
-                    value={transferProductId || NONE}
-                    onValueChange={(v) => setTransferProductId(v === NONE ? "" : v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>Choose product</SelectItem>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                          {p.sku ? ` — ${p.sku}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>From location</Label>
                     <Select
                       value={transferFromId || NONE}
-                      onValueChange={(v) => setTransferFromId(v === NONE ? "" : v)}
-                      disabled={!transferProductId || transferAtLoc.length === 0}
+                      onValueChange={(v) => {
+                        const id = v === NONE ? "" : v;
+                        setTransferFromId(id);
+                        if (id === transferToId) setTransferToId("");
+                      }}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Where stock is now" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE}>Choose location</SelectItem>
-                        {transferAtLoc.map((r) => (
-                          <SelectItem key={r.location_id} value={r.location_id}>
-                            {r.location_name} ({r.quantity} on hand)
+                        {locations.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {l.name}
+                            {l.code ? ` (${l.code})` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1391,7 +1630,7 @@ export default function InventoryPage() {
                     <Select
                       value={transferToId || NONE}
                       onValueChange={(v) => setTransferToId(v === NONE ? "" : v)}
-                      disabled={!transferProductId}
+                      disabled={!transferFromId}
                     >
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Destination" />
@@ -1408,18 +1647,241 @@ export default function InventoryPage() {
                     </Select>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="t-qty">Quantity</Label>
-                  <Input
-                    id="t-qty"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={transferQty}
-                    onChange={(e) => setTransferQty(e.target.value)}
-                    placeholder={transferFromRow ? `Max ${maxTransferQty}` : "0"}
-                  />
-                </div>
+
+                {transferFromId ? (
+                  <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                    <p className="text-sm font-medium text-foreground">Add products</p>
+                    {transferStockLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading stock at source…</p>
+                    ) : transferProductsAvailableToPick.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        {transferStockAtFrom.length === 0
+                          ? "No stock at this location."
+                          : "All products with stock here are already on the list."}
+                      </p>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <Search
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                            aria-hidden
+                          />
+                          <Input
+                            type="search"
+                            value={transferPickerSearchQuery}
+                            onChange={(e) =>
+                              setTransferPickerSearchQuery(e.target.value)
+                            }
+                            placeholder="Search product or SKU…"
+                            className={SEARCH_INPUT_CLASS}
+                            aria-label="Search products to transfer"
+                            autoComplete="off"
+                          />
+                        </div>
+                        {transferProductsFilteredToPick.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            No products match &ldquo;{transferPickerSearchQuery.trim()}
+                            &rdquo;.
+                          </p>
+                        ) : (
+                          <>
+                        <div className="mb-1 grid grid-cols-[auto_1fr_7rem] gap-x-2 gap-y-0 px-1 text-xs font-medium text-muted-foreground">
+                          <span className="w-4" aria-hidden />
+                          <span>Product</span>
+                          <span className="text-right">Quantity</span>
+                        </div>
+                        <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+                          {transferProductsFilteredToPick.map((r) => {
+                            const selected = transferPickerSelected.has(r.product_id);
+                            return (
+                              <div
+                                key={r.product_id}
+                                className={cn(
+                                  "grid grid-cols-[auto_1fr_7rem] items-center gap-x-2 rounded-md px-1 py-1.5 text-sm",
+                                  selected && "bg-muted/50",
+                                )}
+                              >
+                                <Checkbox
+                                  checked={selected}
+                                  onCheckedChange={(c) =>
+                                    toggleTransferPickerProduct(
+                                      r.product_id,
+                                      c === true,
+                                    )
+                                  }
+                                  aria-label={`Select ${r.product_name}`}
+                                />
+                                <label
+                                  className="min-w-0 cursor-pointer"
+                                  onClick={() =>
+                                    toggleTransferPickerProduct(
+                                      r.product_id,
+                                      !selected,
+                                    )
+                                  }
+                                >
+                                  <span className="font-medium">{r.product_name}</span>
+                                  {r.product_sku ? (
+                                    <span className="text-muted-foreground">
+                                      {" "}
+                                      · {r.product_sku}
+                                    </span>
+                                  ) : null}
+                                  <span className="block text-xs text-muted-foreground tabular-nums">
+                                    {formatQty(r.quantity)} on hand
+                                  </span>
+                                </label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={r.quantity}
+                                  step="any"
+                                  className="h-8 tabular-nums"
+                                  value={
+                                    transferPickerQtys[r.product_id] ??
+                                    (selected ? "1" : "")
+                                  }
+                                  onChange={(e) =>
+                                    updateTransferPickerQty(
+                                      r.product_id,
+                                      e.target.value,
+                                    )
+                                  }
+                                  placeholder={selected ? "Qty" : "—"}
+                                  aria-label={`Quantity for ${r.product_name}`}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={transferPickerSelected.size === 0}
+                          onClick={addSelectedProductsToTransferLines}
+                        >
+                          <Plus className="h-4 w-4" aria-hidden />
+                          Add{" "}
+                          {transferPickerSelected.size > 0
+                            ? `${transferPickerSelected.size} `
+                            : ""}
+                          to list
+                        </Button>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+
+                {transferLines.length > 0 ? (
+                  <div className="space-y-2">
+                    <Label>Transfer lines ({transferLines.length})</Label>
+                    <div className="overflow-x-auto rounded-lg border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[72px] text-center">Order</TableHead>
+                            <TableHead>Product</TableHead>
+                            <TableHead className="w-[100px] text-right tabular-nums">
+                              On hand
+                            </TableHead>
+                            <TableHead className="w-[120px]">Quantity</TableHead>
+                            <TableHead className="w-[50px]" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {transferLines.map((line, index) => (
+                            <TableRow key={line.id}>
+                              <TableCell className="align-top">
+                                <div className="flex flex-col items-center gap-0.5 pt-1">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    disabled={index === 0}
+                                    onClick={() => moveTransferLineUp(index)}
+                                    aria-label="Move line up"
+                                  >
+                                    <ChevronUp className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    disabled={index === transferLines.length - 1}
+                                    onClick={() => moveTransferLineDown(index)}
+                                    aria-label="Move line down"
+                                  >
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <div className="pt-1.5 text-sm font-medium">
+                                  {line.productName}
+                                </div>
+                                {line.productSku ? (
+                                  <div className="text-xs text-muted-foreground">
+                                    {line.productSku}
+                                  </div>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="align-top text-right tabular-nums text-muted-foreground">
+                                <span className="inline-block pt-1.5">
+                                  {formatQty(line.maxQty)}
+                                </span>
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Label
+                                  htmlFor={`t-line-qty-${line.id}`}
+                                  className="sr-only"
+                                >
+                                  Quantity for {line.productName}
+                                </Label>
+                                <Input
+                                  id={`t-line-qty-${line.id}`}
+                                  type="number"
+                                  min={0}
+                                  max={line.maxQty}
+                                  step="any"
+                                  value={line.qty}
+                                  onChange={(e) =>
+                                    updateTransferLineQty(line.id, e.target.value)
+                                  }
+                                  placeholder={`Max ${formatQty(line.maxQty)}`}
+                                  className="h-9 min-w-[5.5rem] tabular-nums"
+                                  required
+                                />
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeTransferLine(line.id)}
+                                  aria-label={`Remove ${line.productName}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ) : transferFromId && !transferStockLoading ? (
+                  <p className="text-sm text-muted-foreground">
+                    Select products above to build your transfer list.
+                  </p>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label htmlFor="t-note">Note (optional)</Label>
                   <Textarea
@@ -1444,7 +1906,7 @@ export default function InventoryPage() {
             >
               <form
                 id="inventory-form-refill"
-                onSubmit={handleRefill}
+                onSubmit={requestRefill}
                 className="max-w-xl space-y-4"
               >
                 <div className="space-y-2">
@@ -1523,7 +1985,7 @@ export default function InventoryPage() {
             >
               <form
                 id="inventory-form-adjust"
-                onSubmit={handleAdjustOut}
+                onSubmit={requestAdjustOut}
                 className="max-w-xl space-y-4"
               >
                 <div className="space-y-2">
@@ -1693,7 +2155,7 @@ export default function InventoryPage() {
                         pageSize={movPageSize}
                         onPageChange={setMovPage}
                         onPageSizeChange={setMovPageSize}
-                        pageSizeOptions={[10, 25, 50]}
+                        pageSizeOptions={[10, 50, 100, 200]}
                       />
                     }
                   />
@@ -1703,6 +2165,84 @@ export default function InventoryPage() {
           </TabsContent>
         </Tabs>
       )}
+
+      <AlertDialog open={transferConfirmOpen} onOpenChange={setTransferConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Record transfer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Move {transferConfirmSummary.lineSummary} from{" "}
+              {transferConfirmSummary.from} to {transferConfirmSummary.to}. Stock
+              balances and movement history will be updated.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={transferSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={transferSubmitting}
+              onClick={(e) => {
+                e.preventDefault();
+                setTransferConfirmOpen(false);
+                void performTransfer();
+              }}
+            >
+              {transferSubmitting ? "Saving…" : "Record transfers"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={refillConfirmOpen} onOpenChange={setRefillConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Record refill?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Add {formatQty(parseFloat(refillQty || "0"))} of{" "}
+              {productLabel(refillProductId)} at {locationLabel(refillLocationId)}.
+              Stock at that location will increase.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={refillSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={refillSubmitting}
+              onClick={(e) => {
+                e.preventDefault();
+                setRefillConfirmOpen(false);
+                void performRefill();
+              }}
+            >
+              {refillSubmitting ? "Saving…" : "Record fill"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={adjustConfirmOpen} onOpenChange={setAdjustConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Record stock out?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove {formatQty(parseFloat(adjQty || "0"))} of{" "}
+              {productLabel(adjProductId)} from {locationLabel(adjFromId)}. Stock at
+              that location will be reduced.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={adjSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={adjSubmitting}
+              onClick={(e) => {
+                e.preventDefault();
+                setAdjustConfirmOpen(false);
+                void performAdjustOut();
+              }}
+            >
+              {adjSubmitting ? "Saving…" : "Record stock out"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

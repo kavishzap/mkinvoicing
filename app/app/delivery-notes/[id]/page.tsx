@@ -458,7 +458,24 @@ export default function DeliveryDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Change delivery status?</AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingStatus ? (
+              {pendingStatus === "delivered_to_driver" ? (
+                <>
+                  Mark this delivery as{" "}
+                  <span className="font-medium text-foreground">
+                    Delivered to driver
+                  </span>
+                  ? Stock will move from the primary warehouse to the driver&apos;s
+                  location, and linked sales orders (except cancelled or already
+                  delivered to customer) will be set to Delivered to driver.
+                </>
+              ) : pendingStatus === "completed" ? (
+                <>
+                  Mark this delivery as{" "}
+                  <span className="font-medium text-foreground">Completed</span>?
+                  Linked sales orders on this delivery will be set to Delivered to
+                  customer where applicable.
+                </>
+              ) : pendingStatus ? (
                 <>
                   This will move the delivery from{" "}
                   <span className="font-medium text-foreground">
@@ -468,7 +485,7 @@ export default function DeliveryDetailPage() {
                   <span className="font-medium text-foreground">
                     {DELIVERY_NOTE_STATUS_LABELS[pendingStatus]}
                   </span>
-                  . This can update linked sales orders and stock. Continue?
+                  . This can update linked sales orders and stock.
                 </>
               ) : (
                 "Confirm this status change."

@@ -26,6 +26,9 @@ import {
   Eye,
   FilePlus2,
   FileText,
+  Home,
+  MapPinOff,
+  MapPinX,
   MoreHorizontal,
   PackageCheck,
   Pencil,
@@ -86,6 +89,8 @@ import {
   salesOrderFulfillmentFilterLabel,
   salesOrderPaymentFilterLabel,
   type SalesOrderFulfillmentStatus,
+  salesOrderLocationToListFilters,
+  type SalesOrderLocationFilter,
   type SalesOrderPaymentStatusDb,
   type SalesOrderListFacets,
   type SalesOrderListRow,
@@ -141,6 +146,45 @@ function formatListDate(dateString: string) {
   });
 }
 
+const SalesOrderNotesCell = memo(function SalesOrderNotesCell({
+  notes,
+}: {
+  notes: string;
+}) {
+  if (!notes) {
+    return <span className="text-muted-foreground/40">—</span>;
+  }
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Order notes"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-amber-700 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:text-amber-300 dark:hover:bg-amber-950/40"
+          >
+            <StickyNote className="h-4 w-4" aria-hidden />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="top"
+          align="start"
+          className="max-w-sm whitespace-pre-line text-left"
+        >
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-background/70">
+            Notes
+          </p>
+          <p className="text-xs leading-snug">
+            {notes.length > 400 ? `${notes.slice(0, 400)}…` : notes}
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+});
+
 const SalesOrdersFilterSidebar = memo(function SalesOrdersFilterSidebar({
   id,
   facets,
@@ -148,6 +192,8 @@ const SalesOrdersFilterSidebar = memo(function SalesOrdersFilterSidebar({
   onFulfillmentChange,
   paymentFilter,
   onPaymentChange,
+  locationFilter,
+  onLocationChange,
 }: {
   id?: string;
   facets: SalesOrderListFacets;
@@ -155,6 +201,8 @@ const SalesOrdersFilterSidebar = memo(function SalesOrdersFilterSidebar({
   onFulfillmentChange: (v: SalesOrderFulfillmentStatus | "all") => void;
   paymentFilter: SalesOrderPaymentStatusDb | "all";
   onPaymentChange: (v: SalesOrderPaymentStatusDb | "all") => void;
+  locationFilter: SalesOrderLocationFilter;
+  onLocationChange: (v: SalesOrderLocationFilter) => void;
 }) {
   const fulfillmentRows: {
     id: SalesOrderFulfillmentStatus | "all";
@@ -194,6 +242,38 @@ const SalesOrdersFilterSidebar = memo(function SalesOrdersFilterSidebar({
       icon: paymentFilterIcon(s),
       count: facets.byPayment[s] ?? 0,
     })),
+  ];
+
+  const locationRows: {
+    id: SalesOrderLocationFilter;
+    label: string;
+    icon: LucideIcon;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: "All orders",
+      icon: ClipboardList,
+      count: facets.total,
+    },
+    {
+      id: "missing_city",
+      label: "Missing city",
+      icon: MapPinOff,
+      count: facets.missingCity,
+    },
+    {
+      id: "missing_address",
+      label: "Missing address",
+      icon: Home,
+      count: facets.missingAddress,
+    },
+    {
+      id: "missing_both",
+      label: "Missing city & address",
+      icon: MapPinX,
+      count: facets.missingBoth,
+    },
   ];
 
   const rowBtn =
@@ -282,6 +362,46 @@ const SalesOrdersFilterSidebar = memo(function SalesOrdersFilterSidebar({
             })}
           </nav>
         </div>
+        <div>
+          <h3 className="mb-2.5 px-3 text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground/90">
+            City &amp; address
+          </h3>
+          <nav
+            className="flex flex-col gap-px"
+            aria-label="Filter by missing city or address"
+          >
+            {locationRows.map((item) => {
+              const Icon = item.icon;
+              const selected = locationFilter === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onLocationChange(item.id)}
+                  aria-pressed={selected}
+                  className={cn(
+                    rowBtn,
+                    selected
+                      ? "bg-muted/90 font-semibold text-foreground shadow-none"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0 opacity-75" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.625rem] shrink-0 items-center justify-center rounded-full",
+                      "bg-muted/90 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums leading-none text-muted-foreground",
+                      "dark:bg-muted/70",
+                    )}
+                  >
+                    {item.count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
       </div>
     </aside>
   );
@@ -304,6 +424,13 @@ export default function SalesOrdersPage() {
   const [paymentFilter, setPaymentFilter] = useState<
     SalesOrderPaymentStatusDb | "all"
   >("all");
+  const [locationFilter, setLocationFilter] =
+    useState<SalesOrderLocationFilter>("all");
+
+  const locationListFilters = useMemo(
+    () => salesOrderLocationToListFilters(locationFilter),
+    [locationFilter],
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -318,6 +445,7 @@ export default function SalesOrdersPage() {
     debouncedSearch: "",
     fulfillmentFilter: "all" as SalesOrderFulfillmentStatus | "all",
     paymentFilter: "all" as SalesOrderPaymentStatusDb | "all",
+    locationFilter: "all" as SalesOrderLocationFilter,
     pageSize: 10,
     activeCompanyScope: 0,
   });
@@ -413,6 +541,7 @@ export default function SalesOrdersPage() {
       prev.debouncedSearch !== debouncedSearch ||
       prev.fulfillmentFilter !== fulfillmentFilter ||
       prev.paymentFilter !== paymentFilter ||
+      prev.locationFilter !== locationFilter ||
       prev.pageSize !== pageSize ||
       prev.activeCompanyScope !== activeCompanyScope;
 
@@ -425,6 +554,7 @@ export default function SalesOrdersPage() {
       debouncedSearch,
       fulfillmentFilter,
       paymentFilter,
+      locationFilter,
       pageSize,
       activeCompanyScope,
     };
@@ -440,6 +570,8 @@ export default function SalesOrdersPage() {
         search: debouncedSearch || undefined,
         fulfillmentStatus: fulfillmentFilter,
         paymentStatus: paymentFilter,
+        missingCity: locationListFilters.missingCity,
+        missingAddress: locationListFilters.missingAddress,
         page,
         pageSize,
       };
@@ -487,6 +619,8 @@ export default function SalesOrdersPage() {
     debouncedSearch,
     fulfillmentFilter,
     paymentFilter,
+    locationFilter,
+    locationListFilters,
     page,
     pageSize,
     activeCompanyScope,
@@ -506,6 +640,8 @@ export default function SalesOrdersPage() {
           search: debouncedSearch || undefined,
           fulfillmentStatus: fulfillmentFilter,
           paymentStatus: paymentFilter,
+          missingCity: locationListFilters.missingCity,
+          missingAddress: locationListFilters.missingAddress,
           page,
           pageSize,
           skipExpireStale: true,
@@ -519,6 +655,7 @@ export default function SalesOrdersPage() {
         debouncedSearch,
         fulfillmentFilter,
         paymentFilter,
+        locationFilter,
         pageSize,
         activeCompanyScope,
       };
@@ -541,6 +678,8 @@ export default function SalesOrdersPage() {
     debouncedSearch,
     fulfillmentFilter,
     paymentFilter,
+    locationFilter,
+    locationListFilters,
     page,
     pageSize,
     activeCompanyScope,
@@ -552,9 +691,16 @@ export default function SalesOrdersPage() {
       search: debouncedSearch || undefined,
       fulfillmentStatus: fulfillmentFilter,
       paymentStatus: paymentFilter,
+      missingCity: locationListFilters.missingCity,
+      missingAddress: locationListFilters.missingAddress,
       skipExpireStale: true,
     });
-  }, [debouncedSearch, fulfillmentFilter, paymentFilter]);
+  }, [
+    debouncedSearch,
+    fulfillmentFilter,
+    paymentFilter,
+    locationListFilters,
+  ]);
 
   const exportFilenameStem = useMemo(() => {
     const d = new Date();
@@ -733,6 +879,21 @@ export default function SalesOrdersPage() {
         ),
       },
       {
+        id: "notes",
+        accessorFn: (r) => r.notes,
+        header: () => <span className="sr-only">Notes</span>,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <SalesOrderNotesCell notes={row.original.notes} />
+        ),
+        meta: {
+          searchable: false,
+          stopRowClick: true,
+          thClassName: "w-10 px-2",
+          tdClassName: "w-10 px-2 text-center",
+        },
+      },
+      {
         id: "customer",
         accessorFn: (r) => r.clientName ?? "",
         header: ({ column }) => (
@@ -806,48 +967,11 @@ export default function SalesOrdersPage() {
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Fulfillment" />
         ),
-        cell: ({ row }) => {
-          const so = row.original;
-          const showNoteHint =
-            so.fulfillmentStatus === "pending" && so.notes.length > 0;
-          return (
-            <div className="flex items-center gap-1.5">
-              <SalesOrderFulfillmentStatusBadge
-                status={so.fulfillmentStatus}
-              />
-              {showNoteHint ? (
-                <TooltipProvider delayDuration={150}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="Pending sales order has notes"
-                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-300/70 bg-amber-100 text-amber-900 hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:border-amber-700/60 dark:bg-amber-900/40 dark:text-amber-100"
-                      >
-                        <StickyNote className="h-3 w-3" aria-hidden />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="top"
-                      align="start"
-                      className="max-w-xs whitespace-pre-line text-left"
-                    >
-                      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-background/70">
-                        Pending — notes
-                      </p>
-                      <p className="text-xs leading-snug">
-                        {so.notes.length > 240
-                          ? `${so.notes.slice(0, 240)}…`
-                          : so.notes}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : null}
-            </div>
-          );
-        },
+        cell: ({ row }) => (
+          <SalesOrderFulfillmentStatusBadge
+            status={row.original.fulfillmentStatus}
+          />
+        ),
         meta: {
           tdClassName: "text-muted-foreground",
           searchValue: (row: SalesOrderListRow) =>
@@ -970,8 +1094,9 @@ export default function SalesOrdersPage() {
     () =>
       debouncedSearch !== "" ||
       fulfillmentFilter !== "all" ||
-      paymentFilter !== "all",
-    [debouncedSearch, fulfillmentFilter, paymentFilter],
+      paymentFilter !== "all" ||
+      locationFilter !== "all",
+    [debouncedSearch, fulfillmentFilter, paymentFilter, locationFilter],
   );
 
   const listRangeLabel = useMemo(() => {
@@ -1108,6 +1233,11 @@ export default function SalesOrdersPage() {
                   setPage(1);
                   setPaymentFilter(v);
                 }}
+                locationFilter={locationFilter}
+                onLocationChange={(v) => {
+                  setPage(1);
+                  setLocationFilter(v);
+                }}
               />
             </div>
           </div>
@@ -1166,6 +1296,7 @@ export default function SalesOrdersPage() {
                             setSearchQuery("");
                             setFulfillmentFilter("all");
                             setPaymentFilter("all");
+                            setLocationFilter("all");
                           }}
                         >
                           Clear filters
@@ -1204,7 +1335,7 @@ export default function SalesOrdersPage() {
                     pageSize={pageSize}
                     onPageChange={setPage}
                     onPageSizeChange={setPageSize}
-                    pageSizeOptions={[10, 25, 50]}
+                    pageSizeOptions={[10, 50, 100, 200]}
                   />
                 }
               />

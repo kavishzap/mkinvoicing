@@ -651,19 +651,6 @@ export default function DeliveryNotesPage() {
         meta: { tdClassName: "text-right" },
       },
       {
-        id: "totalAmount",
-        accessorFn: (r) => r.totalAmount,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Amount" />
-        ),
-        cell: ({ row }) => (
-          <span className="tabular-nums font-medium">
-            {fmtMoney(row.original.totalAmount)}
-          </span>
-        ),
-        meta: { tdClassName: "text-right" },
-      },
-      {
         id: "moneyCollected",
         accessorFn: (r) => r.driverCollectedAmount ?? -1,
         header: ({ column }) => (
@@ -877,7 +864,7 @@ export default function DeliveryNotesPage() {
                     pageSize={pageSize}
                     onPageChange={setPage}
                     onPageSizeChange={setPageSize}
-                    pageSizeOptions={[10, 25, 50]}
+                    pageSizeOptions={[10, 50, 100, 200]}
                   />
                 }
               />

@@ -8,6 +8,16 @@
  import { Input } from "@/components/ui/input";
  import { Label } from "@/components/ui/label";
  import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import {
+   AlertDialog,
+   AlertDialogAction,
+   AlertDialogCancel,
+   AlertDialogContent,
+   AlertDialogDescription,
+   AlertDialogFooter,
+   AlertDialogHeader,
+   AlertDialogTitle,
+ } from "@/components/ui/alert-dialog";
  import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
  import { useToast } from "@/hooks/use-toast";
  import { addExpense, type ExpenseLineItem, type ExpensePayload } from "@/lib/expenses-service";
@@ -106,6 +116,7 @@
    const [notes, setNotes] = useState("");
    const [errors, setErrors] = useState<{ lineItems?: string }>({});
    const [saving, setSaving] = useState(false);
+   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
    function addLineItem() {
      setLineItems((prev) => [
@@ -153,9 +164,12 @@
      return true;
    }
 
-   async function handleSave() {
+   function requestSave() {
      if (!validate()) return;
+     setSaveConfirmOpen(true);
+   }
 
+   async function performSave() {
      try {
        setSaving(true);
        const payload = toPayload(
@@ -213,9 +227,9 @@
           >
             Cancel
           </Button>
-          <Button type="button" onClick={handleSave} disabled={saving} className="rounded-md font-semibold shadow-sm">
-            {saving ? "Saving..." : "Save expense"}
-          </Button>
+           <Button type="button" onClick={requestSave} disabled={saving} className="rounded-md font-semibold shadow-sm">
+             {saving ? "Saving..." : "Save expense"}
+           </Button>
         </div>
       }
     >
@@ -410,6 +424,32 @@
          </CardContent>
        </Card>
       </div>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save expense?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will record an expense of {currency} {totalAmount.toFixed(2)}
+              {description.trim() ? ` for “${description.trim()}”` : ""} on{" "}
+              {expenseDate}. You will be returned to the expenses list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Save expense"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
      </AppPageShell>
    );
  }

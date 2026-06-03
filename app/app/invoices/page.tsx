@@ -39,6 +39,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
@@ -267,6 +277,10 @@ export default function InvoicesPage() {
   const [listLoading, setListLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [duplicateTarget, setDuplicateTarget] = useState<{
+    id: string;
+    number: string;
+  } | null>(null);
 
   const listRequestGen = useRef(0);
   const prevListDepsRef = useRef({
@@ -696,9 +710,10 @@ export default function InvoicesPage() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() =>
-                  router.push(
-                    `/app/invoices/new?duplicateFrom=${encodeURIComponent(row.original.id)}`,
-                  )
+                  setDuplicateTarget({
+                    id: row.original.id,
+                    number: row.original.number,
+                  })
                 }
               >
                 <Copy className="mr-2 h-4 w-4" />
@@ -947,7 +962,7 @@ export default function InvoicesPage() {
                     pageSize={pageSize}
                     onPageChange={setPage}
                     onPageSizeChange={setPageSize}
-                    pageSizeOptions={[10, 25, 50]}
+                    pageSizeOptions={[10, 50, 100, 200]}
                   />
                 }
               />
@@ -955,6 +970,38 @@ export default function InvoicesPage() {
           </div>
         </div>
       ) : null}
+
+      <AlertDialog
+        open={!!duplicateTarget}
+        onOpenChange={(open) => {
+          if (!open) setDuplicateTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Duplicate invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicateTarget
+                ? `Create a new invoice prefilled from ${duplicateTarget.number}? You can review and edit it before saving.`
+                : "Create a new invoice from this one?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!duplicateTarget) return;
+                router.push(
+                  `/app/invoices/new?duplicateFrom=${encodeURIComponent(duplicateTarget.id)}`,
+                );
+                setDuplicateTarget(null);
+              }}
+            >
+              Duplicate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

@@ -2,19 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { BarChart3, FileDown, Loader2, Receipt, TrendingUp } from "lucide-react";
+import { BarChart3, FileDown, Loader2, Receipt, TrendingUp, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppPageShell } from "@/components/app-page-shell";
+import { DriverSettlementReportTab } from "@/components/driver-settlement-report-tab";
 import { ExpenseReportTab } from "@/components/expense-report-tab";
 import { PnlReportTab } from "@/components/pnl-report-tab";
 import { SalesReportTab } from "@/components/sales-report-tab";
 import type { ReportTabExportApi } from "@/components/report-tab-export";
 
-type ReportTab = "pnl" | "sales" | "expense";
+type ReportTab = "pnl" | "sales" | "driver-settlement" | "expense";
 
 function parseTab(raw: string | null): ReportTab {
   if (raw === "sales") return "sales";
+  if (raw === "driver-settlement") return "driver-settlement";
   if (raw === "expense") return "expense";
   return "pnl";
 }
@@ -27,6 +29,8 @@ export default function ReportingsPage() {
   );
   const [pnlExport, setPnlExport] = useState<ReportTabExportApi | null>(null);
   const [salesExport, setSalesExport] = useState<ReportTabExportApi | null>(null);
+  const [driverSettlementExport, setDriverSettlementExport] =
+    useState<ReportTabExportApi | null>(null);
   const [expenseExport, setExpenseExport] = useState<ReportTabExportApi | null>(null);
 
   useEffect(() => {
@@ -35,9 +39,10 @@ export default function ReportingsPage() {
 
   const activeExport = useMemo(() => {
     if (mainTab === "sales") return salesExport;
+    if (mainTab === "driver-settlement") return driverSettlementExport;
     if (mainTab === "expense") return expenseExport;
     return pnlExport;
-  }, [mainTab, pnlExport, salesExport, expenseExport]);
+  }, [mainTab, pnlExport, salesExport, driverSettlementExport, expenseExport]);
 
   return (
     <AppPageShell
@@ -75,7 +80,7 @@ export default function ReportingsPage() {
         }}
         className="flex min-h-0 flex-1 flex-col gap-4"
       >
-        <TabsList className="grid h-auto w-full shrink-0 grid-cols-3 gap-1 p-1 sm:inline-flex sm:w-auto">
+        <TabsList className="grid h-auto w-full shrink-0 grid-cols-2 gap-1 p-1 sm:grid-cols-4 sm:inline-flex sm:w-auto">
           <TabsTrigger value="pnl" className="gap-1.5 text-xs sm:text-sm">
             <BarChart3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
             Profit &amp; loss
@@ -83,6 +88,10 @@ export default function ReportingsPage() {
           <TabsTrigger value="sales" className="gap-1.5 text-xs sm:text-sm">
             <TrendingUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
             Sales
+          </TabsTrigger>
+          <TabsTrigger value="driver-settlement" className="gap-1.5 text-xs sm:text-sm">
+            <Truck className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Driver settlement
           </TabsTrigger>
           <TabsTrigger value="expense" className="gap-1.5 text-xs sm:text-sm">
             <Receipt className="h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -101,6 +110,12 @@ export default function ReportingsPage() {
           className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
         >
           <SalesReportTab onExportReady={setSalesExport} />
+        </TabsContent>
+        <TabsContent
+          value="driver-settlement"
+          className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        >
+          <DriverSettlementReportTab onExportReady={setDriverSettlementExport} />
         </TabsContent>
         <TabsContent
           value="expense"

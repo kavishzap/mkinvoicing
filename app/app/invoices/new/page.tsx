@@ -48,6 +48,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Command,
   CommandEmpty,
   CommandInput,
@@ -225,6 +235,7 @@ function NewInvoicePageContent() {
   // ===== Load profile & preferences from Supabase
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
@@ -912,7 +923,7 @@ function NewInvoicePageContent() {
       }
       actions={
         <Button
-          onClick={doCreateUnpaid}
+          onClick={() => setSaveConfirmOpen(true)}
           disabled={saving}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -1398,6 +1409,39 @@ function NewInvoicePageContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will create the invoice
+              {preferences?.currency
+                ? ` for ${preferences.currency} ${total.toFixed(2)}`
+                : ""}
+              {amountPaid >= total
+                ? " and mark it as paid."
+                : amountPaid > 0
+                  ? ` with ${preferences?.currency ?? ""} ${amountPaid.toFixed(2)} paid so far.`
+                  : " as unpaid."}{" "}
+              You will be taken to the invoice detail page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void doCreateUnpaid();
+              }}
+            >
+              {saving ? "Saving…" : "Save & view"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

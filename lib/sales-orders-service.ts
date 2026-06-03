@@ -177,18 +177,78 @@ async function buildSalesOrderListSearchOrClause(
   return null;
 }
 
+export type SalesOrderMissingCityFilter = "all" | "missing";
+export type SalesOrderMissingAddressFilter = "all" | "missing";
+
+/** Unified sidebar filter on /app/sales-orders (city, address, or both). */
+export type SalesOrderLocationFilter =
+  | "all"
+  | "missing_city"
+  | "missing_address"
+  | "missing_both";
+
+export function salesOrderLocationToListFilters(
+  location: SalesOrderLocationFilter,
+): {
+  missingCity: SalesOrderMissingCityFilter;
+  missingAddress: SalesOrderMissingAddressFilter;
+} {
+  switch (location) {
+    case "missing_city":
+      return { missingCity: "missing", missingAddress: "all" };
+    case "missing_address":
+      return { missingCity: "all", missingAddress: "missing" };
+    case "missing_both":
+      return { missingCity: "missing", missingAddress: "missing" };
+    default:
+      return { missingCity: "all", missingAddress: "all" };
+  }
+}
+
 type SalesOrderListQueryOpts = {
   search?: string;
   status?: SalesOrderStatus | "all";
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
   paymentStatus?: SalesOrderPaymentStatusDb | "all";
+  missingCity?: SalesOrderMissingCityFilter;
+  missingAddress?: SalesOrderMissingAddressFilter;
   customerId?: string;
 };
 
-function applySalesOrderListFilters<Q extends {
+type SalesOrderListFilterBuilder<Q> = {
   eq: (col: string, val: string) => Q;
   or: (filters: string) => Q;
-}>(q: Q, opts?: SalesOrderListQueryOpts): Q {
+  is: (col: string, val: null) => Q;
+  in: (col: string, vals: string[]) => Q;
+};
+
+const NO_MATCH_SALES_ORDER_ID = "00000000-0000-0000-0000-000000000000";
+
+/** Rows with no `city_id` and no bill-to city text (matches empty list City column). */
+function applySalesOrderMissingCityFilter<Q extends SalesOrderListFilterBuilder<Q>>(
+  q: Q,
+): Q {
+  return q
+    .is("city_id", null)
+    .or("bill_to_snapshot->>city.is.null,bill_to_snapshot->>city.eq.");
+}
+
+async function fetchSalesOrderIdsMissingAddress(
+  companyId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc("sales_order_ids_missing_address", {
+    p_company_id: companyId,
+  });
+  if (error) throw error;
+  if (!Array.isArray(data)) return [];
+  return data.map((id) => String(id)).filter(Boolean);
+}
+
+function applySalesOrderListFilters<Q extends SalesOrderListFilterBuilder<Q>>(
+  q: Q,
+  opts?: SalesOrderListQueryOpts,
+  missingAddressIds?: string[] | null,
+): Q {
   if (opts?.status && opts.status !== "all") {
     q = q.eq("status", opts.status);
   }
@@ -198,11 +258,37 @@ function applySalesOrderListFilters<Q extends {
   if (opts?.paymentStatus && opts.paymentStatus !== "all") {
     q = q.eq("payment_status", opts.paymentStatus);
   }
+  if (opts?.missingCity === "missing") {
+    q = applySalesOrderMissingCityFilter(q);
+  }
+  if (opts?.missingAddress === "missing") {
+    if (missingAddressIds === null) {
+      q = q.or(
+        "and(bill_to_snapshot->>address_line_1.is.null,bill_to_snapshot->>address_line_1.eq.,bill_to_snapshot->>street.is.null,bill_to_snapshot->>street.eq.,customer_id.is.null)",
+      );
+    } else if (!missingAddressIds?.length) {
+      q = q.eq("id", NO_MATCH_SALES_ORDER_ID);
+    } else {
+      q = q.in("id", missingAddressIds);
+    }
+  }
   const cid = opts?.customerId?.trim();
   if (cid) {
     q = q.eq("customer_id", cid);
   }
   return q;
+}
+
+async function resolveMissingAddressIdsForFilter(
+  companyId: string,
+  opts?: SalesOrderListQueryOpts,
+): Promise<string[] | null | undefined> {
+  if (opts?.missingAddress !== "missing") return undefined;
+  try {
+    return await fetchSalesOrderIdsMissingAddress(companyId);
+  } catch {
+    return null;
+  }
 }
 
 async function deliveryCityNameMapForCompany(
@@ -1036,6 +1122,12 @@ export type SalesOrderListFacets = {
   paymentEnum: SalesOrderPaymentStatusDb[];
   byFulfillment: Record<string, number>;
   byPayment: Record<string, number>;
+  /** Orders with no delivery city and no bill-to city on the snapshot. */
+  missingCity: number;
+  /** Orders with no bill-to or linked customer address. */
+  missingAddress: number;
+  /** Orders missing both city and address (intersection). */
+  missingBoth: number;
 };
 
 let cachedListFacets:
@@ -1068,6 +1160,8 @@ function salesOrderListCacheKey(
     status?: SalesOrderStatus | "all";
     fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
     paymentStatus?: SalesOrderPaymentStatusDb | "all";
+    missingCity?: SalesOrderMissingCityFilter;
+    missingAddress?: SalesOrderMissingAddressFilter;
     customerId?: string;
     page?: number;
     pageSize?: number;
@@ -1079,6 +1173,8 @@ function salesOrderListCacheKey(
     opts?.status ?? "all",
     opts?.fulfillmentStatus ?? "all",
     opts?.paymentStatus ?? "all",
+    opts?.missingCity ?? "all",
+    opts?.missingAddress ?? "all",
     opts?.customerId ?? "",
     opts?.page ?? 1,
     opts?.pageSize ?? 10,
@@ -1240,16 +1336,101 @@ export async function getSalesOrderListFacets(opts?: {
     byPayment = legacy.byPayment;
   }
 
+  let missingCity = Number(
+    (rpcRes.data as Record<string, unknown> | null)?.missingCity ?? NaN,
+  );
+  let missingAddress = Number(
+    (rpcRes.data as Record<string, unknown> | null)?.missingAddress ?? NaN,
+  );
+  let missingBoth = Number(
+    (rpcRes.data as Record<string, unknown> | null)?.missingBoth ?? NaN,
+  );
+  const needMissingCity = !Number.isFinite(missingCity);
+  const needMissingAddress = !Number.isFinite(missingAddress);
+  const needMissingBoth = !Number.isFinite(missingBoth);
+  if (needMissingCity || needMissingAddress || needMissingBoth) {
+    const [cityCnt, addressCnt, bothCnt] = await Promise.all([
+      needMissingCity
+        ? countSalesOrdersMissingCity(companyId)
+        : Promise.resolve(missingCity),
+      needMissingAddress
+        ? countSalesOrdersMissingAddress(companyId)
+        : Promise.resolve(missingAddress),
+      needMissingBoth
+        ? countSalesOrdersMissingBoth(companyId)
+        : Promise.resolve(missingBoth),
+    ]);
+    if (needMissingCity) missingCity = cityCnt;
+    if (needMissingAddress) missingAddress = addressCnt;
+    if (needMissingBoth) missingBoth = bothCnt;
+  }
+
   const data: SalesOrderListFacets = {
     total,
     fulfillmentEnum,
     paymentEnum,
     byFulfillment,
     byPayment,
+    missingCity,
+    missingAddress,
+    missingBoth,
   };
 
   cachedListFacets = { companyId, at: Date.now(), data };
   return data;
+}
+
+async function countSalesOrdersMissingCity(companyId: string): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "count_sales_orders_missing_city",
+    { p_company_id: companyId },
+  );
+  if (!error && data != null) {
+    return Number(data) || 0;
+  }
+  let q = supabase
+    .from("sales_orders")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId);
+  q = applySalesOrderMissingCityFilter(q);
+  const { count, error: headErr } = await q;
+  if (headErr) throw headErr;
+  return count ?? 0;
+}
+
+async function countSalesOrdersMissingAddress(companyId: string): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "count_sales_orders_missing_address",
+    { p_company_id: companyId },
+  );
+  if (!error && data != null) {
+    return Number(data) || 0;
+  }
+  const ids = await fetchSalesOrderIdsMissingAddress(companyId).catch(() => []);
+  return ids.length;
+}
+
+async function countSalesOrdersMissingBoth(companyId: string): Promise<number> {
+  const { data, error } = await supabase.rpc(
+    "count_sales_orders_missing_both",
+    { p_company_id: companyId },
+  );
+  if (!error && data != null) {
+    return Number(data) || 0;
+  }
+  const addressIds = await fetchSalesOrderIdsMissingAddress(companyId).catch(
+    () => [] as string[],
+  );
+  if (addressIds.length === 0) return 0;
+  let q = supabase
+    .from("sales_orders")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .in("id", addressIds);
+  q = applySalesOrderMissingCityFilter(q);
+  const { count, error: headErr } = await q;
+  if (headErr) throw headErr;
+  return count ?? 0;
 }
 
 /** @deprecated Use {@link getSalesOrderListFacets}. */
@@ -1274,6 +1455,10 @@ export async function listSalesOrders(opts?: {
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
   /** When set (not `"all"`), filter by `sales_orders.payment_status` (Postgres enum). */
   paymentStatus?: SalesOrderPaymentStatusDb | "all";
+  /** When `"missing"`, only orders with no city on the order. */
+  missingCity?: SalesOrderMissingCityFilter;
+  /** When `"missing"`, only orders with no address on bill-to or linked customer. */
+  missingAddress?: SalesOrderMissingAddressFilter;
   /** When set, only orders linked to this customer (`sales_orders.customer_id`). */
   customerId?: string;
   page?: number;
@@ -1294,6 +1479,11 @@ export async function listSalesOrders(opts?: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  const missingAddressIds = await resolveMissingAddressIdsForFilter(
+    companyId,
+    opts,
+  );
+
   let q = supabase
     .from("sales_orders")
     .select(SALES_ORDER_LIST_SELECT, { count: "exact" })
@@ -1302,7 +1492,7 @@ export async function listSalesOrders(opts?: {
     .order("id", { ascending: false })
     .range(from, to);
 
-  q = applySalesOrderListFilters(q, opts);
+  q = applySalesOrderListFilters(q, opts, missingAddressIds);
   const searchOr = await buildSalesOrderListSearchOrClause(
     companyId,
     opts?.search,
@@ -1313,7 +1503,8 @@ export async function listSalesOrders(opts?: {
   if (error) throw error;
 
   const rawRows = (data ?? []) as Array<Record<string, unknown>>;
-  const rows = await finishSalesOrderListRows(rawRows);
+  const cityById = await deliveryCityNameMapForCompany(companyId);
+  const rows = await finishSalesOrderListRows(rawRows, cityById);
 
   const total = count ?? 0;
   const cacheKey = salesOrderListCacheKey(companyId, opts);
@@ -1335,6 +1526,8 @@ export async function listAllSalesOrdersForExport(opts?: {
   search?: string;
   fulfillmentStatus?: SalesOrderFulfillmentStatus | "all";
   paymentStatus?: SalesOrderPaymentStatusDb | "all";
+  missingCity?: SalesOrderMissingCityFilter;
+  missingAddress?: SalesOrderMissingAddressFilter;
   customerId?: string;
   status?: SalesOrderStatus | "all";
   /**
@@ -1352,6 +1545,11 @@ export async function listAllSalesOrdersForExport(opts?: {
   let from = 0;
   const out: SalesOrderListRow[] = [];
 
+  const missingAddressIds = await resolveMissingAddressIdsForFilter(
+    companyId,
+    opts,
+  );
+
   for (;;) {
     let q = supabase
       .from("sales_orders")
@@ -1361,7 +1559,7 @@ export async function listAllSalesOrdersForExport(opts?: {
       .order("id", { ascending: false })
       .range(from, from + BATCH - 1);
 
-    q = applySalesOrderListFilters(q, opts);
+    q = applySalesOrderListFilters(q, opts, missingAddressIds);
     const searchOr = await buildSalesOrderListSearchOrClause(
       companyId,
       opts?.search,

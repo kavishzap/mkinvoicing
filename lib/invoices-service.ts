@@ -932,3 +932,27 @@ export async function updateInvoicePayment(
   if (error) throw error;
   invalidateInvoiceCaches();
 }
+
+/** Replace bill-to / customer link on an existing invoice (does not change line items or totals). */
+export async function updateInvoiceCustomer(
+  id: string,
+  customer: {
+    customer_id: string;
+    bill_to_snapshot: Record<string, unknown>;
+  },
+): Promise<void> {
+  const companyId = await requireActiveCompanyId();
+  const { error } = await supabase
+    .from("invoices")
+    .update({
+      customer_id: customer.customer_id,
+      bill_to_snapshot: customer.bill_to_snapshot,
+      client_snapshot: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("company_id", companyId);
+
+  if (error) throw error;
+  invalidateInvoiceCaches();
+}

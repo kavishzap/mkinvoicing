@@ -18,6 +18,8 @@ export type CustomerDirectoryFormData = {
   fullName: string;
   email: string;
   phone: string;
+  phone_2: string;
+  map_location: string;
   street: string;
   city: string;
   postal: string;
@@ -37,6 +39,8 @@ export function emptyCustomerDirectoryForm(
     fullName: "",
     email: "",
     phone: "",
+    phone_2: "",
+    map_location: "",
     street: "",
     city: "",
     postal: "",
@@ -57,6 +61,8 @@ export function customerDirectoryFormToPayload(
     fullName: f.type === "individual" ? f.fullName : undefined,
     email: f.email,
     phone: f.phone,
+    phone_2: f.phone_2.trim() || undefined,
+    map_location: f.map_location.trim() || undefined,
     street: f.street,
     city: f.city,
     cityId: f.cityId || null,
@@ -67,11 +73,20 @@ export function customerDirectoryFormToPayload(
   };
 }
 
+export type ValidateCustomerDirectoryOptions = {
+  /** When false, delivery city is optional (e.g. quick add from invoice). Default true. */
+  requireCity?: boolean;
+};
+
 export function validateCustomerDirectoryForm(
   formData: CustomerDirectoryFormData,
+  options?: ValidateCustomerDirectoryOptions,
 ): Partial<Record<keyof CustomerDirectoryFormData, string>> {
   const next: Partial<Record<keyof CustomerDirectoryFormData, string>> = {};
-  const required: (keyof CustomerDirectoryFormData)[] = ["phone", "cityId"];
+  const required: (keyof CustomerDirectoryFormData)[] = ["phone"];
+  if (options?.requireCity !== false) {
+    required.push("cityId");
+  }
 
   for (const k of required) {
     const v = formData[k];
@@ -126,6 +141,8 @@ type CustomerDirectoryFormFieldsProps = {
   cities: DeliveryCityRow[];
   /** When false, type is shown read-only (edit mode). */
   allowTypeChange?: boolean;
+  /** When false, city picker is optional. Default true. */
+  requireCity?: boolean;
   className?: string;
 };
 
@@ -135,6 +152,7 @@ export function CustomerDirectoryFormFields({
   errors,
   cities,
   allowTypeChange = true,
+  requireCity = true,
   className,
 }: CustomerDirectoryFormFieldsProps) {
   const activeCities = useMemo(
@@ -229,9 +247,25 @@ export function CustomerDirectoryFormFields({
           placeholder="+230 5xx xx xx"
         />
       </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Phone 2"
+          id="phone_2"
+          value={formData.phone_2}
+          onChange={(v) => setFormData({ ...formData, phone_2: v })}
+          placeholder="+230 5xx xx xx"
+        />
+        <Field
+          label="Map location"
+          id="map_location"
+          value={formData.map_location}
+          onChange={(v) => setFormData({ ...formData, map_location: v })}
+          placeholder="Google Maps link or coordinates"
+        />
+      </div>
       <div className="space-y-2">
         <Label htmlFor="cityId" className="text-xs font-medium">
-          City *
+          {requireCity ? "City *" : "City"}
         </Label>
         <SearchableDeliveryCitySelect
           id="cityId"

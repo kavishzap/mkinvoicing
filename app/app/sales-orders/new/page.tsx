@@ -56,6 +56,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Command,
   CommandEmpty,
   CommandInput,
@@ -278,6 +288,7 @@ function NewSalesOrderPageContent() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
@@ -889,7 +900,7 @@ function NewSalesOrderPageContent() {
       }
       actions={
         <Button
-          onClick={doCreateSalesOrder}
+          onClick={() => setSaveConfirmOpen(true)}
           disabled={saving}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -1432,6 +1443,34 @@ function NewSalesOrderPageContent() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save sales order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will create sales order {salesOrderNumber}
+              {preferences?.currency
+                ? ` for ${preferences.currency} ${total.toFixed(2)}`
+                : ""}
+              . You will be taken to the sales order detail page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void doCreateSalesOrder();
+              }}
+            >
+              {saving ? "Saving…" : "Save & view"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

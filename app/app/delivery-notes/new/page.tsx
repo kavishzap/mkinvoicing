@@ -44,6 +44,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AppPageShell } from "@/components/app-page-shell";
 import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
@@ -219,6 +229,7 @@ export default function NewDeliveryPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [orders, setOrders] = useState<SalesOrderPickRow[]>([]);
   const [drivers, setDrivers] = useState<TeamMemberRow[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -428,7 +439,17 @@ export default function NewDeliveryPage() {
     setSelected(new Set());
   }
 
-  async function handleSave() {
+  const selectedDriverLabel = useMemo(() => {
+    const d = drivers.find((row) => row.userId === driverId);
+    if (!d) return "selected driver";
+    return (
+      d.profile?.full_name?.trim() ||
+      d.profile?.email?.trim() ||
+      d.userId.slice(0, 8)
+    );
+  }, [drivers, driverId]);
+
+  function requestSave() {
     if (!driverId) {
       toast({
         title: "Select a driver",
@@ -456,6 +477,10 @@ export default function NewDeliveryPage() {
       return;
     }
 
+    setSaveConfirmOpen(true);
+  }
+
+  async function performSave() {
     try {
       setSaving(true);
       const id = await createDelivery({
@@ -840,7 +865,7 @@ export default function NewDeliveryPage() {
       actions={
         <Button
           type="button"
-          onClick={() => void handleSave()}
+          onClick={requestSave}
           disabled={saving}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -996,6 +1021,34 @@ export default function NewDeliveryPage() {
           </SectionCard>
         </div>
       </div>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save delivery note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will create a delivery for {selectedDriverLabel} on{" "}
+              {deliveryDate.trim() || "the selected date"} with{" "}
+              {selected.size} sales order{selected.size === 1 ? "" : "s"}. Linked
+              orders will be marked delivery note created. You will be taken to
+              the delivery detail page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Save delivery"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

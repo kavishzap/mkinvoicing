@@ -27,6 +27,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -266,6 +276,7 @@ export default function EditInventoryProductPage() {
   const [nameError, setNameError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [productIsActive, setProductIsActive] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -390,9 +401,14 @@ export default function EditInventoryProductPage() {
     return true;
   }
 
-  async function handleSave() {
+  function requestSave() {
     if (!productId) return;
     if (!validate()) return;
+    setSaveConfirmOpen(true);
+  }
+
+  async function performSave() {
+    if (!productId) return;
     try {
       setSaving(true);
       await updateProduct(productId, {
@@ -606,7 +622,7 @@ export default function EditInventoryProductPage() {
             <Button
               type="button"
               size="sm"
-              onClick={() => void handleSave()}
+              onClick={requestSave}
               disabled={saving || loading}
               className="shrink-0 gap-2 font-semibold shadow-sm"
             >
@@ -1258,6 +1274,30 @@ export default function EditInventoryProductPage() {
           </>
         )}
       </div>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will update {form.name.trim() || "this product"} in your catalog.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

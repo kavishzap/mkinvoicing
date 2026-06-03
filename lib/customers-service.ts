@@ -89,6 +89,8 @@ export type CustomerPayload = {
   /** Empty / omitted is stored as null when the DB allows it. */
   email?: string;
   phone?: string;
+  phone_2?: string;
+  map_location?: string;
   street?: string;
   city?: string;
   postal?: string;
@@ -114,7 +116,7 @@ async function getUserId() {
 }
 
 const COLUMNS =
-  "id,type,company_name,contact_name,full_name,email,phone,city,city_id,cities(name),address_line_1,address_line_2,is_active,created_at,updated_at";
+  "id,type,company_name,contact_name,full_name,email,phone,phone_2,map_location,city,city_id,cities(name),address_line_1,address_line_2,is_active,created_at,updated_at";
 
 /** Slim select for pickers (no city join). */
 const CUSTOMER_PICKER_COLUMNS =
@@ -380,6 +382,8 @@ export async function addCustomer(
       ? payload.email.trim().toLowerCase()
       : null,
     phone: payload.phone || null,
+    phone_2: payload.phone_2?.trim() || null,
+    map_location: payload.map_location?.trim() || null,
     street: payload.street || null,
     city: payload.city || null,
     city_id: payload.cityId ?? null,
@@ -421,6 +425,8 @@ export async function addCustomersBulk(
       ? payload.email.trim().toLowerCase()
       : null,
     phone: payload.phone || null,
+    phone_2: payload.phone_2?.trim() || null,
+    map_location: payload.map_location?.trim() || null,
     street: payload.street || null,
     city: payload.city || null,
     city_id: payload.cityId ?? null,
@@ -523,6 +529,9 @@ export async function updateCustomer(
       ? payload.email.trim().toLowerCase()
       : null;
   if ("phone" in payload) update.phone = payload.phone ?? null;
+  if ("phone_2" in payload) update.phone_2 = payload.phone_2?.trim() || null;
+  if ("map_location" in payload)
+    update.map_location = payload.map_location?.trim() || null;
   if ("street" in payload) update.street = payload.street ?? null;
   if ("city" in payload) update.city = payload.city ?? null;
   if ("cityId" in payload) update.city_id = payload.cityId ?? null;
@@ -710,6 +719,8 @@ function mapRow(r: any): CustomerRow {
     fullName: r.full_name ?? "",
     email: r.email ?? "",
     phone: r.phone ?? "",
+    phone_2: r.phone_2 ?? "",
+    map_location: r.map_location ?? "",
     street: r.street ?? "",
     city: r.city ?? "",
     cityId: r.city_id ?? null,

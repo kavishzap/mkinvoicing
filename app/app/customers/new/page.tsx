@@ -8,6 +8,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Building2, Save, UserRound, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { addCustomer } from "@/lib/customers-service";
@@ -78,9 +88,15 @@ function NewCustomerForm() {
     Partial<Record<keyof CustomerDirectoryFormData, string>>
   >({});
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
 
   const returnTo = safeAppReturnTo(searchParams.get("returnTo"));
+
+  const customerPreviewName =
+    formData.type === "company"
+      ? formData.companyName.trim() || "Company customer"
+      : formData.fullName.trim() || "Individual customer";
 
   useEffect(() => {
     void (async () => {
@@ -93,8 +109,7 @@ function NewCustomerForm() {
     })();
   }, []);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function requestSave() {
     const next = validateCustomerDirectoryForm(formData);
     setErrors(next);
     if (Object.keys(next).length > 0) {
@@ -105,6 +120,10 @@ function NewCustomerForm() {
       });
       return;
     }
+    setSaveConfirmOpen(true);
+  }
+
+  async function performSave() {
     try {
       setSaving(true);
       const created = await addCustomer(customerDirectoryFormToPayload(formData));
@@ -128,6 +147,11 @@ function NewCustomerForm() {
     }
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    requestSave();
+  }
+
   return (
     <AppPageShell
       className="max-w-none px-3 sm:px-4 md:px-5 lg:px-6"
@@ -144,8 +168,8 @@ function NewCustomerForm() {
             <Link href={returnTo}>Cancel</Link>
           </Button>
           <Button
-            type="submit"
-            form="customer-new-form"
+            type="button"
+            onClick={requestSave}
             disabled={saving}
             className="gap-2 rounded font-semibold shadow-sm"
           >
@@ -209,6 +233,33 @@ function NewCustomerForm() {
           </SectionCard>
         </form>
       </div>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save customer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will add {customerPreviewName} to your customer directory
+              {returnTo !== "/app/customers"
+                ? " and return you to the previous page."
+                : " and open the customer edit page."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Save customer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

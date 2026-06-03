@@ -9,7 +9,8 @@ const collectionStyles = {
 } as const;
 
 const settlementStyles = {
-  pending: "bg-amber-100 text-amber-900 border-amber-200",
+  pending:
+    "bg-red-100 text-red-900 border-red-200 dark:bg-red-950/35 dark:text-red-100 dark:border-red-800",
   settled: "bg-emerald-100 text-emerald-900 border-emerald-200",
 } as const;
 

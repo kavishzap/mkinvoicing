@@ -8,8 +8,10 @@ import {
   CheckCircle2,
   Edit,
   Printer,
+  UserRound,
   XCircle,
 } from "lucide-react";
+import { ChangeInvoiceCustomerDialog } from "@/components/change-invoice-customer-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +23,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
@@ -37,6 +49,12 @@ import {
   getCustomerCredit,
   createCustomerSettlement,
 } from "@/lib/customer-credits-service";
+import {
+  addPdfHeaderLogo,
+  loadImageForJsPdf,
+  pdfHeaderTextX,
+  resolveDocumentPdfLogo,
+} from "@/lib/pdf-image-for-jspdf";
 
 interface InvoiceViewActionsProps {
   invoiceId: string;
@@ -67,26 +85,6 @@ async function fetchBranding(): Promise<Branding | undefined> {
     const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
     if (!res.ok) return undefined;
     return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
-
-async function imageUrlToDataURL(
-  url: string
-): Promise<{ dataUrl: string; fmt: "PNG" | "JPEG" } | undefined> {
-  try {
-    const res = await fetch(url, { cache: "force-cache" });
-    if (!res.ok) return undefined;
-    const blob = await res.blob();
-    const fmt: "PNG" | "JPEG" = blob.type.includes("png") ? "PNG" : "JPEG";
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    return { dataUrl, fmt };
   } catch {
     return undefined;
   }
@@ -170,11 +168,13 @@ export function InvoiceViewActions({
   const router = useRouter();
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
+  const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [amountPaid, setAmountPaid] = useState(invoice?.amount_paid || 0);
   const [amountPaidError, setAmountPaidError] = useState<string | null>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [creditToApply, setCreditToApply] = useState(0);
+  const [duplicateConfirmOpen, setDuplicateConfirmOpen] = useState(false);
 
   const isPaid = useMemo(() => invoice?.status === "paid", [invoice?.status]);
   
@@ -235,7 +235,13 @@ export function InvoiceViewActions({
 
       const branding = (await fetchBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A"; // slate-900
-      const resolvedLogo = branding.logoUrl || logoSrc || (prof as any)?.logoUrl || "/kredence.png";
+      const snap = (inv.from_snapshot ?? {}) as Record<string, unknown>;
+      const resolvedLogo = resolveDocumentPdfLogo({
+        logoSrc,
+        profileLogoUrl: (prof as Profile)?.logoUrl,
+        snapshotLogoUrl: String(snap.logoUrl ?? ""),
+        brandingLogoUrl: branding.logoUrl,
+      });
 
       const doc = new jsPDF({ unit: "pt", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
@@ -249,11 +255,9 @@ export function InvoiceViewActions({
       doc.setFillColor(brandColor);
       doc.rect(0, 0, pageW, 60, "F");
 
-      // Logo
-      const logoImg = resolvedLogo ? await imageUrlToDataURL(resolvedLogo) : undefined;
-      if (logoImg?.dataUrl) {
-        doc.addImage(logoImg.dataUrl, logoImg.fmt, M, 14, 48, 48, undefined, "FAST");
-      }
+      // Logo (preserve aspect ratio — wide logos are not squashed into a square)
+      const logoImg = resolvedLogo ? await loadImageForJsPdf(resolvedLogo) : undefined;
+      addPdfHeaderLogo(doc, logoImg, M);
 
       // Sender identity (title + email in the header)
       const fromSnap = inv.from_snapshot ?? {};
@@ -266,10 +270,11 @@ export function InvoiceViewActions({
       const senderName = branding.companyName || fallbackName || "Your Company";
       const senderEmail = (fromSnap as any)?.email || (prof as any)?.email || branding.email || "";
 
+      const headerTextX = pdfHeaderTextX(M, logoImg);
       doc.setTextColor("#FFFFFF");
-      doc.setFont("helvetica", "bold").setFontSize(16).text(senderName, M + 60, 28);
+      doc.setFont("helvetica", "bold").setFontSize(16).text(senderName, headerTextX, 28);
       doc.setFont("helvetica", "normal").setFontSize(10);
-      if (senderEmail) doc.text(senderEmail, M + 60, 44);
+      if (senderEmail) doc.text(senderEmail, headerTextX, 44);
 
       // Invoice label + number (right)
       doc.setFont("helvetica", "bold").setFontSize(24).text("INVOICE", rightX, 30, {
@@ -527,7 +532,13 @@ export function InvoiceViewActions({
 
       const branding = (await fetchBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A"; // slate-900
-      const resolvedLogo = branding.logoUrl || logoSrc || (prof as any)?.logoUrl || "/kredence.png";
+      const snap = (inv.from_snapshot ?? {}) as Record<string, unknown>;
+      const resolvedLogo = resolveDocumentPdfLogo({
+        logoSrc,
+        profileLogoUrl: (prof as Profile)?.logoUrl,
+        snapshotLogoUrl: String(snap.logoUrl ?? ""),
+        brandingLogoUrl: branding.logoUrl,
+      });
 
       const doc = new jsPDF({ unit: "pt", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
@@ -541,11 +552,9 @@ export function InvoiceViewActions({
       doc.setFillColor(brandColor);
       doc.rect(0, 0, pageW, 60, "F");
 
-      // Logo
-      const logoImg = resolvedLogo ? await imageUrlToDataURL(resolvedLogo) : undefined;
-      if (logoImg?.dataUrl) {
-        doc.addImage(logoImg.dataUrl, logoImg.fmt, M, 14, 48, 48, undefined, "FAST");
-      }
+      // Logo (preserve aspect ratio — wide logos are not squashed into a square)
+      const logoImg = resolvedLogo ? await loadImageForJsPdf(resolvedLogo) : undefined;
+      addPdfHeaderLogo(doc, logoImg, M);
 
       // Sender identity (title + email in the header)
       const fromSnap = inv.from_snapshot ?? {};
@@ -558,10 +567,11 @@ export function InvoiceViewActions({
       const senderName = branding.companyName || fallbackName || "Your Company";
       const senderEmail = (fromSnap as any)?.email || (prof as any)?.email || branding.email || "";
 
+      const headerTextX = pdfHeaderTextX(M, logoImg);
       doc.setTextColor("#FFFFFF");
-      doc.setFont("helvetica", "bold").setFontSize(16).text(senderName, M + 60, 28);
+      doc.setFont("helvetica", "bold").setFontSize(16).text(senderName, headerTextX, 28);
       doc.setFont("helvetica", "normal").setFontSize(10);
-      if (senderEmail) doc.text(senderEmail, M + 60, 44);
+      if (senderEmail) doc.text(senderEmail, headerTextX, 44);
 
       // Invoice label + number (right)
       doc.setFont("helvetica", "bold").setFontSize(24).text("INVOICE", rightX, 30, {
@@ -963,12 +973,20 @@ export function InvoiceViewActions({
           variant="outline"
           className="gap-2"
           disabled={busy}
-          onClick={() =>
-            router.push(`/app/invoices/new?duplicateFrom=${encodeURIComponent(invoiceId)}`)
-          }
+          onClick={() => setDuplicateConfirmOpen(true)}
         >
           <Copy className="h-4 w-4" />
           Duplicate
+        </Button>
+
+        <Button
+          variant="outline"
+          className="gap-2"
+          disabled={busy}
+          onClick={() => setIsCustomerDialogOpen(true)}
+        >
+          <UserRound className="h-4 w-4" />
+          Change customer name
         </Button>
 
         {invoice?.status !== "paid" && invoice?.status !== "cancelled" && (
@@ -1023,6 +1041,17 @@ export function InvoiceViewActions({
           </Button>
         )}
       </div>
+
+      <ChangeInvoiceCustomerDialog
+        invoiceId={invoiceId}
+        currentCustomerId={invoice?.customer_id}
+        open={isCustomerDialogOpen}
+        onOpenChange={setIsCustomerDialogOpen}
+        onSaved={() => {
+          onRefresh?.();
+          router.refresh();
+        }}
+      />
 
       <Dialog
         open={isPaymentDialogOpen}
@@ -1152,6 +1181,33 @@ export function InvoiceViewActions({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={duplicateConfirmOpen} onOpenChange={setDuplicateConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Duplicate invoice?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {invoice?.number
+                ? `Create a new invoice prefilled from ${invoice.number}? You can review and edit it before saving.`
+                : "Create a new invoice from this one? You can review and edit it before saving."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={() => {
+                setDuplicateConfirmOpen(false);
+                router.push(
+                  `/app/invoices/new?duplicateFrom=${encodeURIComponent(invoiceId)}`,
+                );
+              }}
+            >
+              Duplicate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

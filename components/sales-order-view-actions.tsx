@@ -20,6 +20,12 @@ import {
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
+import {
+  addPdfHeaderLogo,
+  loadImageForJsPdf,
+  pdfHeaderTextX,
+  resolveDocumentPdfLogo,
+} from "@/lib/pdf-image-for-jspdf";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
@@ -39,26 +45,6 @@ async function fetchBranding(): Promise<Branding | undefined> {
     const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
     if (!res.ok) return undefined;
     return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
-
-async function imageUrlToDataURL(
-  url: string
-): Promise<{ dataUrl: string; fmt: "PNG" | "JPEG" } | undefined> {
-  try {
-    const res = await fetch(url, { cache: "force-cache" });
-    if (!res.ok) return undefined;
-    const blob = await res.blob();
-    const fmt: "PNG" | "JPEG" = blob.type.includes("png") ? "PNG" : "JPEG";
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-    return { dataUrl, fmt };
   } catch {
     return undefined;
   }
@@ -223,7 +209,15 @@ export function SalesOrderViewActions({
 
       const branding = (await fetchBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A";
-      const resolvedLogo = branding.logoUrl || logoSrc || (prof as { logoUrl?: string })?.logoUrl || "/kredence.png";
+      const fromSnap = so.from_snapshot ?? {};
+      const resolvedLogo = resolveDocumentPdfLogo({
+        logoSrc,
+        profileLogoUrl: (prof as { logoUrl?: string })?.logoUrl,
+        snapshotLogoUrl: String(
+          (fromSnap as { logoUrl?: string }).logoUrl ?? "",
+        ),
+        brandingLogoUrl: branding.logoUrl,
+      });
 
       const doc = new jsPDF({ unit: "pt", format: "a4" });
       const pageW = doc.internal.pageSize.getWidth();
@@ -235,12 +229,9 @@ export function SalesOrderViewActions({
       doc.setFillColor(brandColor);
       doc.rect(0, 0, pageW, 60, "F");
 
-      const logoImg = resolvedLogo ? await imageUrlToDataURL(resolvedLogo) : undefined;
-      if (logoImg?.dataUrl) {
-        doc.addImage(logoImg.dataUrl, logoImg.fmt, M, 14, 48, 48, undefined, "FAST");
-      }
+      const logoImg = resolvedLogo ? await loadImageForJsPdf(resolvedLogo) : undefined;
+      addPdfHeaderLogo(doc, logoImg, M);
 
-      const fromSnap = so.from_snapshot ?? {};
       const acctType = prof?.accountType ?? "individual";
       const fallbackName =
         (fromSnap as { type?: string }).type === "company"
@@ -254,10 +245,11 @@ export function SalesOrderViewActions({
         branding.email ||
         "";
 
+      const headerTextX = pdfHeaderTextX(M, logoImg);
       doc.setTextColor("#FFFFFF");
-      doc.setFont("helvetica", "bold").setFontSize(16).text(senderName, M + 60, 28);
+      doc.setFont("helvetica", "bold").setFontSize(16).text(senderName, headerTextX, 28);
       doc.setFont("helvetica", "normal").setFontSize(10);
-      if (senderEmail) doc.text(senderEmail, M + 60, 44);
+      if (senderEmail) doc.text(senderEmail, headerTextX, 44);
 
       doc.setFont("helvetica", "bold").setFontSize(22).text("SALES ORDER", rightX, 30, {
         align: "right",

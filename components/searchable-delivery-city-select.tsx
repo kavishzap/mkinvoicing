@@ -24,6 +24,7 @@ export function SearchableDeliveryCitySelect({
   "aria-invalid": ariaInvalid,
   className,
   listMaxHeightClassName = "max-h-[min(50vh,420px)]",
+  popoverContentClassName,
 }: {
   cities: DeliveryCityRow[];
   value: string;
@@ -35,11 +36,13 @@ export function SearchableDeliveryCitySelect({
   className?: string;
   /** Scroll area for long city lists (default taller than base CommandList). */
   listMaxHeightClassName?: string;
+  /** Extra classes on the dropdown panel (use higher z-index inside dialogs). */
+  popoverContentClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const selected = cities.find((c) => c.id === value);
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <Button
           id={id}
@@ -59,8 +62,12 @@ export function SearchableDeliveryCitySelect({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-0"
+        className={cn(
+          "z-[100] w-[var(--radix-popover-trigger-width)] p-0",
+          popoverContentClassName,
+        )}
         align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <Command shouldFilter>
           <CommandInput placeholder="Search cities by name…" className="text-xs" />

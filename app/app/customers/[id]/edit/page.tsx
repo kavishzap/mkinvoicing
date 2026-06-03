@@ -8,6 +8,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Building2, Mail, Save, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -74,6 +84,8 @@ function rowToForm(c: CustomerRow): CustomerDirectoryFormData {
     fullName: c.fullName ?? "",
     email: c.email ?? "",
     phone: c.phone ?? "",
+    phone_2: c.phone_2 ?? "",
+    map_location: c.map_location ?? "",
     street: c.street ?? "",
     city: c.city ?? "",
     cityId: c.cityId ?? "",
@@ -100,6 +112,7 @@ export default function EditCustomerPage() {
     Partial<Record<keyof CustomerDirectoryFormData, string>>
   >({});
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
   const [relatedDocsReload, setRelatedDocsReload] = useState(0);
 
@@ -159,8 +172,7 @@ export default function EditCustomerPage() {
     };
   }, [id, router]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function requestSave() {
     const next = validateCustomerDirectoryForm(formData);
     setErrors(next);
     if (Object.keys(next).length > 0) {
@@ -171,6 +183,10 @@ export default function EditCustomerPage() {
       });
       return;
     }
+    setSaveConfirmOpen(true);
+  }
+
+  async function performSave() {
     try {
       setSaving(true);
       const updated = await updateCustomer(
@@ -192,6 +208,11 @@ export default function EditCustomerPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    requestSave();
   }
 
   const displayName =
@@ -221,8 +242,8 @@ export default function EditCustomerPage() {
       }
       actions={
         <Button
-          type="submit"
-          form="customer-edit-form"
+          type="button"
+          onClick={requestSave}
           disabled={saving}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -272,6 +293,30 @@ export default function EditCustomerPage() {
           <CustomerRelatedDocuments customerId={id} reloadToken={relatedDocsReload} />
         ) : null}
       </div>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will update {displayName} in your customer directory.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

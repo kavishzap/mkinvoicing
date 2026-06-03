@@ -387,6 +387,8 @@ export default function SalesOrderViewPage() {
   const logoSrc = from.logoUrl || profileLogoUrl || "/kredence.png";
 
   const billToIcon = bill.type === "company" ? Building2 : UserRound;
+  const notesText = (salesOrder.notes ?? "").trim();
+  const termsText = (salesOrder.terms ?? "").trim();
 
   return (
     <AppPageShell
@@ -528,6 +530,19 @@ export default function SalesOrderViewPage() {
                 ) : null}
               </div>
             </div>
+            <div className="border-t border-border/60 pt-4">
+              <InfoRow label="Notes">
+                {notesText ? (
+                  <span className="font-normal whitespace-pre-wrap leading-relaxed">
+                    {notesText}
+                  </span>
+                ) : (
+                  <span className="font-normal italic text-muted-foreground">
+                    No notes
+                  </span>
+                )}
+              </InfoRow>
+            </div>
           </SectionCard>
 
           <SectionCard icon={Receipt} title="Totals">
@@ -628,25 +643,11 @@ export default function SalesOrderViewPage() {
           </div>
         </SectionCard>
 
-        {(salesOrder.notes || salesOrder.terms) && (
-          <SectionCard icon={ScrollText} title="Notes & terms">
-            <div className="space-y-4">
-              {salesOrder.notes ? (
-                <div>
-                  <p className={fieldLabelClass}>Notes</p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
-                    {salesOrder.notes}
-                  </p>
-                </div>
-              ) : null}
-              {salesOrder.terms ? (
-                <div>
-                  <p className={fieldLabelClass}>Terms &amp; conditions</p>
-                </div>
-              ) : null}
-            </div>
+        {termsText ? (
+          <SectionCard icon={ScrollText} title="Terms & conditions">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed">{termsText}</p>
           </SectionCard>
-        )}
+        ) : null}
         </div>
       </div>
 

@@ -10,6 +10,16 @@ import {
 import Link from "next/link";
 import { Download, Printer, Sparkles, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DeliveryBalanceCollapsibleSection } from "@/components/delivery-balance-collapsible-section";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +52,7 @@ import {
   type DriverStockReturnLine,
 } from "@/lib/deliveries-service";
 import { generateDriverBalanceSheetPdf } from "@/lib/driver-balance-sheet-pdf";
+import { generateDriverStockReturnPdf } from "@/lib/driver-stock-return-pdf";
 import type { TeamMemberRow } from "@/lib/company-team-service";
 import {
   addExpense,
@@ -613,6 +624,12 @@ export function DeliveryDriverBalancePanel({
   const [returnQtys, setReturnQtys] = useState<Record<string, string>>({});
   const [returnQtyErrors, setReturnQtyErrors] = useState<Record<string, string>>({});
   const [stockReturnBusy, setStockReturnBusy] = useState(false);
+  const [stockReturnConfirmOpen, setStockReturnConfirmOpen] = useState(false);
+  const [stockReturnPendingCount, setStockReturnPendingCount] = useState(0);
+  const [settleProceedConfirmOpen, setSettleProceedConfirmOpen] = useState(false);
+  const [completeSettlementConfirmOpen, setCompleteSettlementConfirmOpen] =
+    useState(false);
+  const [stockSheetBusy, setStockSheetBusy] = useState(false);
   const [step, setStep] = useState<"preview" | "payment">("preview");
   const [settlementCashInput, setSettlementCashInput] = useState("");
   const [settlementBankInput, setSettlementBankInput] = useState("");
@@ -786,8 +803,68 @@ export function DeliveryDriverBalancePanel({
     [balanceSheetBusy, delivery, toast]
   );
 
-  async function submitDriverStockReturns() {
-    const driverId = delivery.driverUserId;
+  const runStockReturnSheet = useCallback(
+    async (mode: "download" | "print") => {
+      if (stockSheetBusy || stockReturnLines.length === 0) return;
+      setStockSheetBusy(true);
+      try {
+        const result = generateDriverStockReturnPdf(
+          {
+            delivery: {
+              id: delivery.id,
+              driverDisplay: delivery.driverDisplay,
+              status: delivery.status,
+              createdAt: delivery.createdAt,
+              createdByDisplay: delivery.createdByDisplay,
+              deliveryDate: delivery.deliveryDate,
+            },
+            lines: stockReturnLines,
+            availableByProduct: driverStockAvailable,
+            returnQtys,
+          },
+          mode
+        );
+        if (result.mode === "print-fallback") {
+          toast({
+            title: "Print blocked",
+            description: "Allow popups to print. PDF downloaded instead.",
+          });
+        } else {
+          toast({
+            title: mode === "print" ? "Opening print dialog" : "Downloaded",
+            description: result.filename,
+          });
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Could not generate stock sheet",
+          description: msg,
+          variant: "destructive",
+        });
+      } finally {
+        setStockSheetBusy(false);
+      }
+    },
+    [
+      delivery.createdAt,
+      delivery.createdByDisplay,
+      delivery.deliveryDate,
+      delivery.driverDisplay,
+      delivery.id,
+      delivery.status,
+      driverStockAvailable,
+      returnQtys,
+      stockReturnLines,
+      stockSheetBusy,
+      toast,
+    ]
+  );
+
+  function collectStockReturnEntries(): {
+    entries: { productId: string; productName: string; qty: number }[];
+    nextErrors: Record<string, string>;
+  } {
     const entries: { productId: string; productName: string; qty: number }[] = [];
     const nextErrors: Record<string, string> = {};
 
@@ -808,6 +885,11 @@ export function DeliveryDriverBalancePanel({
       entries.push({ productId: l.productId, productName: l.productName, qty });
     }
 
+    return { entries, nextErrors };
+  }
+
+  function requestStockReturn() {
+    const { entries, nextErrors } = collectStockReturnEntries();
     setReturnQtyErrors(nextErrors);
 
     if (Object.keys(nextErrors).length > 0) {
@@ -827,6 +909,15 @@ export function DeliveryDriverBalancePanel({
       });
       return;
     }
+
+    setStockReturnPendingCount(entries.length);
+    setStockReturnConfirmOpen(true);
+  }
+
+  async function performStockReturn() {
+    const driverId = delivery.driverUserId;
+    const { entries } = collectStockReturnEntries();
+    if (entries.length === 0) return;
 
     try {
       setStockReturnBusy(true);
@@ -863,7 +954,7 @@ export function DeliveryDriverBalancePanel({
     }
   }
 
-  function tryProceedToSettlementPayment() {
+  function requestSettleProceed() {
     const block = applyDriverSettlementValidation();
     if (block) {
       toast({
@@ -873,6 +964,10 @@ export function DeliveryDriverBalancePanel({
       });
       return;
     }
+    setSettleProceedConfirmOpen(true);
+  }
+
+  function performSettleProceed() {
     if (dueRounded > 0) {
       setSettlementCashInput(String(dueRounded));
       setSettlementBankInput("");
@@ -884,7 +979,7 @@ export function DeliveryDriverBalancePanel({
     setStep("payment");
   }
 
-  async function completeDriverBalanceSettlement() {
+  function requestCompleteSettlement() {
     const block = applyDriverSettlementValidation();
     if (block) {
       toast({
@@ -907,6 +1002,10 @@ export function DeliveryDriverBalancePanel({
       return;
     }
 
+    setCompleteSettlementConfirmOpen(true);
+  }
+
+  async function performCompleteSettlement() {
     const cashAmt = settlementCashParsed;
     const bankAmt = settlementBankParsed;
     const refTrim = settlementBankReference.trim();
@@ -1141,6 +1240,7 @@ export function DeliveryDriverBalancePanel({
   }
 
   return (
+    <>
     <div className="space-y-4 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5 print:hidden">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -1359,7 +1459,39 @@ export function DeliveryDriverBalancePanel({
                       </TableBody>
                     </Table>
                   </div>
-                  <div className="mt-4 flex justify-end">
+                  <div className="mt-4 flex flex-wrap justify-end gap-2 print:hidden">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={
+                        stockSheetBusy ||
+                        stockReturnBusy ||
+                        confirming ||
+                        stockReturnLines.length === 0
+                      }
+                      onClick={() => void runStockReturnSheet("download")}
+                    >
+                      <Download className="h-4 w-4" aria-hidden />
+                      {stockSheetBusy ? "Preparing…" : "Download stock PDF"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={
+                        stockSheetBusy ||
+                        stockReturnBusy ||
+                        confirming ||
+                        stockReturnLines.length === 0
+                      }
+                      onClick={() => void runStockReturnSheet("print")}
+                    >
+                      <Printer className="h-4 w-4" aria-hidden />
+                      {stockSheetBusy ? "Preparing…" : "Print stock"}
+                    </Button>
                     <Button
                       type="button"
                       className="gap-2 rounded font-semibold shadow-sm"
@@ -1369,7 +1501,7 @@ export function DeliveryDriverBalancePanel({
                         stockReturnLines.length === 0 ||
                         Object.keys(returnQtyErrors).length > 0
                       }
-                      onClick={() => void submitDriverStockReturns()}
+                      onClick={requestStockReturn}
                     >
                       {stockReturnBusy ? "Returning…" : "Return stock"}
                     </Button>
@@ -1423,7 +1555,7 @@ export function DeliveryDriverBalancePanel({
                 stockReturnBusy ||
                 settlementPrerequisites.message != null
               }
-              onClick={() => tryProceedToSettlementPayment()}
+              onClick={requestSettleProceed}
             >
               Settle
             </Button>
@@ -1530,7 +1662,7 @@ export function DeliveryDriverBalancePanel({
             <Button
               type="button"
               className="rounded font-semibold shadow-sm"
-              onClick={() => void completeDriverBalanceSettlement()}
+              onClick={requestCompleteSettlement}
               disabled={
                 confirming ||
                 stockReturnBusy ||
@@ -1544,5 +1676,93 @@ export function DeliveryDriverBalancePanel({
         </div>
       )}
     </div>
+
+    <AlertDialog open={stockReturnConfirmOpen} onOpenChange={setStockReturnConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Return stock to warehouse?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Move {stockReturnPendingCount} product line
+            {stockReturnPendingCount === 1 ? "" : "s"} from {delivery.driverDisplay} back
+            to the primary warehouse. This updates inventory balances.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={stockReturnBusy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={stockReturnBusy}
+            onClick={(e) => {
+              e.preventDefault();
+              setStockReturnConfirmOpen(false);
+              void performStockReturn();
+            }}
+          >
+            {stockReturnBusy ? "Returning…" : "Return stock"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={settleProceedConfirmOpen} onOpenChange={setSettleProceedConfirmOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Proceed with settlement?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Continue to record how {delivery.driverDisplay} returned{" "}
+            {fmtMoneyMur(Math.max(0, dueRounded))} to you? Expenses may be created
+            for driver daily rate and upselling commission before payment is recorded.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              setSettleProceedConfirmOpen(false);
+              performSettleProceed();
+            }}
+          >
+            Continue to payment
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog
+      open={completeSettlementConfirmOpen}
+      onOpenChange={setCompleteSettlementConfirmOpen}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Complete driver settlement?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Record settlement for {delivery.driverDisplay} with{" "}
+            {settlementCashParsed > 0
+              ? `cash ${fmtMoneyMur(settlementCashParsed)}`
+              : "no cash"}
+            {settlementBankParsed > 0
+              ? ` and bank ${fmtMoneyMur(settlementBankParsed)}`
+              : settlementCashParsed > 0
+                ? ""
+                : " and no bank transfer"}
+            . The delivery note will be marked completed and driver settlement saved.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={confirming}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={confirming}
+            onClick={(e) => {
+              e.preventDefault();
+              setCompleteSettlementConfirmOpen(false);
+              void performCompleteSettlement();
+            }}
+          >
+            {confirming ? "Settling…" : "Complete settlement"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

@@ -16,6 +16,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -134,6 +144,7 @@ export default function LocationDetailPage() {
   const [loc, setLoc] = useState<LocationRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [nameError, setNameError] = useState("");
   const [tab, setTab] = useState(() => {
     const t = searchParams.get("tab");
@@ -304,8 +315,13 @@ export default function LocationDetailPage() {
     return true;
   }
 
-  async function handleSave() {
+  function requestSave() {
     if (!id || !validate()) return;
+    setSaveConfirmOpen(true);
+  }
+
+  async function performSave() {
+    if (!id) return;
     try {
       setSaving(true);
       const updated = await updateLocation(id, {
@@ -374,7 +390,7 @@ export default function LocationDetailPage() {
               </Button>
               <Button
                 type="button"
-                onClick={() => void handleSave()}
+                onClick={requestSave}
                 disabled={
                   saving ||
                   locationTypesLoading ||
@@ -714,6 +730,36 @@ export default function LocationDetailPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will update {form.name.trim() || loc.name} in your locations
+              list
+              {!isActive ? " and mark it as inactive" : ""}
+              {form.location_type === "warehouse" && isPrimaryWarehouse
+                ? " as the primary warehouse"
+                : ""}
+              .
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

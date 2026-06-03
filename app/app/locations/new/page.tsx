@@ -10,6 +10,16 @@ import { ArrowLeft, Building2, MapPinned, Save, type LucideIcon } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -125,6 +135,7 @@ export default function NewLocationPage() {
   const [locationTypesLoading, setLocationTypesLoading] = useState(true);
   const [nameError, setNameError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [isPrimaryWarehouse, setIsPrimaryWarehouse] = useState(false);
 
   useEffect(() => {
@@ -174,6 +185,11 @@ export default function NewLocationPage() {
     return true;
   }
 
+  function requestSave() {
+    if (!validate()) return;
+    setSaveConfirmOpen(true);
+  }
+
   async function performSave() {
     try {
       setSaving(true);
@@ -209,11 +225,6 @@ export default function NewLocationPage() {
     }
   }
 
-  async function handleSave() {
-    if (!validate()) return;
-    await performSave();
-  }
-
   return (
     <AppPageShell
       fillHeight
@@ -227,7 +238,7 @@ export default function NewLocationPage() {
       }
       actions={
         <Button
-          onClick={handleSave}
+          onClick={requestSave}
           disabled={saving || locationTypesLoading || locationTypeOptions.length === 0}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -421,6 +432,35 @@ export default function NewLocationPage() {
         </div>
       </div>
       )}
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save location?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will add {form.name.trim() || "this location"} as a{" "}
+              {formatLocationTypeLabel(form.location_type).toLowerCase()}
+              {form.location_type === "warehouse" && isPrimaryWarehouse
+                ? " (primary warehouse)"
+                : ""}
+              . You will be taken to the location detail page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Submit"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }

@@ -17,6 +17,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -231,6 +241,7 @@ export default function NewInventoryProductPage() {
   const [nameError, setNameError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -279,8 +290,14 @@ export default function NewInventoryProductPage() {
     return true;
   }
 
-  async function handleSave() {
+  function requestSave() {
     if (!validate()) return;
+    const stockPayload = parseStockLines(stockLines, toast);
+    if (stockPayload === null) return;
+    setSaveConfirmOpen(true);
+  }
+
+  async function performSave() {
     const stockPayload = parseStockLines(stockLines, toast);
     if (stockPayload === null) return;
 
@@ -330,7 +347,7 @@ export default function NewInventoryProductPage() {
       }
       actions={
         <Button
-          onClick={handleSave}
+          onClick={requestSave}
           disabled={saving || loading}
           className="gap-2 rounded font-semibold shadow-sm"
         >
@@ -571,6 +588,31 @@ export default function NewInventoryProductPage() {
         </SectionCard>
       </div>
       )}
+
+      <AlertDialog open={saveConfirmOpen} onOpenChange={setSaveConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will add {form.name.trim() || "this product"} to your catalog
+              and return you to the products list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                setSaveConfirmOpen(false);
+                void performSave();
+              }}
+            >
+              {saving ? "Saving…" : "Submit"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppPageShell>
   );
 }
