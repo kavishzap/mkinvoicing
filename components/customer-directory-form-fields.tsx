@@ -98,6 +98,13 @@ export function validateCustomerDirectoryForm(
   return next;
 }
 
+function mapLocationHref(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trimmed)}`;
+}
+
 function Field(props: {
   label: string;
   id: string;
@@ -158,6 +165,10 @@ export function CustomerDirectoryFormFields({
   const activeCities = useMemo(
     () => cities.filter((c) => c.isActive),
     [cities],
+  );
+  const mapHref = useMemo(
+    () => mapLocationHref(formData.map_location),
+    [formData.map_location],
   );
 
   return (
@@ -255,13 +266,33 @@ export function CustomerDirectoryFormFields({
           onChange={(v) => setFormData({ ...formData, phone_2: v })}
           placeholder="+230 5xx xx xx"
         />
-        <Field
-          label="Map location"
-          id="map_location"
-          value={formData.map_location}
-          onChange={(v) => setFormData({ ...formData, map_location: v })}
-          placeholder="Google Maps link or coordinates"
-        />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="map_location" className="text-xs font-medium">
+              Map location
+            </Label>
+            {mapHref ? (
+              <a
+                href={mapHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Open
+              </a>
+            ) : null}
+          </div>
+          <Input
+            id="map_location"
+            type="text"
+            value={formData.map_location}
+            onChange={(e) =>
+              setFormData({ ...formData, map_location: e.target.value })
+            }
+            placeholder="Google Maps link or coordinates"
+            className="h-8 text-xs"
+          />
+        </div>
       </div>
       <div className="space-y-2">
         <Label htmlFor="cityId" className="text-xs font-medium">

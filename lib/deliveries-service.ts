@@ -258,10 +258,49 @@ export type SalesOrderPickRow = {
   items: DeliveryLineItem[];
 };
 
+export type DriverSettlementStatus = "pending" | "settled" | "due";
+
+export function normalizeDriverSettlementStatus(
+  raw: string | null | undefined,
+  opts?: {
+    legacyDriverStatus?: boolean | null;
+    settlementDueAmount?: number | null;
+  },
+): DriverSettlementStatus {
+  const dueAmt = roundMoney2(Number(opts?.settlementDueAmount ?? 0));
+  if (dueAmt > 0) return "due";
+
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (s === "settled") return "settled";
+  if (s === "due") return "settled";
+  if (s === "pending") return "pending";
+  if (opts?.legacyDriverStatus) return "settled";
+  return "pending";
+}
+
+export function driverSettlementStatusRank(
+  status: DriverSettlementStatus,
+): number {
+  switch (status) {
+    case "pending":
+      return 0;
+    case "due":
+      return 1;
+    case "settled":
+      return 2;
+    default:
+      return 0;
+  }
+}
+
 export type DeliveryListRow = {
   id: string;
   status: DeliveryNoteStatus;
+  /** @deprecated Use driverSettlementStatus */
   driverStatus: boolean;
+  driverSettlementStatus: DriverSettlementStatus;
   driverUserId: string;
   driverDisplay: string;
   /** `company_users.id` for `/app/company-team/[id]` when the driver is a team member. */
@@ -284,6 +323,11 @@ export type DeliveryListRow = {
    * Null if collection is still pending, or settled without a settlement row (legacy).
    */
   driverCollectedAmount: number | null;
+  /**
+   * Remaining amount due on driver balance for this delivery (after partial payments).
+   * Null when nothing is due or settlement is not recorded yet.
+   */
+  driverDueAmount: number | null;
 };
 
 export type DeliveryDetailSalesOrder = {
@@ -309,8 +353,11 @@ export type DeliveryDetailSalesOrder = {
 export type DeliveryDetail = {
   id: string;
   status: DeliveryNoteStatus;
-  /** True when driver cash/balance has been collected and recorded. */
+  /** @deprecated Use driverSettlementStatus */
   driverStatus: boolean;
+  driverSettlementStatus: DriverSettlementStatus;
+  /** Outstanding amount on driver balance when status is due. */
+  driverSettlementDueAmount: number | null;
   notes: string | null;
   deliveryDate: string | null;
   createdAt: string;
@@ -723,6 +770,7 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       id,
       status,
       driver_status,
+      driver_settlement_status,
       driver_user_id,
       created_by,
       delivery_date,
@@ -770,7 +818,7 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
         })
       : supabase
           .from("delivery_driver_settlements")
-          .select("delivery_id, cash_amount, bank_transfer_amount")
+          .select("delivery_id, cash_amount, bank_transfer_amount, due_amount")
           .eq("company_id", companyId)
           .in("delivery_id", deliveryIds);
 
@@ -792,7 +840,10 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
   if (pinnedRes.error) throw new Error(pinnedRes.error.message);
   if (settlementsRes.error) throw new Error(settlementsRes.error.message);
 
-  const settlementByDelivery = new Map<string, { cash: number; bank: number }>();
+  const settlementByDelivery = new Map<
+    string,
+    { cash: number; bank: number; due: number }
+  >();
   for (const row of settlementsRes.data ?? []) {
     const rec = row as Record<string, unknown>;
     const did = String(rec.delivery_id ?? "").trim();
@@ -800,6 +851,7 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
     settlementByDelivery.set(did, {
       cash: Number(rec.cash_amount ?? 0),
       bank: Number(rec.bank_transfer_amount ?? 0),
+      due: Number(rec.due_amount ?? 0),
     });
   }
 
@@ -882,17 +934,28 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
     }
 
     const deliveryId = p.r.id as string;
-    const settled = Boolean(p.r.driver_status);
+    const legacySettled = Boolean(p.r.driver_status);
     const split = settlementByDelivery.get(deliveryId);
+    const driverSettlementStatus = normalizeDriverSettlementStatus(
+      p.r.driver_settlement_status as string | null | undefined,
+      {
+        legacyDriverStatus: legacySettled,
+        settlementDueAmount: split?.due ?? null,
+      },
+    );
     const driverCollectedAmount =
-      settled && split != null
+      driverSettlementStatus !== "pending" && split != null
         ? roundMoney2(split.cash + split.bank)
         : null;
+    const dueRaw = split != null ? roundMoney2(split.due) : 0;
+    const driverDueAmount =
+      driverSettlementStatus === "due" && dueRaw > 0 ? dueRaw : null;
 
     return {
       id: deliveryId,
       status: normalizeDeliveryNoteStatus(p.r.status as string | null | undefined),
-      driverStatus: settled,
+      driverStatus: driverSettlementStatus !== "pending",
+      driverSettlementStatus,
       driverUserId: p.driverId,
       driverDisplay: names.get(p.driverId) ?? p.driverId.slice(0, 8),
       driverMembershipId: memberships.get(p.driverId) ?? null,
@@ -909,24 +972,37 @@ export async function listDeliveries(): Promise<DeliveryListRow[]> {
       totalAmountCashForSettlement:
         p.totalAmountCashForSettlement + addSettlementCash,
       driverCollectedAmount,
+      driverDueAmount,
     };
   });
 }
 
-export async function setDeliveryDriverStatus(
+export async function setDriverSettlementStatus(
   deliveryId: string,
-  driverStatus: boolean
+  status: DriverSettlementStatus,
 ): Promise<void> {
   const companyId = await requireActiveCompanyId();
   const { error } = await supabase
     .from("deliveries")
     .update({
-      driver_status: driverStatus,
+      driver_settlement_status: status,
+      driver_status: status !== "pending",
       updated_at: new Date().toISOString(),
     } as never)
     .eq("id", deliveryId)
     .eq("company_id", companyId);
   if (error) throw new Error(error.message);
+}
+
+/** @deprecated Use setDriverSettlementStatus */
+export async function setDeliveryDriverStatus(
+  deliveryId: string,
+  driverStatus: boolean,
+): Promise<void> {
+  await setDriverSettlementStatus(
+    deliveryId,
+    driverStatus ? "settled" : "pending",
+  );
 }
 
 function roundMoney2(n: number): number {
@@ -1030,6 +1106,8 @@ export type InsertDeliveryDriverSettlementParams = {
   cashAmount: number;
   /** Portion of amount_to_owner paid by bank transfer (>= 0). */
   bankTransferAmount: number;
+  /** Portion of amount_to_owner deferred to driver balance (>= 0). */
+  dueAmount?: number;
   /** Optional note when any amount was paid by bank transfer. */
   bankReference?: string | null;
   expenseId?: string | null;
@@ -1037,7 +1115,7 @@ export type InsertDeliveryDriverSettlementParams = {
 
 /**
  * Inserts a row in `delivery_driver_settlements` (RLS: same company, `recorded_by` = current user).
- * When amount_to_owner > 0, cash_amount + bank_transfer_amount must match (enforced in DB and here).
+ * When amount_to_owner > 0, cash_amount + bank_transfer_amount + due_amount must match.
  */
 export async function insertDeliveryDriverSettlement(
   params: InsertDeliveryDriverSettlementParams
@@ -1046,21 +1124,32 @@ export async function insertDeliveryDriverSettlement(
   const uid = await getCurrentUserId();
   const cash = roundMoney2(Number(params.cashAmount));
   const bank = roundMoney2(Number(params.bankTransferAmount));
+  const dueAmt = roundMoney2(Number(params.dueAmount ?? 0));
   const due = roundMoney2(Number(params.amountToOwner));
   const refTrim = String(params.bankReference ?? "").trim();
 
-  if (!Number.isFinite(cash) || !Number.isFinite(bank) || cash < 0 || bank < 0) {
-    throw new Error("Cash and bank amounts must be valid non-negative numbers.");
+  if (
+    !Number.isFinite(cash) ||
+    !Number.isFinite(bank) ||
+    !Number.isFinite(dueAmt) ||
+    cash < 0 ||
+    bank < 0 ||
+    dueAmt < 0
+  ) {
+    throw new Error(
+      "Cash, bank, and due amounts must be valid non-negative numbers.",
+    );
   }
   if (due > 0) {
-    if (roundMoney2(cash + bank) !== due) {
-      throw new Error("Cash plus bank transfer must equal the Return to Owner Amount.");
+    if (roundMoney2(cash + bank + dueAmt) !== due) {
+      throw new Error(
+        "Cash, bank transfer, and due must add up to the Return to Owner Amount.",
+      );
     }
-    if (cash <= 0 && bank <= 0) {
-      throw new Error("Enter at least one of cash or bank transfer amount.");
-    }
-  } else if (cash !== 0 || bank !== 0) {
-    throw new Error("When the net amount to owner is zero or negative, leave cash and bank amounts at zero.");
+  } else if (cash !== 0 || bank !== 0 || dueAmt !== 0) {
+    throw new Error(
+      "When the net amount to owner is zero or negative, leave cash, bank, and due at zero.",
+    );
   }
 
   const insert = {
@@ -1075,6 +1164,7 @@ export async function insertDeliveryDriverSettlement(
     linked_orders_total: params.linkedOrdersTotal ?? null,
     cash_amount: cash,
     bank_transfer_amount: bank,
+    due_amount: dueAmt,
     bank_reference: bank > 0 && refTrim ? refTrim : null,
     expense_id: params.expenseId ?? null,
   };
@@ -1112,6 +1202,7 @@ export type DeliveryDriverSettlementSnapshot = {
   linkedOrdersTotal: number | null;
   cashAmount: number;
   bankTransferAmount: number;
+  dueAmount: number;
   bankReference: string | null;
   createdAt: string;
 };
@@ -1123,7 +1214,7 @@ export async function getDeliveryDriverSettlement(
   const { data, error } = await supabase
     .from("delivery_driver_settlements")
     .select(
-      "id, amount_to_owner, currency, settlement_cash_total, driver_daily_rate, linked_orders_total, cash_amount, bank_transfer_amount, bank_reference, created_at"
+      "id, amount_to_owner, currency, settlement_cash_total, driver_daily_rate, linked_orders_total, cash_amount, bank_transfer_amount, due_amount, bank_reference, created_at"
     )
     .eq("company_id", companyId)
     .eq("delivery_id", deliveryId)
@@ -1151,6 +1242,7 @@ export async function getDeliveryDriverSettlement(
         : null,
     cashAmount: roundMoney2(Number(r.cash_amount ?? 0)),
     bankTransferAmount: roundMoney2(Number(r.bank_transfer_amount ?? 0)),
+    dueAmount: roundMoney2(Number(r.due_amount ?? 0)),
     bankReference: r.bank_reference != null ? String(r.bank_reference) : null,
     createdAt: String(r.created_at ?? ""),
   };
@@ -1166,6 +1258,7 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
       id,
       status,
       driver_status,
+      driver_settlement_status,
       driver_user_id,
       created_by,
       notes,
@@ -1240,20 +1333,38 @@ export async function getDelivery(id: string): Promise<DeliveryDetail | null> {
   const { totalAmount, totalAmountCashForSettlement } =
     deliverySettlementTotalsFromSalesOrders(salesOrders);
   const settled = Boolean(d.driver_status);
+  let driverSettlementStatus = normalizeDriverSettlementStatus(
+    d.driver_settlement_status as string | null | undefined,
+    { legacyDriverStatus: settled },
+  );
   let driverCollectedAmount: number | null = null;
-  if (settled) {
+  let driverSettlementDueAmount: number | null = null;
+  if (settled || driverSettlementStatus !== "pending") {
     const settlement = await getDeliveryDriverSettlement(id);
     if (settlement) {
       driverCollectedAmount = roundMoney2(
-        settlement.cashAmount + settlement.bankTransferAmount
+        settlement.cashAmount + settlement.bankTransferAmount,
       );
+      driverSettlementStatus = normalizeDriverSettlementStatus(
+        d.driver_settlement_status as string | null | undefined,
+        {
+          legacyDriverStatus: settled,
+          settlementDueAmount: settlement.dueAmount,
+        },
+      );
+      driverSettlementDueAmount =
+        driverSettlementStatus === "due" && settlement.dueAmount > 0
+          ? settlement.dueAmount
+          : null;
     }
   }
 
   return {
     id: d.id as string,
     status: normalizeDeliveryNoteStatus(d.status as string | null | undefined),
-    driverStatus: settled,
+    driverStatus: driverSettlementStatus !== "pending",
+    driverSettlementStatus,
+    driverSettlementDueAmount,
     notes: (d.notes as string | null) ?? null,
     deliveryDate:
       d.delivery_date != null && String(d.delivery_date).trim()
@@ -1478,7 +1589,7 @@ export async function loadDeliveryDetailPageData(
 
   const [drivers, stockReturn] = await Promise.all([
     listDriverTeamMembers(),
-    delivery.driverStatus
+    delivery.driverSettlementStatus !== "pending"
       ? Promise.resolve(null)
       : getDriverStockReturnContext(deliveryId, { p_days: 0, delivery }),
   ]);

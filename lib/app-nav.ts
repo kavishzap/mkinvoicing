@@ -3,6 +3,7 @@ import {
   BarChart3,
   BookOpen,
   ClipboardList,
+  Coins,
   FileInput,
   FileText,
   LayoutDashboard,
@@ -127,6 +128,7 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/data-center": "Data Center",
   "/app/delivery-notes": "Delivery Notes",
   "/app/delivery-notes/zone-cities": "Zone Cities",
+  "/app/delivery-notes/driver-credit": "Driver Balance",
 };
 
 /**
@@ -141,6 +143,7 @@ export function getNavDisplayLabel(
   if (item.href === "/app/inventory") return "Inventory";
   if (item.href === "/app/products") return "Products";
   if (item.href === "/app/locations") return "Locations";
+  if (item.href === "/app/delivery-notes/driver-credit") return "Driver Balance";
   const fromDb = featureNameFn(item.requires)?.trim();
   if (fromDb) return fromDb;
   return NAV_LABEL_FALLBACK_BY_HREF[item.href] ?? item.requires;
@@ -212,6 +215,13 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.deliveryNote,
     href: "/app/delivery-notes",
     icon: PackageOpen,
+    section: "operations",
+    subsection: "Delivery",
+  },
+  {
+    requires: FEATURE_CODES.deliveryNote,
+    href: "/app/delivery-notes/driver-credit",
+    icon: Coins,
     section: "operations",
     subsection: "Delivery",
   },
@@ -359,6 +369,7 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   { prefix: "/app/company-team", requires: FEATURE_CODES.companyTeam },
   { prefix: "/app/data-center", requires: FEATURE_CODES.dataCenter },
   { prefix: "/app/delivery-notes/zone-cities", requires: FEATURE_CODES.zoneCity },
+  { prefix: "/app/delivery-notes/driver-credit", requires: FEATURE_CODES.deliveryNote },
   { prefix: "/app/delivery-notes", requires: FEATURE_CODES.deliveryNote },
   { prefix: "/app", requires: FEATURE_CODES.dashboard },
 ];
@@ -396,6 +407,12 @@ export function resolveCurrentNavLabel(
   }
   const code = requiredFeatureForPath(pathname);
   if (!code) return "MoLedger";
+  const byHref = [...APP_NAV_ITEMS]
+    .sort((a, b) => b.href.length - a.href.length)
+    .find(
+      (i) => pathname === i.href || pathname.startsWith(i.href + "/"),
+    );
+  if (byHref) return getNavDisplayLabel(byHref, featureNameFn);
   const item = APP_NAV_ITEMS.find((i) => i.requires === code);
   if (item) return getNavDisplayLabel(item, featureNameFn);
   return featureNameFn(code) ?? code;

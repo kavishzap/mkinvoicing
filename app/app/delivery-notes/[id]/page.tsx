@@ -193,12 +193,13 @@ export default function DeliveryDetailPage() {
     try {
       const updated = await advanceDeliveryNoteStatus(delivery.id);
       if (updated) {
-        const stockReturn = updated.driverStatus
-          ? null
-          : await getDriverStockReturnContext(updated.id, {
-              p_days: 0,
-              delivery: updated,
-            });
+        const stockReturn =
+          updated.driverSettlementStatus !== "pending"
+            ? null
+            : await getDriverStockReturnContext(updated.id, {
+                p_days: 0,
+                delivery: updated,
+              });
         setPageData((prev) =>
           prev
             ? {

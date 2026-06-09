@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   FileText,
@@ -379,22 +379,47 @@ export function SalesReportTab({ onExportReady }: ReportTabExportProps) {
                   icon={PieChart}
                   tone="violet"
                 >
-                  <ReportLineGrid
-                    lines={[
-                      {
-                        label: "Cash Sales",
-                        value: salesFmt(data.salesBreakdown.cash, data.currency),
-                      },
-                      {
-                        label: "Credit Sales",
-                        value: salesFmt(data.salesBreakdown.credit, data.currency),
-                      },
-                      {
-                        label: "Bank / Juice",
-                        value: salesFmt(data.salesBreakdown.bankJuice, data.currency),
-                      },
-                    ]}
-                  />
+                  <div className="space-y-4 px-4 py-4 text-sm">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Money collected
+                      </p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-muted-foreground">
+                        {(
+                          [
+                            ["Cash", data.salesBreakdown.cash],
+                            ["Credit", data.salesBreakdown.credit],
+                            ["Bank / Juice", data.salesBreakdown.bankJuice],
+                          ] as const
+                        ).map(([label, amount]) => (
+                          <Fragment key={label}>
+                            <span>{label}</span>
+                            <span className="text-right tabular-nums text-foreground">
+                              {salesFmt(amount, data.currency)}
+                            </span>
+                          </Fragment>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 px-4 py-3">
+                      <div className="grid grid-cols-2 gap-x-4 text-sm">
+                        <span className="font-semibold text-amber-800 dark:text-amber-300">
+                          Due (outstanding)
+                        </span>
+                        <span className="text-right font-semibold tabular-nums text-amber-800 dark:text-amber-300">
+                          {salesFmt(data.salesBreakdown.due, data.currency)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="border-t pt-3">
+                      <div className="grid grid-cols-2 gap-x-4 font-semibold">
+                        <span>Total sales</span>
+                        <span className="text-right tabular-nums">
+                          {salesFmt(data.totalSalesGross, data.currency)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </ReportTableSection>
 
                   {/* Sales by Product */}
@@ -518,9 +543,9 @@ export function SalesReportTab({ onExportReady }: ReportTabExportProps) {
                     )}
                   </ReportTableSection>
 
-                  {/* Invoice Details */}
+                  {/* Sales Details */}
                   <ReportTableSection
-                    title="Invoice Details"
+                    title="Sales Details"
                     icon={FileText}
                     tone="indigo"
                     count={data.invoices.length}
@@ -529,7 +554,8 @@ export function SalesReportTab({ onExportReady }: ReportTabExportProps) {
                       <Table>
                         <TableHeader className="sticky top-0 z-10">
                           <TableRow className={REPORT_TONE.indigo.headerRow}>
-                            <TableHead>Invoice #</TableHead>
+                            <TableHead>Ref #</TableHead>
+                            <TableHead>Type</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Customer</TableHead>
                             <TableHead>Payment</TableHead>
@@ -557,6 +583,20 @@ export function SalesReportTab({ onExportReady }: ReportTabExportProps) {
                               <TableRow key={inv.id} className={sb.row}>
                                 <TableCell className="font-medium">
                                   {inv.number}
+                                </TableCell>
+                                <TableCell>
+                                  <span
+                                    className={cn(
+                                      PILL_BASE,
+                                      inv.source === "sales_order"
+                                        ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"
+                                        : "border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
+                                    )}
+                                  >
+                                    {inv.source === "sales_order"
+                                      ? "Sales order"
+                                      : "Invoice"}
+                                  </span>
                                 </TableCell>
                                 <TableCell className="text-muted-foreground tabular-nums">
                                   {formatDate(inv.issueDate)}

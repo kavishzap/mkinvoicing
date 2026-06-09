@@ -45,7 +45,7 @@ import {
   getDriverStockReturnContext,
   insertDeliveryDriverSettlement,
   returnDriverStockToWarehouse,
-  setDeliveryDriverStatus,
+  setDriverSettlementStatus,
   type DeliveryDetail,
   type DeliveryDetailSalesOrder,
   type DriverStockReturnContext,
@@ -59,6 +59,10 @@ import {
   deleteExpense,
   type ExpenseLineItem,
 } from "@/lib/expenses-service";
+import {
+  recordDriverBalanceDueFromDelivery,
+  revertDriverBalanceDueRecord,
+} from "@/lib/driver-credits-service";
 
 const DRIVER_STOCK_RETURN_P_DAYS_ALL = 0;
 
@@ -680,6 +684,12 @@ export function DeliveryDriverBalancePanel({
     return roundMoney2(settlementCashParsed + settlementBankParsed);
   }, [settlementCashParsed, settlementBankParsed]);
 
+  const settlementDueAmount = useMemo(() => {
+    if (dueRounded <= 0) return 0;
+    if (!Number.isFinite(settlementSplitSum)) return NaN;
+    return roundMoney2(Math.max(0, dueRounded - settlementSplitSum));
+  }, [dueRounded, settlementSplitSum]);
+
   const settlementPaymentReady = useMemo(() => {
     if (!Number.isFinite(settlementCashParsed) || !Number.isFinite(settlementBankParsed)) {
       return false;
@@ -687,11 +697,17 @@ export function DeliveryDriverBalancePanel({
     if (dueRounded <= 0) {
       return settlementCashParsed === 0 && settlementBankParsed === 0;
     }
-    return (
-      settlementSplitSum === dueRounded &&
-      (settlementCashParsed > 0 || settlementBankParsed > 0)
-    );
-  }, [dueRounded, settlementBankParsed, settlementCashParsed, settlementSplitSum]);
+    if (!Number.isFinite(settlementDueAmount) || settlementDueAmount < 0) {
+      return false;
+    }
+    return roundMoney2(settlementSplitSum + settlementDueAmount) === dueRounded;
+  }, [
+    dueRounded,
+    settlementBankParsed,
+    settlementCashParsed,
+    settlementDueAmount,
+    settlementSplitSum,
+  ]);
 
   const settlementPrerequisites = useMemo(
     () =>
@@ -1008,10 +1024,12 @@ export function DeliveryDriverBalancePanel({
   async function performCompleteSettlement() {
     const cashAmt = settlementCashParsed;
     const bankAmt = settlementBankParsed;
+    const dueAmt = settlementDueAmount;
     const refTrim = settlementBankReference.trim();
 
     const createdExpenseIds: string[] = [];
     let settlementId: string | null = null;
+    let driverBalanceDueId: string | null = null;
     try {
       setConfirming(true);
       const rate = Number(selectedDriverRate);
@@ -1019,6 +1037,7 @@ export function DeliveryDriverBalancePanel({
       const parts: string[] = [];
       if (cashAmt > 0) parts.push(`Cash ${fmtMoneyMur(cashAmt)}`);
       if (bankAmt > 0) parts.push(`Bank transfer ${fmtMoneyMur(bankAmt)}`);
+      if (dueAmt > 0) parts.push(`Due ${fmtMoneyMur(dueAmt)}`);
       const paymentSummary =
         parts.length > 0 ? parts.join(" · ") : "No cash movement (net ≤ 0)";
 
@@ -1114,26 +1133,54 @@ export function DeliveryDriverBalancePanel({
         linkedOrdersTotal: selectedDeliveryTotalAll,
         cashAmount: cashAmt,
         bankTransferAmount: bankAmt,
+        dueAmount: dueAmt,
         bankReference: bankAmt > 0 && refTrim ? refTrim : null,
         expenseId: salaryExpense.id,
       });
       settlementId = sid;
 
-      await setDeliveryDriverStatus(delivery.id, true);
-      await ensureDeliveryNoteCompleted(delivery.id);
+      if (dueAmt > 0) {
+        const { settlementId: dueRecordId } =
+          await recordDriverBalanceDueFromDelivery({
+            driverUserId: delivery.driverUserId,
+            deliveryId: delivery.id,
+            amount: dueAmt,
+            notes: `Outstanding balance from ${deliverySettlementRef(delivery)} settlement.`,
+          });
+        driverBalanceDueId = dueRecordId;
+      }
+
+      await setDriverSettlementStatus(
+        delivery.id,
+        dueAmt > 0 ? "due" : "settled",
+      );
+      if (dueAmt <= 0) {
+        await ensureDeliveryNoteCompleted(delivery.id);
+      }
       await onDeliveryUpdated();
 
       const expenseMsg =
         commissionExpenseSummaries.length > 0
           ? `Driver daily rate and ${commissionExpenseSummaries.length} upselling commission expense(s) saved.`
           : "Driver daily rate expense saved.";
+      const completionMsg =
+        dueAmt > 0
+          ? ` Due of ${fmtMoneyMur(dueAmt)} recorded on driver balance. Delivery note stays open until the balance is cleared.`
+          : " Delivery note marked completed.";
       toast({
         title: "Driver balance recorded",
-        description: `${expenseMsg} Payment logged, delivery note marked completed, and driver settlement saved.`,
+        description: `${expenseMsg} Driver settlement saved.${completionMsg}`,
       });
       setStep("preview");
     } catch (e: unknown) {
       const err = e as { message?: string };
+      if (driverBalanceDueId) {
+        try {
+          await revertDriverBalanceDueRecord(driverBalanceDueId);
+        } catch {
+          /* ignore */
+        }
+      }
       if (settlementId) {
         try {
           await deleteDeliveryDriverSettlement(settlementId);
@@ -1185,7 +1232,7 @@ export function DeliveryDriverBalancePanel({
     </div>
   );
 
-  if (delivery.driverStatus) {
+  if (delivery.driverSettlementStatus !== "pending") {
     return (
       <div className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1212,8 +1259,19 @@ export function DeliveryDriverBalancePanel({
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-muted-foreground">Settlement</span>
-            <DeliveryDriverSettlementBadge settled />
+            <DeliveryDriverSettlementBadge
+              status={delivery.driverSettlementStatus}
+            />
           </div>
+          {delivery.driverSettlementDueAmount != null &&
+          delivery.driverSettlementDueAmount > 0 ? (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Due on driver balance</span>
+              <span className="font-semibold tabular-nums text-orange-700">
+                {fmtMoneyMur(delivery.driverSettlementDueAmount)}
+              </span>
+            </div>
+          ) : null}
         </div>
         <DriverBalanceTotalsSummary
           settlementCashTotal={selectedSettlementCashTotal}
@@ -1571,11 +1629,12 @@ export function DeliveryDriverBalancePanel({
             showCommissionLine={showCommissionLine}
           />
           <p className="text-xs text-muted-foreground">
-            Split between cash and bank transfer; both can be used. The two amounts must
-            add up to the Return to Owner Amount (when it is greater than zero).
+            Split between cash, bank transfer, and due. Cash plus bank plus due must
+            add up to the Return to Owner Amount. Any shortfall is recorded on driver
+            balance and linked to this delivery note.
           </p>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="settlement-cash-amt">Cash (MUR)</Label>
               <Input
@@ -1606,6 +1665,26 @@ export function DeliveryDriverBalancePanel({
                 placeholder="0"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="settlement-due-amt">Due (MUR)</Label>
+              <Input
+                id="settlement-due-amt"
+                type="text"
+                readOnly
+                tabIndex={-1}
+                className="tabular-nums bg-muted/50"
+                value={
+                  dueRounded <= 0
+                    ? "0"
+                    : Number.isFinite(settlementDueAmount)
+                      ? String(settlementDueAmount)
+                      : "—"
+                }
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Auto-calculated shortfall recorded on driver balance.
+              </p>
+            </div>
           </div>
 
           {settlementBankParsed > 0 ? (
@@ -1625,16 +1704,26 @@ export function DeliveryDriverBalancePanel({
           {dueRounded > 0 ? (
             <div
               className={`rounded-md border px-3 py-2 text-sm ${
-                Number.isFinite(settlementSplitSum) && settlementSplitSum === dueRounded
+                settlementPaymentReady
                   ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
-                  : "border-border bg-muted/40"
+                  : Number.isFinite(settlementDueAmount) && settlementDueAmount < 0
+                    ? "border-destructive/40 bg-destructive/5 text-destructive"
+                    : "border-border bg-muted/40"
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground">Total allocated</span>
+                <span className="text-muted-foreground">Cash + bank</span>
                 <span className="font-medium tabular-nums">
                   {Number.isFinite(settlementSplitSum)
                     ? fmtMoneyMur(settlementSplitSum)
+                    : "—"}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-muted-foreground">Due (driver balance)</span>
+                <span className="font-medium tabular-nums">
+                  {Number.isFinite(settlementDueAmount)
+                    ? fmtMoneyMur(settlementDueAmount)
                     : "—"}
                 </span>
               </div>
@@ -1642,11 +1731,16 @@ export function DeliveryDriverBalancePanel({
                 <span className="text-muted-foreground">Must equal</span>
                 <span className="font-medium tabular-nums">{fmtMoneyMur(dueRounded)}</span>
               </div>
+              {Number.isFinite(settlementDueAmount) && settlementDueAmount < 0 ? (
+                <p className="mt-2 text-xs text-destructive">
+                  Cash and bank exceed the Return to Owner Amount.
+                </p>
+              ) : null}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-2">
-              Net to owner is zero or negative — leave cash and bank at zero and complete
-              settlement.
+              Net to owner is zero or negative — leave cash, bank, and due at zero and
+              complete settlement.
             </p>
           )}
 
@@ -1745,7 +1839,19 @@ export function DeliveryDriverBalancePanel({
               : settlementCashParsed > 0
                 ? ""
                 : " and no bank transfer"}
-            . The delivery note will be marked completed and driver settlement saved.
+            {settlementDueAmount > 0
+              ? ` and due ${fmtMoneyMur(settlementDueAmount)} on driver balance`
+              : ""}
+            .
+            {settlementDueAmount > 0 ? (
+              <>
+                {" "}
+                The due amount will be recorded on driver balance and this delivery
+                note will stay open until it is cleared.
+              </>
+            ) : (
+              <> The delivery note will be marked completed and driver settlement saved.</>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

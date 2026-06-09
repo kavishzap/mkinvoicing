@@ -177,11 +177,16 @@ export async function generateDriverBalanceSheetPdf(
         "Paid to owner by bank transfer",
         fmtMoneyCurrency(settlement.bankTransferAmount, ccy),
       ],
+      ["Due (driver balance)", fmtMoneyCurrency(settlement.dueAmount, ccy)],
       ["Bank reference", settlement.bankReference?.trim() || "—"],
       [
-        "Cash + bank (paid to owner)",
+        "Cash + bank + due (return to owner)",
         fmtMoneyCurrency(
-          roundMoney2(settlement.cashAmount + settlement.bankTransferAmount),
+          roundMoney2(
+            settlement.cashAmount +
+              settlement.bankTransferAmount +
+              settlement.dueAmount
+          ),
           ccy
         ),
       ],

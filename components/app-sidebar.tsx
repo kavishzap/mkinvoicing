@@ -212,7 +212,12 @@ export function AppSidebar({ className, onNavigate }: SidebarProps) {
                         : item.href === "/app/delivery-notes"
                           ? pathname === "/app/delivery-notes" ||
                             (pathname?.startsWith("/app/delivery-notes/") &&
-                              !pathname?.startsWith("/app/delivery-notes/zone-cities"))
+                              !pathname?.startsWith(
+                                "/app/delivery-notes/zone-cities",
+                              ) &&
+                              !pathname?.startsWith(
+                                "/app/delivery-notes/driver-credit",
+                              ))
                         : pathname === item.href ||
                           pathname?.startsWith(item.href + "/");
 

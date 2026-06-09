@@ -54,6 +54,7 @@ import { DeliveryDriverSettlementBadge } from "@/components/delivery-driver-bala
 import {
   DELIVERY_NOTE_STATUSES,
   DELIVERY_NOTE_STATUS_LABELS,
+  driverSettlementStatusRank,
   getDelivery,
   listDeliveries,
   type DeliveryListRow,
@@ -574,49 +575,6 @@ export default function DeliveryNotesPage() {
   const columns = useMemo<ColumnDef<DeliveryListRow>[]>(
     () => [
       {
-        id: "createdAt",
-        accessorFn: (r) => r.createdAt,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Created" />
-        ),
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap text-muted-foreground">
-            {fmtWhen(row.original.createdAt)}
-          </span>
-        ),
-      },
-      {
-        id: "createdBy",
-        accessorFn: (r) => r.createdByDisplay,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Created by" />
-        ),
-        cell: ({ row }) => row.original.createdByDisplay || "—",
-        meta: { tdClassName: "text-muted-foreground" },
-      },
-      {
-        id: "deliveryDate",
-        accessorFn: (r) => r.deliveryDate ?? "",
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Delivery date" />
-        ),
-        cell: ({ row }) => (
-          <span className="whitespace-nowrap tabular-nums text-muted-foreground">
-            {fmtScheduleDay(row.original.deliveryDate)}
-          </span>
-        ),
-      },
-      {
-        id: "status",
-        accessorFn: (r) => r.status,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Status" />
-        ),
-        cell: ({ row }) => (
-          <DeliveryNoteStatusBadge status={row.original.status} />
-        ),
-      },
-      {
         id: "driver",
         accessorFn: (r) => r.driverDisplay,
         header: ({ column }) => (
@@ -638,6 +596,16 @@ export default function DeliveryNotesPage() {
           return <span className="font-medium">{r.driverDisplay}</span>;
         },
         meta: { stopRowClick: true },
+      },
+      {
+        id: "status",
+        accessorFn: (r) => r.status,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Status" />
+        ),
+        cell: ({ row }) => (
+          <DeliveryNoteStatusBadge status={row.original.status} />
+        ),
       },
       {
         id: "orderCount",
@@ -670,13 +638,67 @@ export default function DeliveryNotesPage() {
         meta: { tdClassName: "text-right" },
       },
       {
+        id: "moneyDue",
+        accessorFn: (r) => r.driverDueAmount ?? -1,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Money due" />
+        ),
+        cell: ({ row }) => {
+          const due = row.original.driverDueAmount;
+          if (due == null || due <= 0) {
+            return <span className="text-muted-foreground">—</span>;
+          }
+          return (
+            <span className="tabular-nums font-medium text-red-700">
+              {fmtMoney(due)}
+            </span>
+          );
+        },
+        meta: { tdClassName: "text-right" },
+      },
+      {
         id: "settlement",
-        accessorFn: (r) => (r.driverStatus ? 1 : 0),
+        accessorFn: (r) => driverSettlementStatusRank(r.driverSettlementStatus),
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title="Settlement" />
         ),
         cell: ({ row }) => (
-          <DeliveryDriverSettlementBadge settled={row.original.driverStatus} />
+          <DeliveryDriverSettlementBadge
+            status={row.original.driverSettlementStatus}
+          />
+        ),
+      },
+      {
+        id: "createdAt",
+        accessorFn: (r) => r.createdAt,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Created" />
+        ),
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-muted-foreground">
+            {fmtWhen(row.original.createdAt)}
+          </span>
+        ),
+      },
+      {
+        id: "createdBy",
+        accessorFn: (r) => r.createdByDisplay,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Created by" />
+        ),
+        cell: ({ row }) => row.original.createdByDisplay || "—",
+        meta: { tdClassName: "text-muted-foreground" },
+      },
+      {
+        id: "deliveryDate",
+        accessorFn: (r) => r.deliveryDate ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Delivery date" />
+        ),
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap tabular-nums text-muted-foreground">
+            {fmtScheduleDay(row.original.deliveryDate)}
+          </span>
         ),
       },
     ],

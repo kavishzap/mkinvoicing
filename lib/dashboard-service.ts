@@ -12,6 +12,12 @@ export type DashboardStats = {
   driverSettlementCount: number;
   driverSettlementsCashTotal: number;
   driverSettlementsBankTotal: number;
+  /** Sum still owed on delivery notes (due_amount on settlement rows). */
+  driverSettlementsDueOpenTotal: number;
+  /** Manual payments recorded on Driver Balance (clears due). */
+  driverSettlementsDuePaidTotal: number;
+  /** Delivery notes with outstanding driver settlement due. */
+  driverSettlementsOpenDueCount: number;
   currency: string;
 };
 
@@ -75,34 +81,50 @@ async function fetchDashboardData(
   companyId: string,
   year: number,
 ): Promise<DashboardData> {
-  const [invRes, expRes, custRes, piRes, drvSetRes] = await Promise.all([
-    supabase
-      .from("invoices")
-      .select("status, issue_date, due_date, currency, total")
-      .or(`company_id.eq.${companyId},company_id.is.null`),
-    supabase
-      .from("expenses")
-      .select("amount, currency, expense_date")
-      .eq("company_id", companyId),
-    supabase
-      .from("customers")
-      .select("id", { count: "exact", head: true })
-      .eq("company_id", companyId),
-    supabase
-      .from("purchase_invoices")
-      .select("status, total, currency")
-      .eq("company_id", companyId),
-    supabase
-      .from("delivery_driver_settlements")
-      .select("cash_amount, bank_transfer_amount")
-      .eq("company_id", companyId),
-  ]);
+  const [invRes, expRes, custRes, piRes, drvSetRes, drvCreditSetRes] =
+    await Promise.all([
+      supabase
+        .from("invoices")
+        .select("status, issue_date, due_date, currency, total")
+        .or(`company_id.eq.${companyId},company_id.is.null`),
+      supabase
+        .from("expenses")
+        .select("amount, currency, expense_date")
+        .eq("company_id", companyId),
+      supabase
+        .from("customers")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId),
+      supabase
+        .from("purchase_invoices")
+        .select("status, total, currency")
+        .eq("company_id", companyId),
+      supabase
+        .from("delivery_driver_settlements")
+        .select("cash_amount, bank_transfer_amount, due_amount")
+        .eq("company_id", companyId),
+      supabase
+        .from("driver_credit_settlements")
+        .select("amount, delivery_id")
+        .eq("company_id", companyId),
+    ]);
 
   if (invRes.error) throw invRes.error;
   if (expRes.error) throw expRes.error;
   if (custRes.error) throw custRes.error;
   if (piRes.error) throw piRes.error;
   if (drvSetRes.error) throw drvSetRes.error;
+  // Driver balance tables may not exist on older DBs — treat as empty.
+  const driverCreditSettlements =
+    drvCreditSetRes.error &&
+    (drvCreditSetRes.error.code === "42P01" ||
+      drvCreditSetRes.error.message.includes("does not exist"))
+      ? []
+      : drvCreditSetRes.error
+        ? (() => {
+            throw drvCreditSetRes.error;
+          })()
+        : (drvCreditSetRes.data ?? []);
 
   const invoices = (invRes.data ?? []) as RawInvoice[];
   const expenses = (expRes.data ?? []) as RawExpense[];
@@ -157,14 +179,39 @@ async function fetchDashboardData(
   let driverSettlementCount = 0;
   let driverSettlementsCashTotal = 0;
   let driverSettlementsBankTotal = 0;
+  let driverSettlementsDueOpenTotal = 0;
+  let driverSettlementsOpenDueCount = 0;
   for (const row of drvSetRes.data ?? []) {
     driverSettlementCount += 1;
-    driverSettlementsCashTotal += Number(
+    const cash = Number(
       (row as { cash_amount?: number | string | null }).cash_amount ?? 0,
     );
-    driverSettlementsBankTotal += Number(
-      (row as { bank_transfer_amount?: number | string | null }).bank_transfer_amount ?? 0,
+    const bank = Number(
+      (row as { bank_transfer_amount?: number | string | null })
+        .bank_transfer_amount ?? 0,
     );
+    const due = Number(
+      (row as { due_amount?: number | string | null }).due_amount ?? 0,
+    );
+    driverSettlementsCashTotal += cash;
+    driverSettlementsBankTotal += bank;
+    if (due > 0) {
+      driverSettlementsDueOpenTotal += due;
+      driverSettlementsOpenDueCount += 1;
+    }
+  }
+
+  let driverSettlementsDuePaidTotal = 0;
+  for (const row of driverCreditSettlements) {
+    const rec = row as {
+      amount?: number | string | null;
+      delivery_id?: string | null;
+    };
+    if (rec.delivery_id != null && String(rec.delivery_id).trim()) continue;
+    const amount = Number(rec.amount ?? 0);
+    if (Number.isFinite(amount) && amount > 0) {
+      driverSettlementsDuePaidTotal += amount;
+    }
   }
 
   const incomeByMonth: IncomeByMonth[] = [];
@@ -189,6 +236,9 @@ async function fetchDashboardData(
       driverSettlementCount,
       driverSettlementsCashTotal,
       driverSettlementsBankTotal,
+      driverSettlementsDueOpenTotal,
+      driverSettlementsDuePaidTotal,
+      driverSettlementsOpenDueCount,
       currency,
     },
     incomeByMonth,
