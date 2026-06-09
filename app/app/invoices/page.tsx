@@ -67,6 +67,7 @@ import {
   type InvoiceStatus,
 } from "@/lib/invoices-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { InvoicePivotButton } from "@/components/invoice-pivot-dialog";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
   ACTIVE_COMPANY_ID_STORAGE_KEY,
@@ -759,6 +760,7 @@ export default function InvoicesPage() {
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
         <div className="flex shrink-0 items-center gap-2">
+          <InvoicePivotButton />
           <Button
             type="button"
             variant="outline"

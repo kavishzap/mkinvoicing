@@ -9,6 +9,7 @@ import {
   BarChart3,
   FileStack,
   Landmark,
+  Package,
   Receipt,
   TrendingUp,
   Users,
@@ -29,6 +30,7 @@ import {
 import {
   getDashboardData,
   invalidateDashboardCache,
+  peekDashboardCache,
   type DashboardData,
 } from "@/lib/dashboard-service";
 import { FEATURE_CODES } from "@/lib/app-nav";
@@ -66,11 +68,16 @@ export default function DashboardPage() {
   toastRef.current = toast;
 
   const { has, status: featureStatus } = useAppFeatures();
-  const [loadState, setLoadState] = useState<LoadState>({ phase: "loading" });
+  const [loadState, setLoadState] = useState<LoadState>(() => {
+    const cached = peekDashboardCache();
+    return cached ? { phase: "ready", data: cached } : { phase: "loading" };
+  });
   const [reloadToken, setReloadToken] = useState(0);
 
-  const load = useCallback(async (signal: AbortSignal) => {
-    setLoadState({ phase: "loading" });
+  const load = useCallback(async (signal: AbortSignal, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoadState((prev) => (prev.phase === "ready" ? prev : { phase: "loading" }));
+    }
     try {
       const data = await getDashboardData();
       if (signal.aborted) return;
@@ -78,7 +85,7 @@ export default function DashboardPage() {
     } catch (e: unknown) {
       if (signal.aborted) return;
       const message = e instanceof Error ? e.message : "Please try again.";
-      setLoadState({ phase: "error" });
+      setLoadState((prev) => (prev.phase === "ready" ? prev : { phase: "error" }));
       toastRef.current({
         title: "Failed to load dashboard",
         description: message,
@@ -89,7 +96,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const ac = new AbortController();
-    void load(ac.signal);
+    const cached = peekDashboardCache();
+    void load(ac.signal, { silent: cached != null });
     return () => ac.abort();
   }, [load, reloadToken]);
 
@@ -192,7 +200,7 @@ export default function DashboardPage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <DashboardStatCard
             title="Profitable Income"
             icon={TrendingUp}
@@ -216,13 +224,46 @@ export default function DashboardPage() {
             hint="Active & inactive"
           />
           <DashboardStatCard
-            title="Sales Invoices"
-            icon={FileStack}
-            value={
-              <div className="text-xl font-bold">{stats.salesInvoiceCount}</div>
-            }
-            hint="Non-cancelled invoices"
+            title="Products"
+            icon={Package}
+            value={<div className="text-xl font-bold">{stats.productCount}</div>}
+            hint="Active & inactive"
           />
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Sales Invoices
+              </CardTitle>
+              <FileStack className="h-4 w-4 text-muted-foreground" aria-hidden />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="text-xl font-bold tabular-nums">
+                {stats.salesInvoiceCount}
+              </div>
+              {stats.salesInvoicesByYear.length > 0 ? (
+                <div className="grid gap-1 text-xs text-muted-foreground">
+                  {stats.salesInvoicesByYear.map((row) => (
+                    <div
+                      key={row.year}
+                      className="flex justify-between gap-2 tabular-nums"
+                    >
+                      <span>{row.year}</span>
+                      <span className="font-medium text-foreground">
+                        {row.count.toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No dated invoices yet
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Non-cancelled · by issue year
+              </p>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">

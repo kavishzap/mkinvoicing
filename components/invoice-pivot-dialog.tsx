@@ -19,89 +19,34 @@ import {
   getInvoicePivotData,
   type InvoicePivotData,
 } from "@/lib/invoice-pivot-service";
-
-type PivotPeriod = "today" | "week" | "month" | "year" | "custom";
-
-const PERIOD_OPTIONS = [
-  { value: "today" as const, label: "Today" },
-  { value: "week" as const, label: "This week" },
-  { value: "month" as const, label: "This month" },
-  { value: "year" as const, label: "This year" },
-  { value: "custom" as const, label: "Custom" },
-];
-
-function toLocalDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function getPivotDateRange(
-  period: PivotPeriod,
-  customStart?: string,
-  customEnd?: string,
-): { start: string; end: string } {
-  const today = new Date();
-  const end = toLocalDateStr(today);
-
-  if (period === "today") {
-    return { start: end, end };
-  }
-  if (period === "week") {
-    const startDate = new Date(today);
-    const weekday = startDate.getDay();
-    const daysFromMonday = weekday === 0 ? 6 : weekday - 1;
-    startDate.setDate(startDate.getDate() - daysFromMonday);
-    return { start: toLocalDateStr(startDate), end };
-  }
-  if (period === "month") {
-    const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { start: toLocalDateStr(startDate), end };
-  }
-  if (period === "year") {
-    const startDate = new Date(today.getFullYear(), 0, 1);
-    return { start: toLocalDateStr(startDate), end };
-  }
-  return {
-    start: customStart || end,
-    end: customEnd || end,
-  };
-}
-
-function formatPeriodLabel(start: string, end: string) {
-  if (start === end) {
-    return new Date(`${start}T12:00:00`).toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  }
-  const fmt = (d: string) =>
-    new Date(`${d}T12:00:00`).toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  return `${fmt(start)} – ${fmt(end)}`;
-}
+import {
+  defaultPivotCustomEnd,
+  defaultPivotCustomStart,
+  formatPivotPeriodLabel,
+  getPivotDateRange,
+  isPivotCustomRangeInvalid,
+  PIVOT_PERIOD_OPTIONS,
+  type PivotPeriod,
+} from "@/lib/pivot-date-range";
 
 function formatQty(n: number) {
   return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
-function formatAmount(n: number) {
-  return n.toLocaleString("en-US", {
+function formatAmount(n: number, currency: string) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  });
+  }).format(n);
 }
 
 function PivotTable({ data }: { data: InvoicePivotData }) {
   return (
-    <div className="overflow-hidden rounded-md border border-border">
+    <div className="max-h-[min(70vh,560px)] overflow-auto rounded-md border border-border">
       <table className="w-full border-collapse text-sm">
-        <thead>
+        <thead className="sticky top-0 z-10">
           <tr className="bg-slate-600 text-white dark:bg-slate-700">
             <th className="px-4 py-2.5 text-left font-semibold italic">
               Product
@@ -136,7 +81,7 @@ function PivotTable({ data }: { data: InvoicePivotData }) {
                   {formatQty(row.totalQty)}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">
-                  {formatAmount(row.totalAmount)}
+                  {formatAmount(row.totalAmount, data.currency)}
                 </td>
               </tr>
             ))
@@ -150,7 +95,7 @@ function PivotTable({ data }: { data: InvoicePivotData }) {
                 {formatQty(data.grandTotalQty)}
               </td>
               <td className="px-4 py-2.5 text-right tabular-nums">
-                {formatAmount(data.grandTotalAmount)}
+                {formatAmount(data.grandTotalAmount, data.currency)}
               </td>
             </tr>
           </tfoot>
@@ -169,12 +114,8 @@ export function InvoicePivotDialog({
 }) {
   const { toast } = useToast();
   const [period, setPeriod] = useState<PivotPeriod>("today");
-  const [customStart, setCustomStart] = useState(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return toLocalDateStr(d);
-  });
-  const [customEnd, setCustomEnd] = useState(() => toLocalDateStr(new Date()));
+  const [customStart, setCustomStart] = useState(defaultPivotCustomStart);
+  const [customEnd, setCustomEnd] = useState(defaultPivotCustomEnd);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<InvoicePivotData | null>(null);
 
@@ -184,7 +125,10 @@ export function InvoicePivotDialog({
   );
 
   const customRangeInvalid =
-    period === "custom" && customStart.trim() > customEnd.trim();
+    period === "custom" && isPivotCustomRangeInvalid(customStart, customEnd);
+
+  const dataMatchesSelection =
+    data != null && data.startDate === start && data.endDate === end;
 
   const load = useCallback(async () => {
     if (customRangeInvalid) {
@@ -192,6 +136,7 @@ export function InvoicePivotDialog({
       return;
     }
     setLoading(true);
+    setData(null);
     try {
       const result = await getInvoicePivotData({
         startDate: start,
@@ -219,29 +164,32 @@ export function InvoicePivotDialog({
   useEffect(() => {
     if (!open) {
       setPeriod("today");
-      const d = new Date();
-      d.setMonth(d.getMonth() - 1);
-      setCustomStart(toLocalDateStr(d));
-      setCustomEnd(toLocalDateStr(new Date()));
+      setCustomStart(defaultPivotCustomStart());
+      setCustomEnd(defaultPivotCustomEnd());
+      setData(null);
     }
   }, [open]);
 
+  const descriptionSuffix = loading
+    ? "Loading…"
+    : dataMatchesSelection
+      ? `${data.invoiceCount.toLocaleString()} invoice${data.invoiceCount === 1 ? "" : "s"} · ${data.currency} (qty × unit price)`
+      : "Select a period to load product totals.";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-4">
+      <DialogContent className="max-w-3xl gap-4">
         <DialogHeader>
           <DialogTitle>Invoice Pivot Table</DialogTitle>
           <DialogDescription>
-            {data
-              ? `${formatPeriodLabel(data.startDate, data.endDate)} · ${data.invoiceCount.toLocaleString()} invoice${data.invoiceCount === 1 ? "" : "s"} · ${data.currency} (qty × unit price)`
-              : "Product totals from invoices by issue date."}
+            {`${formatPivotPeriodLabel(start, end)} · ${descriptionSuffix}`}
           </DialogDescription>
         </DialogHeader>
 
         <ReportPeriodTabs
           value={period}
           onChange={setPeriod}
-          options={PERIOD_OPTIONS}
+          options={PIVOT_PERIOD_OPTIONS}
         />
 
         {period === "custom" ? (
@@ -252,6 +200,7 @@ export function InvoicePivotDialog({
                 id="invoice-pivot-custom-start"
                 type="date"
                 value={customStart}
+                max={customEnd || undefined}
                 onChange={(e) => setCustomStart(e.target.value)}
               />
             </div>
@@ -261,6 +210,7 @@ export function InvoicePivotDialog({
                 id="invoice-pivot-custom-end"
                 type="date"
                 value={customEnd}
+                min={customStart || undefined}
                 onChange={(e) => setCustomEnd(e.target.value)}
               />
             </div>
@@ -277,7 +227,7 @@ export function InvoicePivotDialog({
           <div className="flex min-h-[200px] items-center justify-center">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : data ? (
+        ) : dataMatchesSelection && data ? (
           <PivotTable data={data} />
         ) : null}
       </DialogContent>
