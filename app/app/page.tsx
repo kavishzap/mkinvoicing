@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppPageShell } from "@/components/app-page-shell";
 import { DashboardPageSkeleton } from "@/components/page-skeletons";
 import { DashboardStatCard } from "@/components/dashboard-stat-card";
+import { InvoicePivotButton } from "@/components/invoice-pivot-dialog";
 import { SalesOrderPivotButton } from "@/components/sales-order-pivot-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAppFeatures } from "@/contexts/app-features-context";
@@ -112,10 +113,13 @@ export default function DashboardPage() {
     featureStatus === "ready" && has(FEATURE_CODES.reporting);
   const showSalesOrderPivot =
     featureStatus === "ready" && has(FEATURE_CODES.salesOrders);
+  const showInvoicePivot =
+    featureStatus === "ready" && has(FEATURE_CODES.invoices);
 
   const shortcutActions =
-    showSalesReportShortcut || showSalesOrderPivot ? (
+    showSalesReportShortcut || showSalesOrderPivot || showInvoicePivot ? (
       <div className="flex flex-wrap items-center justify-end gap-2">
+        {showInvoicePivot ? <InvoicePivotButton /> : null}
         {showSalesOrderPivot ? <SalesOrderPivotButton /> : null}
         {showSalesReportShortcut ? (
           <Button variant="outline" size="sm" className="gap-2 shrink-0" asChild>
