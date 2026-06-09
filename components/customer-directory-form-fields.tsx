@@ -2,7 +2,7 @@
 
 import type { Dispatch, SetStateAction } from "react";
 import { useMemo } from "react";
-import { Building2, User } from "lucide-react";
+import { Building2, ExternalLink, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -276,9 +276,10 @@ export function CustomerDirectoryFormFields({
                 href={mapHref}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                aria-label="Open map in new tab"
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-primary transition-colors hover:bg-primary/10 hover:text-primary"
               >
-                Open
+                <ExternalLink className="h-4 w-4" aria-hidden />
               </a>
             ) : null}
           </div>

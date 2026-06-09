@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -212,6 +213,34 @@ function fmtScheduleDay(yyyyMmDd: string | null) {
   }
 }
 
+function toLocalDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function shortDeliveryId(id: string) {
+  return id.slice(0, 8).toUpperCase();
+}
+
+function newDeliveryIdsForDate(
+  rows: DeliveryListRow[],
+  day: string,
+): Set<string> {
+  const trimmed = day.trim();
+  if (!trimmed) return new Set();
+  return new Set(
+    rows
+      .filter(
+        (r) =>
+          r.status === "new" &&
+          (r.deliveryDate ?? "").slice(0, 10) === trimmed,
+      )
+      .map((r) => r.id),
+  );
+}
+
 function deliverySearchText(r: DeliveryListRow): string {
   return [
     r.id,
@@ -255,10 +284,25 @@ export default function DeliveryNotesPage() {
     activeCompanyScope: 0,
   });
   const [isStoreKeeperModalOpen, setIsStoreKeeperModalOpen] = useState(false);
+  const [storeKeeperDateFilter, setStoreKeeperDateFilter] = useState(() =>
+    toLocalDateStr(new Date()),
+  );
   const [selectedDeliveryIds, setSelectedDeliveryIds] = useState<Set<string>>(
     new Set()
   );
   const [generatingStoreKeeperList, setGeneratingStoreKeeperList] = useState(false);
+
+  function applyDefaultStoreKeeperSelection(day: string) {
+    setSelectedDeliveryIds(newDeliveryIdsForDate(rows, day));
+  }
+
+  useEffect(() => {
+    if (!isStoreKeeperModalOpen || !listLoaded) return;
+    setSelectedDeliveryIds((prev) => {
+      if (prev.size > 0) return prev;
+      return newDeliveryIdsForDate(rows, storeKeeperDateFilter);
+    });
+  }, [isStoreKeeperModalOpen, listLoaded, rows, storeKeeperDateFilter]);
 
   useEffect(() => {
     const t = window.setTimeout(
@@ -390,10 +434,38 @@ export default function DeliveryNotesPage() {
 
   const showDirectory = companyReady === true && listLoaded;
 
-  const storeKeeperModalRows = useMemo(
-    () => rows.filter((r) => r.status === "new"),
-    [rows],
-  );
+  const storeKeeperModalRows = useMemo(() => {
+    const day = storeKeeperDateFilter.trim();
+    if (!day) return [];
+    return rows.filter((r) => (r.deliveryDate ?? "").slice(0, 10) === day);
+  }, [rows, storeKeeperDateFilter]);
+
+  const allStoreKeeperSelected =
+    storeKeeperModalRows.length > 0 &&
+    storeKeeperModalRows.every((r) => selectedDeliveryIds.has(r.id));
+
+  const someStoreKeeperSelected =
+    !allStoreKeeperSelected &&
+    storeKeeperModalRows.some((r) => selectedDeliveryIds.has(r.id));
+
+  function setStoreKeeperDate(day: string) {
+    setStoreKeeperDateFilter(day);
+    applyDefaultStoreKeeperSelection(day);
+  }
+
+  function shiftStoreKeeperDate(days: number) {
+    const d = new Date(`${storeKeeperDateFilter}T12:00:00`);
+    d.setDate(d.getDate() + days);
+    setStoreKeeperDate(toLocalDateStr(d));
+  }
+
+  function toggleSelectAllStoreKeeper(checked: boolean) {
+    if (checked) {
+      setSelectedDeliveryIds(new Set(storeKeeperModalRows.map((r) => r.id)));
+    } else {
+      setSelectedDeliveryIds(new Set());
+    }
+  }
 
   function toggleDeliverySelection(id: string, checked: boolean) {
     setSelectedDeliveryIds((prev) => {
@@ -429,20 +501,42 @@ export default function DeliveryNotesPage() {
         return;
       }
 
-      const productQtyMap = new Map<string, number>();
+      const productDriverQtyMap = new Map<
+        string,
+        { product: string; driver: string; qty: number }
+      >();
       for (const delivery of validDetails) {
+        const driver = delivery.driverDisplay?.trim() || "—";
         for (const so of delivery.salesOrders) {
           for (const item of so.items ?? []) {
             const product = String(item.item ?? "").trim() || "Unnamed product";
             const qty = Number(item.quantity ?? 0);
-            productQtyMap.set(product, (productQtyMap.get(product) ?? 0) + qty);
+            const key = `${product}\0${driver}`;
+            const existing = productDriverQtyMap.get(key);
+            if (existing) {
+              existing.qty += qty;
+            } else {
+              productDriverQtyMap.set(key, { product, driver, qty });
+            }
           }
         }
       }
 
-      const rowsForPdf = [...productQtyMap.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([product, qty], idx) => [String(idx + 1), product, String(qty), ""]);
+      const rowsForPdf = [...productDriverQtyMap.values()]
+        .sort(
+          (a, b) =>
+            a.driver.localeCompare(b.driver) ||
+            a.product.localeCompare(b.product),
+        )
+        .map(({ product, driver, qty }, idx) => [
+          String(idx + 1),
+          product,
+          String(qty),
+          driver,
+          "",
+        ]);
+
+      const filterLabel = fmtScheduleDay(storeKeeperDateFilter);
 
       const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
       const pageW = doc.internal.pageSize.getWidth();
@@ -455,7 +549,7 @@ export default function DeliveryNotesPage() {
         pageW,
         leftSubtitle: "Store operations export",
         rightTitle: "STORE KEEPER LIST",
-        rightSubtitle: `Ref count: ${selectedIds.length}`,
+        rightSubtitle: `Delivery date: ${filterLabel} · ${selectedIds.length} note${selectedIds.length === 1 ? "" : "s"}`,
       });
 
       let y = 88;
@@ -463,13 +557,18 @@ export default function DeliveryNotesPage() {
       doc.setFont("helvetica", "normal").setFontSize(10);
       y += 16;
       doc.text(`Generated: ${generatedAt}`, margin, y);
+      y += 14;
+      doc.text(`Delivery date: ${filterLabel}`, margin, y);
       y += 20;
 
       autoTable(doc, {
         startY: y,
         margin: { left: margin, right: margin },
-        head: [["No", "Product", "Qty", "Remark"]],
-        body: rowsForPdf.length > 0 ? rowsForPdf : [["1", "No items", "0", ""]],
+        head: [["No", "Product", "Qty", "Driver", "Remark"]],
+        body:
+          rowsForPdf.length > 0
+            ? rowsForPdf
+            : [["1", "No items", "0", "—", ""]],
         styles: {
           font: "helvetica",
           fontSize: 10,
@@ -484,10 +583,11 @@ export default function DeliveryNotesPage() {
           fontStyle: "bold",
         },
         columnStyles: {
-          0: { halign: "center", cellWidth: 40 },
+          0: { halign: "center", cellWidth: 36 },
           1: { cellWidth: "auto" },
-          2: { halign: "right", cellWidth: 70 },
-          3: { cellWidth: 140 },
+          2: { halign: "right", cellWidth: 56 },
+          3: { cellWidth: 120 },
+          4: { cellWidth: 100 },
         },
       });
 
@@ -535,7 +635,7 @@ export default function DeliveryNotesPage() {
       });
       doc.setTextColor(0);
 
-      const filename = `StoreKeeperList-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const filename = `StoreKeeperList-${storeKeeperDateFilter}.pdf`;
       if (mode === "print") {
         const pdfBlob = doc.output("blob");
         const pdfUrl = URL.createObjectURL(pdfBlob);
@@ -898,68 +998,164 @@ export default function DeliveryNotesPage() {
         open={isStoreKeeperModalOpen}
         onOpenChange={(open) => {
           setIsStoreKeeperModalOpen(open);
-          if (!open) setSelectedDeliveryIds(new Set());
+          if (open) {
+            applyDefaultStoreKeeperSelection(storeKeeperDateFilter);
+          } else {
+            setSelectedDeliveryIds(new Set());
+          }
         }}
       >
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-4xl sm:max-w-[52rem]">
           <DialogHeader>
             <DialogTitle>Prepare store keeper list</DialogTitle>
             <DialogDescription>
-              Only delivery notes in <span className="font-medium text-foreground">New</span>{" "}
-              status are listed. Select one or more to generate a Product + Qty PDF.
+              Choose a delivery date, select delivery notes, then print or
+              download the product list grouped by driver.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[420px] overflow-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10" />
-                  <TableHead>Created</TableHead>
-                  <TableHead>Created by</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Driver</TableHead>
-                  <TableHead className="text-right">Orders</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {storeKeeperModalRows.length === 0 ? (
+          <div className="space-y-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border/60 bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-2">
+                <Label htmlFor="store-keeper-date">Delivery date</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    id="store-keeper-date"
+                    type="date"
+                    value={storeKeeperDateFilter}
+                    onChange={(e) => setStoreKeeperDate(e.target.value)}
+                    className="w-[168px] bg-background"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setStoreKeeperDate(toLocalDateStr(new Date()))}
+                  >
+                    Today
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="px-2"
+                    onClick={() => shiftStoreKeeperDate(-1)}
+                    aria-label="Previous day"
+                  >
+                    ←
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="px-2"
+                    onClick={() => shiftStoreKeeperDate(1)}
+                    aria-label="Next day"
+                  >
+                    →
+                  </Button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {selectedDeliveryIds.size} of {storeKeeperModalRows.length}{" "}
+                  selected
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={storeKeeperModalRows.length === 0}
+                  onClick={() => toggleSelectAllStoreKeeper(true)}
+                >
+                  Select all
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={selectedDeliveryIds.size === 0}
+                  onClick={() => toggleSelectAllStoreKeeper(false)}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+            <div className="max-h-[440px] overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      {rows.length === 0
-                        ? "No delivery notes available."
-                        : "No delivery notes in New status. Advance or complete other notes before they appear here."}
-                    </TableCell>
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={
+                          allStoreKeeperSelected
+                            ? true
+                            : someStoreKeeperSelected
+                              ? "indeterminate"
+                              : false
+                        }
+                        onCheckedChange={(c) =>
+                          toggleSelectAllStoreKeeper(c === true)
+                        }
+                        aria-label="Select all delivery notes for this date"
+                        disabled={storeKeeperModalRows.length === 0}
+                      />
+                    </TableHead>
+                    <TableHead>Delivery note</TableHead>
+                    <TableHead>Delivery date</TableHead>
+                    <TableHead>Driver</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Orders</TableHead>
                   </TableRow>
-                ) : (
-                  storeKeeperModalRows.map((r) => (
-                    <TableRow key={`store-keeper-${r.id}`}>
-                      <TableCell>
-                        <Checkbox
-                          checked={selectedDeliveryIds.has(r.id)}
-                          onCheckedChange={(c) =>
-                            toggleDeliverySelection(r.id, c === true)
-                          }
-                          aria-label={`Select delivery ${r.id}`}
-                        />
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {fmtWhen(r.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {r.createdByDisplay || "—"}
-                      </TableCell>
-                      <TableCell>
-                        <DeliveryNoteStatusBadge status={r.status} />
-                      </TableCell>
-                      <TableCell className="font-medium">{r.driverDisplay}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {r.orderCount}
+                </TableHeader>
+                <TableBody>
+                  {storeKeeperModalRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="py-8 text-center text-muted-foreground"
+                      >
+                        {rows.length === 0
+                          ? "No delivery notes available."
+                          : `No delivery notes scheduled for ${fmtScheduleDay(storeKeeperDateFilter)}.`}
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    storeKeeperModalRows.map((r) => (
+                      <TableRow key={`store-keeper-${r.id}`}>
+                        <TableCell>
+                          <Checkbox
+                            checked={selectedDeliveryIds.has(r.id)}
+                            onCheckedChange={(c) =>
+                              toggleDeliverySelection(r.id, c === true)
+                            }
+                            aria-label={`Select delivery ${shortDeliveryId(r.id)}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          <Link
+                            href={`/app/delivery-notes/${r.id}`}
+                            className="text-primary underline-offset-4 hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {shortDeliveryId(r.id)}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
+                          {fmtScheduleDay(r.deliveryDate)}
+                        </TableCell>
+                        <TableCell className="font-medium">{r.driverDisplay}</TableCell>
+                        <TableCell>
+                          <DeliveryNoteStatusBadge status={r.status} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {r.orderCount}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -974,7 +1170,9 @@ export default function DeliveryNotesPage() {
               type="button"
               variant="outline"
               onClick={() => generateStoreKeeperList("print")}
-              disabled={generatingStoreKeeperList || storeKeeperModalRows.length === 0}
+              disabled={
+                generatingStoreKeeperList || selectedDeliveryIds.size === 0
+              }
             >
               <Printer className="mr-2 h-4 w-4" aria-hidden />
               {generatingStoreKeeperList ? "Generating..." : "Print"}
@@ -982,7 +1180,9 @@ export default function DeliveryNotesPage() {
             <Button
               type="button"
               onClick={() => generateStoreKeeperList("download")}
-              disabled={generatingStoreKeeperList || storeKeeperModalRows.length === 0}
+              disabled={
+                generatingStoreKeeperList || selectedDeliveryIds.size === 0
+              }
             >
               <Download className="mr-2 h-4 w-4" aria-hidden />
               {generatingStoreKeeperList ? "Generating..." : "Download PDF"}

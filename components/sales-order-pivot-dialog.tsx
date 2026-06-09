@@ -10,6 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ReportPeriodTabs } from "@/components/report-period-tabs";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -18,13 +20,14 @@ import {
   type SalesOrderPivotData,
 } from "@/lib/sales-order-pivot-service";
 
-type PivotPeriod = "today" | "week" | "month" | "year";
+type PivotPeriod = "today" | "week" | "month" | "year" | "custom";
 
 const PERIOD_OPTIONS = [
   { value: "today" as const, label: "Today" },
   { value: "week" as const, label: "This week" },
   { value: "month" as const, label: "This month" },
   { value: "year" as const, label: "This year" },
+  { value: "custom" as const, label: "Custom" },
 ];
 
 function toLocalDateStr(d: Date): string {
@@ -34,7 +37,11 @@ function toLocalDateStr(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function getPivotDateRange(period: PivotPeriod): { start: string; end: string } {
+function getPivotDateRange(
+  period: PivotPeriod,
+  customStart?: string,
+  customEnd?: string,
+): { start: string; end: string } {
   const today = new Date();
   const end = toLocalDateStr(today);
 
@@ -52,8 +59,14 @@ function getPivotDateRange(period: PivotPeriod): { start: string; end: string } 
     const startDate = new Date(today.getFullYear(), today.getMonth(), 1);
     return { start: toLocalDateStr(startDate), end };
   }
-  const startDate = new Date(today.getFullYear(), 0, 1);
-  return { start: toLocalDateStr(startDate), end };
+  if (period === "year") {
+    const startDate = new Date(today.getFullYear(), 0, 1);
+    return { start: toLocalDateStr(startDate), end };
+  }
+  return {
+    start: customStart || end,
+    end: customEnd || end,
+  };
 }
 
 function formatPeriodLabel(start: string, end: string) {
@@ -156,12 +169,28 @@ export function SalesOrderPivotDialog({
 }) {
   const { toast } = useToast();
   const [period, setPeriod] = useState<PivotPeriod>("today");
+  const [customStart, setCustomStart] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return toLocalDateStr(d);
+  });
+  const [customEnd, setCustomEnd] = useState(() => toLocalDateStr(new Date()));
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<SalesOrderPivotData | null>(null);
 
-  const { start, end } = useMemo(() => getPivotDateRange(period), [period]);
+  const { start, end } = useMemo(
+    () => getPivotDateRange(period, customStart, customEnd),
+    [period, customStart, customEnd],
+  );
+
+  const customRangeInvalid =
+    period === "custom" && customStart.trim() > customEnd.trim();
 
   const load = useCallback(async () => {
+    if (customRangeInvalid) {
+      setData(null);
+      return;
+    }
     setLoading(true);
     try {
       const result = await getSalesOrderPivotData({
@@ -179,7 +208,7 @@ export function SalesOrderPivotDialog({
     } finally {
       setLoading(false);
     }
-  }, [start, end, toast]);
+  }, [start, end, customRangeInvalid, toast]);
 
   useEffect(() => {
     if (open) {
@@ -190,6 +219,10 @@ export function SalesOrderPivotDialog({
   useEffect(() => {
     if (!open) {
       setPeriod("today");
+      const d = new Date();
+      d.setMonth(d.getMonth() - 1);
+      setCustomStart(toLocalDateStr(d));
+      setCustomEnd(toLocalDateStr(new Date()));
     }
   }, [open]);
 
@@ -210,6 +243,35 @@ export function SalesOrderPivotDialog({
           onChange={setPeriod}
           options={PERIOD_OPTIONS}
         />
+
+        {period === "custom" ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="pivot-custom-start">Start date</Label>
+              <Input
+                id="pivot-custom-start"
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pivot-custom-end">End date</Label>
+              <Input
+                id="pivot-custom-end"
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {customRangeInvalid ? (
+          <p className="text-sm text-destructive">
+            Start date must be on or before the end date.
+          </p>
+        ) : null}
 
         {loading ? (
           <div className="flex min-h-[200px] items-center justify-center">

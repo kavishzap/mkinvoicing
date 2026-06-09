@@ -640,6 +640,7 @@ export default function CustomersPage() {
               row.fullName,
               row.email,
               row.phone,
+              row.phone_2,
             ]
               .filter(Boolean)
               .join(" "),
@@ -676,6 +677,19 @@ export default function CustomersPage() {
           searchValue: (row: CustomerRow) => row.phone ?? "",
         },
         cell: ({ row }) => row.original.phone || "—",
+      },
+      {
+        id: "phone_2",
+        accessorFn: (r) => r.phone_2 ?? "",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Phone 2" />
+        ),
+        meta: {
+          thClassName: "hidden md:table-cell",
+          tdClassName: "hidden md:table-cell text-muted-foreground",
+          searchValue: (row: CustomerRow) => row.phone_2 ?? "",
+        },
+        cell: ({ row }) => row.original.phone_2 || "—",
       },
       {
         id: "city",
@@ -896,7 +910,7 @@ export default function CustomersPage() {
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by name, email, phone, or company…"
+                  placeholder="Search by name, email, phone, phone 2, or company…"
                   className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
                   aria-label="Search customers"
                   autoComplete="off"
