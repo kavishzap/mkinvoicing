@@ -98,6 +98,9 @@ import { cn } from "@/lib/utils";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
 import { listDeliveryCities, type DeliveryCityRow } from "@/lib/delivery-zones-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { QtyNumberInput } from "@/components/qty-input";
 
 const DEFAULT_TAX_PERCENT = 15;
 
@@ -245,7 +248,7 @@ export default function EditSalesOrderPage() {
   toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -676,8 +679,8 @@ export default function EditSalesOrderPage() {
       return;
     }
 
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       if (!preferences) throw new Error("Preferences not loaded");
       if (!profile) throw new Error("Profile not loaded");
 
@@ -739,16 +742,15 @@ export default function EditSalesOrderPage() {
         description: "Your changes were saved.",
       });
       router.push(`/app/sales-orders/${salesOrderId}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toastRef.current({
         title: "Failed to save sales order",
         description: msg,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
@@ -791,11 +793,11 @@ export default function EditSalesOrderPage() {
       actions={
         <Button
           onClick={() => setSaveConfirmOpen(true)}
-          disabled={saving}
+          disabled={isRunning}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Save changes"}
+          "Save changes"
         </Button>
       }
     >
@@ -845,57 +847,6 @@ export default function EditSalesOrderPage() {
             </div>
 
             <div className={twoColSectionGridClass}>
-              <EditSectionCard
-                icon={Store}
-                title="Seller"
-                headerRight={
-                  <Link href="/app/settings">
-                    <Button variant="link" size="sm" className="h-auto px-0">
-                      Edit in Settings
-                    </Button>
-                  </Link>
-                }
-              >
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  {logoSrc ? (
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
-                      <Image
-                        src={logoSrc}
-                        alt=""
-                        width={56}
-                        height={56}
-                        className="object-contain"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary text-lg font-bold text-primary-foreground">
-                      {(profile?.companyName || profile?.fullName || "S")
-                        .slice(0, 1)
-                        .toUpperCase()}
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <InfoRow label="Name">
-                      {profile?.accountType === "company"
-                        ? profile?.companyName || "—"
-                        : profile?.fullName || "—"}
-                    </InfoRow>
-                    {profile?.email ? (
-                      <InfoRow label="Email">{profile.email}</InfoRow>
-                    ) : null}
-                    {profile?.accountType === "company" &&
-                    profile?.registrationId ? (
-                      <InfoRow label="Registration">
-                        {profile.registrationId}
-                      </InfoRow>
-                    ) : null}
-                    {profile?.accountType === "company" && profile?.vatNumber ? (
-                      <InfoRow label="VAT">{profile.vatNumber}</InfoRow>
-                    ) : null}
-                  </div>
-                </div>
-              </EditSectionCard>
-
               <EditSectionCard
                 icon={billToIcon}
                 title="Bill to"
@@ -1115,6 +1066,58 @@ export default function EditSalesOrderPage() {
                   </InfoRow>
                 ) : null}
               </EditSectionCard>
+
+              <EditSectionCard
+                icon={Store}
+                title="Seller"
+                headerRight={
+                  <Link href="/app/settings">
+                    <Button variant="link" size="sm" className="h-auto px-0">
+                      Edit in Settings
+                    </Button>
+                  </Link>
+                }
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                  {logoSrc ? (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
+                      <Image
+                        src={logoSrc}
+                        alt=""
+                        width={56}
+                        height={56}
+                        className="object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary text-lg font-bold text-primary-foreground">
+                      {(profile?.companyName || profile?.fullName || "S")
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <InfoRow label="Name">
+                      {profile?.accountType === "company"
+                        ? profile?.companyName || "—"
+                        : profile?.fullName || "—"}
+                    </InfoRow>
+                    {profile?.email ? (
+                      <InfoRow label="Email">{profile.email}</InfoRow>
+                    ) : null}
+                    {profile?.accountType === "company" &&
+                    profile?.registrationId ? (
+                      <InfoRow label="Registration">
+                        {profile.registrationId}
+                      </InfoRow>
+                    ) : null}
+                    {profile?.accountType === "company" && profile?.vatNumber ? (
+                      <InfoRow label="VAT">{profile.vatNumber}</InfoRow>
+                    ) : null}
+                  </div>
+                </div>
+              </EditSectionCard>
+
             </div>
 
             <div className={twoColSectionGridClass}>
@@ -1383,16 +1386,10 @@ export default function EditSalesOrderPage() {
                         />
                       </TableCell>
                       <TableCell className="align-middle py-2">
-                        <Input
-                          type="number"
-                          min="1"
+                        <QtyNumberInput
                           value={item.quantity}
-                          onChange={(e) =>
-                            updateLineItem(
-                              item.id,
-                              "quantity",
-                              Number(e.target.value)
-                            )
+                          onValueChange={(value) =>
+                            updateLineItem(item.id, "quantity", value)
                           }
                           className={`h-9 ${
                             lineErrQty ? "border-destructive" : ""
@@ -1553,16 +1550,16 @@ export default function EditSalesOrderPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void saveSalesOrder();
               }}
             >
-              {saving ? "Saving…" : "Save changes"}
+              "Save changes"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

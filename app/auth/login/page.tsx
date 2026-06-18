@@ -20,7 +20,6 @@ import {
   clearRoleFeaturesCache,
   getRoleFeatures,
 } from "@/lib/role-features-service";
-import { logLoginSessionDebug } from "@/lib/login-session-debug-log";
 import {
   authInputClass,
   authLabelClass,
@@ -113,13 +112,7 @@ export default function LoginPage() {
           userId,
           companyResult.companyId
         );
-        if (data.user) {
-          await logLoginSessionDebug(
-            data.user,
-            companyResult.companyId,
-            roleFeatures
-          );
-        }
+        void roleFeatures;
       } catch {
         /* non-fatal – provider will retry */
       }

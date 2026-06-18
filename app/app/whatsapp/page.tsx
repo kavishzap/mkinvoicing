@@ -4,14 +4,16 @@ import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ImageIcon, Plus, SlidersVertical, Users } from "lucide-react";
+import { ImageIcon, Plus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppPageShell } from "@/components/app-page-shell";
+import { DirectoryFilterToggleButton } from "@/components/directory-list-layout";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
 import { WhatsAppCatalogueTab } from "@/components/whatsapp-catalogue-tab";
 import { WhatsAppGroupsTab } from "@/components/whatsapp-groups-tab";
+import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import { getActiveCompanyId } from "@/lib/active-company";
-import { cn } from "@/lib/utils";
 
 type MainTab = "groups" | "catalogue";
 
@@ -26,7 +28,7 @@ export default function WhatsAppPage() {
     parseTab(searchParams.get("tab")),
   );
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   useEffect(() => {
     setMainTab(parseTab(searchParams.get("tab")));
@@ -51,43 +53,32 @@ export default function WhatsAppPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <ResponsivePageActions>
           {mainTab === "groups" ? (
-            <Button className="gap-2" disabled={companyReady !== true} asChild>
+            <Button className="gap-2" size="sm" disabled={companyReady !== true} asChild>
               <Link href="/app/whatsapp/groups/new">
                 <Plus className="h-4 w-4" />
                 New group
               </Link>
             </Button>
           ) : (
-            <Button className="gap-2" disabled={companyReady !== true} asChild>
+            <Button className="gap-2" size="sm" disabled={companyReady !== true} asChild>
               <Link href="/app/whatsapp/catalogue/new">
                 <Plus className="h-4 w-4" />
                 New post
               </Link>
             </Button>
           )}
-        </div>
+        </ResponsivePageActions>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-9 w-9 shrink-0 text-muted-foreground",
-              filtersOpen && "bg-primary/15 text-primary",
-            )}
-            aria-label={
-              filtersOpen ? "Hide WhatsApp filters" : "Show WhatsApp filters"
-            }
-            aria-expanded={filtersOpen}
-            aria-controls={filterPanelId}
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <SlidersVertical className="h-4 w-4" aria-hidden />
-          </Button>
+          <DirectoryFilterToggleButton
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId={filterPanelId}
+            label="WhatsApp filters"
+          />
         ) : null
       }
     >
@@ -121,6 +112,7 @@ export default function WhatsAppPage() {
             <WhatsAppGroupsTab
               companyReady={companyReady}
               filtersOpen={filtersOpen}
+              onFiltersOpenChange={setFiltersOpen}
             />
           </TabsContent>
 
@@ -131,6 +123,7 @@ export default function WhatsAppPage() {
             <WhatsAppCatalogueTab
               companyReady={companyReady}
               filtersOpen={filtersOpen}
+              onFiltersOpenChange={setFiltersOpen}
             />
           </TabsContent>
         </Tabs>

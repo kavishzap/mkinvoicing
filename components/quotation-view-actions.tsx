@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { Copy, Download, Edit, Printer, ShoppingCart, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -12,29 +11,14 @@ import {
   getQuotation,
   type QuotationDetail,
 } from "@/lib/quotations-service";
+import {
+  fetchDocumentBranding,
+  type DocumentBranding,
+} from "@/lib/branding-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import Link from "next/link";
-
-type Branding = {
-  logoUrl?: string;
-  brandColor?: string;
-  companyName?: string;
-  address1?: string;
-  address2?: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-};
-
-async function fetchBranding(): Promise<Branding | undefined> {
-  try {
-    const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
-    if (!res.ok) return undefined;
-    return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 
 async function imageUrlToDataURL(
   url: string
@@ -60,7 +44,7 @@ function money(n: number, ccy: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(n);
 }
 
-function buildFromLines(q: QuotationDetail, prof: Profile | null | undefined, branding: Branding) {
+function buildFromLines(q: QuotationDetail, prof: Profile | null | undefined, branding: DocumentBranding) {
   const fromSnap = (q.from_snapshot ?? {}) as Record<string, unknown>;
   const acctType = prof?.accountType ?? "individual";
   const senderName =
@@ -116,38 +100,38 @@ export function QuotationViewActions({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const [busy, setBusy] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const handleDuplicate = () => {
-    if (busy) return;
+    if (isRunning) return;
     router.push(
       `/app/quotations/new?duplicate=${encodeURIComponent(quotationId)}`
     );
   };
 
   const handleConvertToSalesOrder = () => {
-    if (busy) return;
+    if (isRunning) return;
     router.push(
       `/app/sales-orders/new?convertFromQuotation=${encodeURIComponent(quotationId)}`
     );
   };
 
   const handleConvertToInvoice = () => {
-    if (busy) return;
+    if (isRunning) return;
     router.push(
       `/app/invoices/new?convertFromQuotation=${encodeURIComponent(quotationId)}`
     );
   };
 
   const renderPdf = async (mode: "download" | "print") => {
-    if (busy) return;
-    setBusy(true);
+    if (isRunning) return;
+    await runActionProgress("Generating PDF…", async () => {
     try {
       const q = quotation ?? (await getQuotation(quotationId));
       const prof = profile ?? (await fetchProfile());
       if (!q) throw new Error("Quotation not found.");
 
-      const branding = (await fetchBranding()) ?? {};
+      const branding = (await fetchDocumentBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A";
       const resolvedLogo = branding.logoUrl || logoSrc || (prof as { logoUrl?: string })?.logoUrl || "/kredence.png";
 
@@ -420,9 +404,8 @@ export function QuotationViewActions({
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not generate PDF.";
       toast({ title: "PDF error", description: msg, variant: "destructive" });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   return (
@@ -431,17 +414,17 @@ export function QuotationViewActions({
         type="button"
         variant="outline"
         className="gap-2"
-        disabled={busy}
+        disabled={isRunning}
         onClick={() => renderPdf("download")}
       >
         <Download className="h-4 w-4" />
-        {busy ? "Generating…" : "Download PDF"}
+        Download PDF
       </Button>
       <Button
         type="button"
         variant="outline"
         className="gap-2"
-        disabled={busy}
+        disabled={isRunning}
         onClick={() => renderPdf("print")}
       >
         <Printer className="h-4 w-4" />
@@ -451,7 +434,7 @@ export function QuotationViewActions({
         type="button"
         variant="outline"
         className="gap-2"
-        disabled={busy}
+        disabled={isRunning}
         onClick={handleDuplicate}
       >
         <Copy className="h-4 w-4" />
@@ -462,7 +445,7 @@ export function QuotationViewActions({
         variant="outline"
         className="gap-2"
         onClick={handleConvertToSalesOrder}
-        disabled={busy}
+        disabled={isRunning}
       >
         <ShoppingCart className="h-4 w-4" />
         Convert to Sales Order
@@ -472,7 +455,7 @@ export function QuotationViewActions({
         variant="outline"
         className="gap-2"
         onClick={handleConvertToInvoice}
-        disabled={busy}
+        disabled={isRunning}
       >
         <FileText className="h-4 w-4" />
         Convert to Invoice

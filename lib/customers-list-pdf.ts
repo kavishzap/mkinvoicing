@@ -1,24 +1,11 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { CustomerRow } from "@/lib/customers-service";
+import {
+  fetchDocumentBranding,
+  type DocumentBranding,
+} from "@/lib/branding-service";
 import { fetchProfile } from "@/lib/settings-service";
-
-type Branding = {
-  logoUrl?: string;
-  brandColor?: string;
-  companyName?: string;
-  email?: string;
-};
-
-async function fetchBranding(): Promise<Branding | undefined> {
-  try {
-    const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
-    if (!res.ok) return undefined;
-    return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
 
 async function imageUrlToDataURL(
   url: string
@@ -59,8 +46,11 @@ export async function buildCustomersListPdfDoc(params: {
   searchQuery: string;
 }): Promise<jsPDF> {
   const { rows, typeFilter, searchQuery } = params;
-  const [prof, brandingRes] = await Promise.all([fetchProfile(), fetchBranding()]);
-  const branding = brandingRes ?? {};
+  const [prof, brandingRes] = await Promise.all([
+    fetchProfile(),
+    fetchDocumentBranding(),
+  ]);
+  const branding: DocumentBranding = brandingRes ?? {};
   const brandColor = branding.brandColor || "#0F172A";
   const acctType = prof?.accountType ?? "individual";
   const fallbackName =

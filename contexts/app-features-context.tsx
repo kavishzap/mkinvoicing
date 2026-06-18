@@ -5,19 +5,30 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { supabase } from "@/lib/supabaseClient";
-import { getActiveCompanyId } from "@/lib/active-company";
+import { getSessionUser, clearAuthSessionCache } from "@/lib/auth-session";
+import {
+  ACTIVE_COMPANY_ID_STORAGE_KEY,
+  getActiveCompanyId,
+} from "@/lib/active-company";
+import {
+  getDashboardData,
+  peekDashboardCache,
+} from "@/lib/dashboard-service";
 import {
   clearRoleFeaturesCache,
   getRoleFeatures,
   type RoleFeature,
 } from "@/lib/role-features-service";
+import { supabase } from "@/lib/supabaseClient";
 
 type Status = "loading" | "unauthenticated" | "no-company" | "ready" | "error";
 const FEATURES_CACHE_KEY = "mkinv:app_features_cache:v1";
+const SESSION_USER_KEY = "mkinv:active_company_user_id";
 
 type FeaturesCacheSnapshot = {
   userId: string;
@@ -67,6 +78,31 @@ function clearFeaturesCache() {
   }
 }
 
+function readValidatedFeaturesCache(): FeaturesCacheSnapshot | null {
+  const cached = readFeaturesCache();
+  if (!cached) return null;
+  try {
+    const storedUserId = window.sessionStorage.getItem(SESSION_USER_KEY);
+    const storedCompanyId = window.sessionStorage.getItem(
+      ACTIVE_COMPANY_ID_STORAGE_KEY,
+    );
+    if (
+      storedUserId !== cached.userId ||
+      storedCompanyId !== cached.companyId
+    ) {
+      return null;
+    }
+    return cached;
+  } catch {
+    return null;
+  }
+}
+
+function prefetchDashboardIfNeeded() {
+  if (typeof window === "undefined" || peekDashboardCache()) return;
+  void getDashboardData().catch(() => {});
+}
+
 type AppFeaturesContextValue = {
   status: Status;
   /** True when the current user is the company owner (`company_users.is_owner`). */
@@ -90,15 +126,23 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
   const [isOwner, setIsOwner] = useState(false);
   const [features, setFeatures] = useState<RoleFeature[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+
+  useLayoutEffect(() => {
+    const cached = readValidatedFeaturesCache();
+    if (!cached) return;
+    setIsOwner(Boolean(cached.isOwner));
+    setFeatures(cached.features);
+    setStatus("ready");
+    prefetchDashboardIfNeeded();
+  }, []);
 
   const load = useCallback(async () => {
-    // Keep existing ready UI during background refresh to avoid sidebar flicker.
     setStatus((prev) => (prev === "ready" ? prev : "loading"));
     setError(null);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const user = await getSessionUser();
       if (!user?.id) {
         setFeatures([]);
         setIsOwner(false);
@@ -120,11 +164,12 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
         cached &&
         cached.userId === user.id &&
         cached.companyId === companyId &&
-        status !== "ready"
+        statusRef.current !== "ready"
       ) {
         setIsOwner(Boolean(cached.isOwner));
         setFeatures(cached.features);
         setStatus("ready");
+        prefetchDashboardIfNeeded();
       }
 
       const result = await getRoleFeatures(user.id, companyId);
@@ -138,16 +183,16 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
         cachedAt: new Date().toISOString(),
       });
       setStatus("ready");
+      prefetchDashboardIfNeeded();
     } catch (err) {
-      // If we already had features rendered, keep them to avoid flashing empty sidebar.
-      if (status !== "ready") {
+      if (statusRef.current !== "ready") {
         setFeatures([]);
         setIsOwner(false);
       }
       setError(err instanceof Error ? err.message : "Could not load features.");
       setStatus((prev) => (prev === "ready" ? prev : "error"));
     }
-  }, [status]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -158,6 +203,7 @@ export function AppFeaturesProvider({ children }: { children: React.ReactNode })
       if (event === "SIGNED_OUT") {
         clearRoleFeaturesCache();
         clearFeaturesCache();
+        clearAuthSessionCache();
         setFeatures([]);
         setIsOwner(false);
         setStatus("unauthenticated");

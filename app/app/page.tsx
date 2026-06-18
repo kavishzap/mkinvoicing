@@ -1,9 +1,8 @@
 "use client";
-export const dynamic = "force-dynamic";
 
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Banknote,
   BarChart3,
@@ -19,8 +18,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppPageShell } from "@/components/app-page-shell";
 import { DashboardPageSkeleton } from "@/components/page-skeletons";
 import { DashboardStatCard } from "@/components/dashboard-stat-card";
-import { InvoicePivotButton } from "@/components/invoice-pivot-dialog";
-import { SalesOrderPivotButton } from "@/components/sales-order-pivot-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAppFeatures } from "@/contexts/app-features-context";
 import {
@@ -48,6 +45,22 @@ const DashboardIncomeChart = nextDynamic(
   },
 );
 
+const InvoicePivotButton = nextDynamic(
+  () =>
+    import("@/components/invoice-pivot-dialog").then(
+      (m) => m.InvoicePivotButton,
+    ),
+  { ssr: false, loading: () => null },
+);
+
+const SalesOrderPivotButton = nextDynamic(
+  () =>
+    import("@/components/sales-order-pivot-dialog").then(
+      (m) => m.SalesOrderPivotButton,
+    ),
+  { ssr: false, loading: () => null },
+);
+
 type LoadState =
   | { phase: "loading" }
   | { phase: "ready"; data: DashboardData }
@@ -68,11 +81,15 @@ export default function DashboardPage() {
   toastRef.current = toast;
 
   const { has, status: featureStatus } = useAppFeatures();
-  const [loadState, setLoadState] = useState<LoadState>(() => {
-    const cached = peekDashboardCache();
-    return cached ? { phase: "ready", data: cached } : { phase: "loading" };
-  });
+  const [loadState, setLoadState] = useState<LoadState>({ phase: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
+
+  useLayoutEffect(() => {
+    const cached = peekDashboardCache();
+    if (cached) {
+      setLoadState({ phase: "ready", data: cached });
+    }
+  }, []);
 
   const load = useCallback(async (signal: AbortSignal, opts?: { silent?: boolean }) => {
     if (!opts?.silent) {

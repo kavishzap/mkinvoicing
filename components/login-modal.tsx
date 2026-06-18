@@ -26,8 +26,6 @@ import {
   clearRoleFeaturesCache,
   getRoleFeatures,
 } from "@/lib/role-features-service";
-import { logLoginSessionDebug } from "@/lib/login-session-debug-log";
-
 interface LoginModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -100,7 +98,7 @@ export function LoginModal({ open, onOpenChange }: LoginModalProps) {
           user.id,
           companyResult.companyId
         );
-        await logLoginSessionDebug(user, companyResult.companyId, roleFeatures);
+        void roleFeatures;
       } catch {
         /* non-fatal – provider will retry */
       }

@@ -16,6 +16,8 @@ import {
 } from "@/lib/supplier-form";
 import { addSupplier } from "@/lib/suppliers-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 export default function NewSupplierPage() {
   const router = useRouter();
@@ -26,7 +28,7 @@ export default function NewSupplierPage() {
   const [errors, setErrors] = useState<
     Partial<Record<keyof SupplierFormData, string>>
   >({});
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,20 +42,19 @@ export default function NewSupplierPage() {
       });
       return;
     }
-    try {
-      setSaving(true);
+    await runActionProgress("Creating supplier…", async () => {
+      try {
       await addSupplier(supplierFormToPayload(formData));
       toast({ title: "Supplier added" });
       router.push("/app/suppliers");
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       toast({
         title: "Could not save",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -77,8 +78,8 @@ export default function NewSupplierPage() {
           <Button variant="outline" type="button" asChild>
             <Link href="/app/suppliers">Cancel</Link>
           </Button>
-          <Button type="submit" form="supplier-new-form" disabled={saving}>
-            {saving ? "Saving…" : "Save supplier"}
+          <Button type="submit" form="supplier-new-form" disabled={isRunning}>
+            "Save supplier"
           </Button>
         </div>
       }

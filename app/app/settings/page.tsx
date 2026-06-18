@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import Image from "next/image";
 
 import {
@@ -227,8 +229,7 @@ export default function SettingsPage() {
 
   // flags
   const [loading, setLoading] = useState(true);
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [savingPrefs, setSavingPrefs] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const [company, setCompany] = useState<ActiveCompanySettings>(
     emptyActiveCompanySettings()
@@ -382,63 +383,60 @@ export default function SettingsPage() {
       return;
     }
 
-    try {
-      setSavingProfile(true);
+    await runActionProgress("Saving company profile…", async () => {
+      try {
+        assertCompanyLogoFileSize(logoFile);
+        const company_logo_url = await fileToImageDataUrl(logoFile);
+        revokeLogoObjectUrl();
+        setLogoPreview(company_logo_url);
 
-      assertCompanyLogoFileSize(logoFile);
-      const company_logo_url = await fileToImageDataUrl(logoFile);
-      revokeLogoObjectUrl();
-      setLogoPreview(company_logo_url);
+        await updateActiveCompanySettings({
+          ...company,
+          company_logo_url,
+        });
 
-      await updateActiveCompanySettings({
-        ...company,
-        company_logo_url,
-      });
+        const [refreshed, sub] = await Promise.all([
+          fetchActiveCompanySettings(),
+          fetchCompanySubscriptionDetails().catch(() => null),
+        ]);
+        setCompany(refreshed);
+        setLogoPreview(refreshed.company_logo_url || null);
+        if (sub) setSubscription(sub);
 
-      const [refreshed, sub] = await Promise.all([
-        fetchActiveCompanySettings(),
-        fetchCompanySubscriptionDetails().catch(() => null),
-      ]);
-      setCompany(refreshed);
-      setLogoPreview(refreshed.company_logo_url || null);
-      if (sub) setSubscription(sub);
+        await refreshAccount();
 
-      await refreshAccount();
-
-      toast({
-        title: "Company saved",
-        description: "Your company record has been updated.",
-      });
-      setLogoFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    } catch (err: any) {
-      toast({
-        title: "Save failed",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingProfile(false);
-    }
+        toast({
+          title: "Company saved",
+          description: "Your company record has been updated.",
+        });
+        setLogoFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } catch (err: any) {
+        toast({
+          title: "Save failed",
+          description: err?.message ?? "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const handleSavePreferences = async () => {
-    try {
-      setSavingPrefs(true);
-      await upsertPreferences(preferences);
-      toast({
-        title: "Preferences saved",
-        description: "Your invoice preferences have been updated successfully.",
-      });
-    } catch (err: any) {
-      toast({
-        title: "Save failed",
-        description: err?.message ?? "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingPrefs(false);
-    }
+    await runActionProgress("Saving preferences…", async () => {
+      try {
+        await upsertPreferences(preferences);
+        toast({
+          title: "Preferences saved",
+          description: "Your invoice preferences have been updated successfully.",
+        });
+      } catch (err: any) {
+        toast({
+          title: "Save failed",
+          description: err?.message ?? "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   function handleSettingsTabChange(next: string) {
@@ -467,18 +465,18 @@ export default function SettingsPage() {
         settingsTab === "profile" ? (
           <Button
             onClick={handleSaveCompany}
-            disabled={savingProfile || noActiveCompany || !logoFile}
+            disabled={isRunning || noActiveCompany || !logoFile}
             className="gap-2 rounded-md font-semibold shadow-sm"
           >
-            {savingProfile ? "Saving..." : logoActionLabel}
+            {logoActionLabel}
           </Button>
         ) : settingsTab === "preferences" ? (
           <Button
             onClick={handleSavePreferences}
-            disabled={savingPrefs || noActiveCompany}
+            disabled={isRunning || noActiveCompany}
             className="gap-2 rounded-md font-semibold shadow-sm"
           >
-            {savingPrefs ? "Saving..." : "Save preferences"}
+            Save preferences
           </Button>
         ) : null
       }

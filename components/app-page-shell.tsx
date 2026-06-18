@@ -8,10 +8,10 @@ import { cn } from "@/lib/utils";
 
 /** Outer padding + width for all `/app/*` feature pages (topbar title is separate). */
 export const APP_PAGE_SHELL_CLASS =
-  "mx-auto w-full max-w-[1800px] px-4 py-5 text-sm sm:px-6 sm:py-6";
+  "mx-auto w-full max-w-[1800px] px-3 py-4 text-sm sm:px-6 sm:py-6";
 
 const APP_PAGE_SHELL_COMPACT_CLASS =
-  "mx-auto w-full max-w-[1800px] px-4 py-4 text-sm sm:px-5 sm:py-5";
+  "mx-auto w-full max-w-[1800px] px-3 py-3 text-sm sm:px-5 sm:py-5";
 
 type AppPageShellProps = {
   /** Renders in the app top bar immediately before the page title (e.g. back icon). */

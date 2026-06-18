@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
+import { ActionProgressProvider } from "@/contexts/action-progress-context";
 import "./globals.css";
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -42,8 +43,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
-          <Toaster />
+          <ActionProgressProvider>
+            {children}
+            <Toaster />
+          </ActionProgressProvider>
         </ThemeProvider>
         <Analytics />
       </body>

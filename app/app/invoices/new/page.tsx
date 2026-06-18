@@ -96,18 +96,16 @@ import { AppPageShell } from "@/components/app-page-shell";
 import { cn } from "@/lib/utils";
 import { SalesOrderLineProductSelect } from "@/components/sales-order-line-product-select";
 import { applyProductPickToLines } from "@/lib/sales-order-line-items-merge";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
+
+import { QtyNumberInput } from "@/components/qty-input";
+import {
+  formatNumericFieldValue,
+  parseNumericFieldValue,
+} from "@/lib/numeric-field";
 
 const DEFAULT_TAX_PERCENT = 0;
-
-function formatNumericFieldValue(n: number) {
-  return n === 0 ? "" : String(n);
-}
-
-function parseNumericFieldValue(raw: string) {
-  if (raw.trim() === "") return 0;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : 0;
-}
 
 const fieldLabelClass =
   "text-sm font-medium text-neutral-700 dark:text-neutral-300";
@@ -234,7 +232,7 @@ function NewInvoicePageContent() {
 
   // ===== Load profile & preferences from Supabase
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -803,8 +801,8 @@ function NewInvoicePageContent() {
       return;
     }
 
-    try {
-      setSaving(true);
+    await runActionProgress("Creating invoice…", async () => {
+      try {
       if (!preferences) throw new Error("Preferences not loaded");
 
       const itemsPayload: LineItemPayload[] = lineItems.map((li) => ({
@@ -866,7 +864,7 @@ function NewInvoicePageContent() {
             createdFromSalesOrderId,
             nextPay
           );
-        } catch (syncErr: unknown) {
+      } catch (syncErr: unknown) {
           const msg =
             syncErr instanceof Error ? syncErr.message : "Unknown error";
           toast({
@@ -888,9 +886,8 @@ function NewInvoicePageContent() {
         description: e?.message ?? "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   if (loading) {
@@ -924,11 +921,11 @@ function NewInvoicePageContent() {
       actions={
         <Button
           onClick={() => setSaveConfirmOpen(true)}
-          disabled={saving}
+          disabled={isRunning}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Save & view"}
+          "Save & view"
         </Button>
       }
     >
@@ -1143,19 +1140,11 @@ function NewInvoicePageContent() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          min="1"
-                          inputMode="decimal"
-                          value={formatNumericFieldValue(item.quantity)}
+                        <QtyNumberInput
                           placeholder="1"
-                          onFocus={(e) => e.currentTarget.select()}
-                          onChange={(e) =>
-                            updateLineItem(
-                              item.id,
-                              "quantity",
-                              parseNumericFieldValue(e.target.value),
-                            )
+                          value={item.quantity}
+                          onValueChange={(value) =>
+                            updateLineItem(item.id, "quantity", value)
                           }
                           className={`h-9 ${
                             lineErrQty ? "border-destructive" : ""
@@ -1428,16 +1417,16 @@ function NewInvoicePageContent() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void doCreateUnpaid();
               }}
             >
-              {saving ? "Saving…" : "Save & view"}
+              "Save & view"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

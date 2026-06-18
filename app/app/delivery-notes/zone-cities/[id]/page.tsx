@@ -50,6 +50,8 @@ import {
 } from "@/components/ui/table";
 import { SearchableDeliveryCitySelect } from "@/components/searchable-delivery-city-select";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import type { TeamMemberRow } from "@/lib/company-team-service";
 import {
   assignCityToZone,
@@ -156,6 +158,7 @@ function withSequentialSortOrder(
 export default function DeliveryZoneDetailPage() {
   const params = useParams<{ id: string }>();
   const { toast } = useToast();
+  const { isRunning } = useActionProgress();
   const id = params?.id ?? "";
 
   const [loading, setLoading] = useState(true);
@@ -165,8 +168,6 @@ export default function DeliveryZoneDetailPage() {
   const [drivers, setDrivers] = useState<TeamMemberRow[]>([]);
 
   const [isEditing, setIsEditing] = useState(false);
-  const [savingDetails, setSavingDetails] = useState(false);
-  const [savingAssignmentEdit, setSavingAssignmentEdit] = useState(false);
   const [nameError, setNameError] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [form, setForm] = useState({
@@ -177,7 +178,6 @@ export default function DeliveryZoneDetailPage() {
 
   const [assignCityId, setAssignCityId] = useState("");
   const [assignSortOrder, setAssignSortOrder] = useState("1");
-  const [assignSaving, setAssignSaving] = useState(false);
 
   const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(
     null,
@@ -188,7 +188,6 @@ export default function DeliveryZoneDetailPage() {
   const [removeTarget, setRemoveTarget] = useState<DeliveryZoneCityRow | null>(
     null,
   );
-  const [removeSaving, setRemoveSaving] = useState(false);
 
   const [draggingAssignmentId, setDraggingAssignmentId] = useState<
     string | null
@@ -196,7 +195,6 @@ export default function DeliveryZoneDetailPage() {
   const [pendingZoneCityOrder, setPendingZoneCityOrder] = useState<
     DeliveryZoneCityRow[] | null
   >(null);
-  const [savingReorder, setSavingReorder] = useState(false);
 
   const displayedZoneCities = pendingZoneCityOrder ?? zoneCities;
   const hasUnsavedOrderChanges =
@@ -286,54 +284,52 @@ export default function DeliveryZoneDetailPage() {
 
   async function handleSaveDetails() {
     if (!id || !validate()) return;
-    try {
-      setSavingDetails(true);
-      await updateDeliveryZone(id, {
-        name: form.name.trim(),
-        description: form.description.trim() || null,
-        driverUserId:
-          !form.driverUserId || form.driverUserId === "__none__"
-            ? null
-            : form.driverUserId,
-        isActive,
-      });
-      await reload();
-      toast({ title: "Zone saved" });
-      setIsEditing(false);
-    } catch (e: unknown) {
-      toast({
-        title: "Save failed",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingDetails(false);
-    }
+    await runActionProgress("Saving zone…", async () => {
+      try {
+        await updateDeliveryZone(id, {
+          name: form.name.trim(),
+          description: form.description.trim() || null,
+          driverUserId:
+            !form.driverUserId || form.driverUserId === "__none__"
+              ? null
+              : form.driverUserId,
+          isActive,
+        });
+        await reload();
+        toast({ title: "Zone saved" });
+        setIsEditing(false);
+      } catch (e: unknown) {
+        toast({
+          title: "Save failed",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   async function handleAssign() {
     if (!id || !assignCityId) return;
-    try {
-      setAssignSaving(true);
-      await assignCityToZone({
-        zoneId: id,
-        cityId: assignCityId,
-        sortOrder: Number(assignSortOrder || "0"),
-      });
-      setAssignCityId("");
-      const rows = await listZoneCities(id);
-      setZoneCities(rows);
-      setPendingZoneCityOrder(null);
-      toast({ title: "City assigned" });
-    } catch (e: unknown) {
-      toast({
-        title: "Could not assign city",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setAssignSaving(false);
-    }
+    await runActionProgress("Assigning city…", async () => {
+      try {
+        await assignCityToZone({
+          zoneId: id,
+          cityId: assignCityId,
+          sortOrder: Number(assignSortOrder || "0"),
+        });
+        setAssignCityId("");
+        const rows = await listZoneCities(id);
+        setZoneCities(rows);
+        setPendingZoneCityOrder(null);
+        toast({ title: "City assigned" });
+      } catch (e: unknown) {
+        toast({
+          title: "Could not assign city",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   function startEdit(row: DeliveryZoneCityRow) {
@@ -350,27 +346,26 @@ export default function DeliveryZoneDetailPage() {
 
   async function saveAssignmentEdit() {
     if (!editingAssignmentId) return;
-    try {
-      setSavingAssignmentEdit(true);
-      await updateZoneCityAssignment({
-        assignmentId: editingAssignmentId,
-        cityId: editingCityId,
-        sortOrder: Number(editingSortOrder || "0"),
-      });
-      const rows = await listZoneCities(id);
-      setZoneCities(rows);
-      setPendingZoneCityOrder(null);
-      toast({ title: "Assignment updated" });
-      cancelEdit();
-    } catch (e: unknown) {
-      toast({
-        title: "Could not update assignment",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingAssignmentEdit(false);
-    }
+    await runActionProgress("Updating assignment…", async () => {
+      try {
+        await updateZoneCityAssignment({
+          assignmentId: editingAssignmentId,
+          cityId: editingCityId,
+          sortOrder: Number(editingSortOrder || "0"),
+        });
+        const rows = await listZoneCities(id);
+        setZoneCities(rows);
+        setPendingZoneCityOrder(null);
+        toast({ title: "Assignment updated" });
+        cancelEdit();
+      } catch (e: unknown) {
+        toast({
+          title: "Could not update assignment",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   function cancelPendingRouteOrder() {
@@ -384,35 +379,34 @@ export default function DeliveryZoneDetailPage() {
     const sequential = withSequentialSortOrder(ordered);
     setZoneCities(sequential);
     setPendingZoneCityOrder(null);
-    try {
-      setSavingReorder(true);
-      for (let i = 0; i < n; i++) {
-        const row = sequential[i];
-        await updateZoneCityAssignment({
-          assignmentId: row.id,
-          cityId: row.cityId,
-          sortOrder: TEMP_BASE + i,
+    await runActionProgress("Saving route order…", async () => {
+      try {
+        for (let i = 0; i < n; i++) {
+          const row = sequential[i];
+          await updateZoneCityAssignment({
+            assignmentId: row.id,
+            cityId: row.cityId,
+            sortOrder: TEMP_BASE + i,
+          });
+        }
+        for (let i = 0; i < n; i++) {
+          const row = sequential[i];
+          await updateZoneCityAssignment({
+            assignmentId: row.id,
+            cityId: row.cityId,
+            sortOrder: i + 1,
+          });
+        }
+        toast({ title: "Route order saved" });
+      } catch (e: unknown) {
+        toast({
+          title: "Could not save route order",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
         });
+        await reload();
       }
-      for (let i = 0; i < n; i++) {
-        const row = sequential[i];
-        await updateZoneCityAssignment({
-          assignmentId: row.id,
-          cityId: row.cityId,
-          sortOrder: i + 1,
-        });
-      }
-      toast({ title: "Route order saved" });
-    } catch (e: unknown) {
-      toast({
-        title: "Could not save route order",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-      await reload();
-    } finally {
-      setSavingReorder(false);
-    }
+    });
   }
 
   async function handleSaveRouteOrder() {
@@ -422,23 +416,22 @@ export default function DeliveryZoneDetailPage() {
 
   async function confirmRemove() {
     if (!removeTarget) return;
-    try {
-      setRemoveSaving(true);
-      await removeZoneCityAssignment(removeTarget.id);
-      const rows = await listZoneCities(id);
-      setZoneCities(rows);
-      setPendingZoneCityOrder(null);
-      toast({ title: "City removed from zone" });
-      setRemoveTarget(null);
-    } catch (e: unknown) {
-      toast({
-        title: "Could not remove city",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setRemoveSaving(false);
-    }
+    await runActionProgress("Removing city from zone…", async () => {
+      try {
+        await removeZoneCityAssignment(removeTarget.id);
+        const rows = await listZoneCities(id);
+        setZoneCities(rows);
+        setPendingZoneCityOrder(null);
+        toast({ title: "City removed from zone" });
+        setRemoveTarget(null);
+      } catch (e: unknown) {
+        toast({
+          title: "Could not remove city",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   if (loading) {
@@ -498,7 +491,7 @@ export default function DeliveryZoneDetailPage() {
                 type="button"
                 variant="outline"
                 onClick={handleCancelEdit}
-                disabled={savingDetails}
+                disabled={isRunning}
                 className="rounded font-semibold"
               >
                 Cancel
@@ -506,11 +499,11 @@ export default function DeliveryZoneDetailPage() {
               <Button
                 type="button"
                 onClick={() => void handleSaveDetails()}
-                disabled={savingDetails}
+                disabled={isRunning}
                 className="gap-2 rounded font-semibold shadow-sm"
               >
                 <Save className="size-3.5 shrink-0" aria-hidden />
-                {savingDetails ? "Saving…" : "Save changes"}
+                Save changes
               </Button>
             </>
           ) : (
@@ -637,16 +630,16 @@ export default function DeliveryZoneDetailPage() {
                   <Button
                     type="button"
                     size="sm"
-                    disabled={savingReorder}
+                    disabled={isRunning}
                     onClick={() => void handleSaveRouteOrder()}
                   >
-                    {savingReorder ? "Saving…" : "Update order"}
+                    Update order
                   </Button>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
-                    disabled={savingReorder}
+                    disabled={isRunning}
                     onClick={cancelPendingRouteOrder}
                   >
                     Cancel
@@ -682,7 +675,7 @@ export default function DeliveryZoneDetailPage() {
                 type="button"
                 className="sm:mb-0"
                 disabled={
-                  assignSaving ||
+                  isRunning ||
                   !assignCityId ||
                   !assignSortOrder ||
                   Number(assignSortOrder) < 1
@@ -696,7 +689,7 @@ export default function DeliveryZoneDetailPage() {
             <div
               className={cn(
                 "overflow-x-auto rounded-md border border-border/60",
-                savingReorder && "pointer-events-none opacity-60",
+                isRunning && "pointer-events-none opacity-60",
               )}
             >
               <Table>
@@ -723,7 +716,7 @@ export default function DeliveryZoneDetailPage() {
                   ) : (
                     displayedZoneCities.map((zc) => {
                       const canDrag =
-                        editingAssignmentId === null && !savingReorder;
+                        editingAssignmentId === null && !isRunning;
                       return (
                         <TableRow
                           key={zc.id}
@@ -830,7 +823,7 @@ export default function DeliveryZoneDetailPage() {
                                   size="sm"
                                   onClick={() => void saveAssignmentEdit()}
                                   disabled={
-                                    savingAssignmentEdit ||
+                                    isRunning ||
                                     !editingCityId ||
                                     !editingSortOrder
                                   }
@@ -842,7 +835,7 @@ export default function DeliveryZoneDetailPage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={cancelEdit}
-                                  disabled={savingAssignmentEdit}
+                                  disabled={isRunning}
                                 >
                                   Cancel
                                 </Button>
@@ -897,16 +890,16 @@ export default function DeliveryZoneDetailPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={removeSaving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={removeSaving}
+              disabled={isRunning}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={(e) => {
                 e.preventDefault();
                 void confirmRemove();
               }}
             >
-              {removeSaving ? "Removing…" : "Remove"}
+              Remove
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

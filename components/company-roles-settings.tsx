@@ -27,6 +27,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import { useAppFeatures } from "@/contexts/app-features-context";
 import { requireActiveCompanyId } from "@/lib/active-company";
 import { clearRoleFeaturesCache } from "@/lib/role-features-service";
@@ -47,7 +49,7 @@ export function CompanyRolesSettings() {
   const { toast } = useToast();
   const { reload: reloadAppFeatures } = useAppFeatures();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [planFeatures, setPlanFeatures] = useState<PlanAllowedFeature[]>([]);
   const [roles, setRoles] = useState<CompanyRole[]>([]);
 
@@ -81,23 +83,22 @@ export function CompanyRolesSettings() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    setSaving(true);
-    try {
-      await deleteCompanyRole(deleteTarget.id);
-      toast({ title: "Role deleted", description: "The role was removed." });
-      setDeleteTarget(null);
-      clearRoleFeaturesCache();
-      await reloadAppFeatures();
-      await load();
-    } catch (err) {
-      toast({
-        title: "Delete failed",
-        description: err instanceof Error ? err.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+    await runActionProgress("Deleting role…", async () => {
+      try {
+        await deleteCompanyRole(deleteTarget.id);
+        toast({ title: "Role deleted", description: "The role was removed." });
+        setDeleteTarget(null);
+        clearRoleFeaturesCache();
+        await reloadAppFeatures();
+        await load();
+      } catch (err) {
+        toast({
+          title: "Delete failed",
+          description: err instanceof Error ? err.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const handleRowActiveToggle = async (role: CompanyRole, next: boolean) => {
@@ -273,9 +274,10 @@ export function CompanyRolesSettings() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isRunning}
               onClick={() => void handleDelete()}
             >
               Delete

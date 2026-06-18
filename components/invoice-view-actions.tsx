@@ -34,6 +34,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import {
@@ -43,6 +45,10 @@ import {
   type InvoiceDetail,
   updateInvoicePayment,
 } from "@/lib/invoices-service";
+import {
+  fetchDocumentBranding,
+  type DocumentBranding,
+} from "@/lib/branding-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import {
   addCustomerCredit,
@@ -69,26 +75,7 @@ interface InvoiceViewActionsProps {
   onRefresh?: () => void;
 }
 
-type Branding = {
-  logoUrl?: string;
-  brandColor?: string; // hex
-  companyName?: string;
-  address1?: string;
-  address2?: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-};
-
-async function fetchBranding(): Promise<Branding | undefined> {
-  try {
-    const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
-    if (!res.ok) return undefined;
-    return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
+type Branding = DocumentBranding;
 
 function money(n: number, ccy: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(n);
@@ -167,7 +154,7 @@ export function InvoiceViewActions({
 }: InvoiceViewActionsProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [busy, setBusy] = useState(false);
+  const { isRunning } = useActionProgress();
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [amountPaid, setAmountPaid] = useState(invoice?.amount_paid || 0);
@@ -207,8 +194,6 @@ export function InvoiceViewActions({
         }
       } catch (e) {
         if (!cancelled) {
-          // eslint-disable-next-line no-console
-          console.error("Failed to load customer credit", e);
           setCreditBalance(null);
         }
       }
@@ -219,8 +204,8 @@ export function InvoiceViewActions({
   }, [invoice?.customer_id]);
 
   const handleDownloadPDF = async () => {
-    if (busy) return;
-    setBusy(true);
+    if (isRunning) return;
+    await runActionProgress("Generating PDF…", async () => {
     try {
       const inv = invoice ?? (await getInvoice(invoiceId));
       const prof = profile ?? (await fetchProfile());
@@ -233,7 +218,7 @@ export function InvoiceViewActions({
           ? 0
           : Math.max(0, totals.total - pdfPaid);
 
-      const branding = (await fetchBranding()) ?? {};
+      const branding = (await fetchDocumentBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A"; // slate-900
       const snap = (inv.from_snapshot ?? {}) as Record<string, unknown>;
       const resolvedLogo = resolveDocumentPdfLogo({
@@ -510,14 +495,13 @@ export function InvoiceViewActions({
         description: err?.message ?? "Could not generate PDF.",
         variant: "destructive",
       });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   const handlePrintPDF = async () => {
-    if (busy) return;
-    setBusy(true);
+    if (isRunning) return;
+    await runActionProgress("Generating PDF…", async () => {
     try {
       const inv = invoice ?? (await getInvoice(invoiceId));
       const prof = profile ?? (await fetchProfile());
@@ -530,7 +514,7 @@ export function InvoiceViewActions({
           ? 0
           : Math.max(0, totals.total - pdfPaid);
 
-      const branding = (await fetchBranding()) ?? {};
+      const branding = (await fetchDocumentBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A"; // slate-900
       const snap = (inv.from_snapshot ?? {}) as Record<string, unknown>;
       const resolvedLogo = resolveDocumentPdfLogo({
@@ -829,13 +813,12 @@ export function InvoiceViewActions({
         description: err?.message ?? "Could not generate PDF.",
         variant: "destructive",
       });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   const handleUpdatePayment = async () => {
-    if (busy) return;
+    if (isRunning) return;
     
     // Validate amount paid
     if (amountPaid < 0) {
@@ -844,7 +827,7 @@ export function InvoiceViewActions({
     }
 
     setAmountPaidError(null);
-    setBusy(true);
+    await runActionProgress("Updating payment…", async () => {
     try {
       const effectivePaid = amountPaid + creditToApply;
       const calculatedAmountDue = Math.max(0, totals.total - effectivePaid);
@@ -869,10 +852,8 @@ export function InvoiceViewActions({
             amount: creditToApply,
             notes: "Applied automatically when updating invoice payment.",
           });
-        } catch (e) {
-          // Non-fatal: log and continue
-          // eslint-disable-next-line no-console
-          console.error("Failed to settle customer credit", e);
+        } catch {
+          // Non-fatal: settlement failed; invoice payment still succeeded.
         }
       }
 
@@ -883,10 +864,8 @@ export function InvoiceViewActions({
             invoice.customer_id as string,
             overpaid
           );
-        } catch (e) {
-          // Non-fatal: log and continue
-          // eslint-disable-next-line no-console
-          console.error("Failed to record customer credit", e);
+        } catch {
+          // Non-fatal: credit record failed; invoice payment still succeeded.
         }
       }
 
@@ -925,14 +904,13 @@ export function InvoiceViewActions({
         description: e?.message ?? "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   const handleCancelInvoice = async () => {
-    if (busy) return;
-    setBusy(true);
+    if (isRunning) return;
+    await runActionProgress("Cancelling invoice…", async () => {
     try {
       await cancelInvoice(invoiceId);
       toast({ title: "Invoice cancelled" });
@@ -946,24 +924,23 @@ export function InvoiceViewActions({
         description: e?.message ?? "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   return (
     <>
       <div className="flex w-full max-w-full flex-wrap items-center justify-start gap-1.5 sm:gap-2">
-        <Button variant="outline" onClick={handleDownloadPDF} className="gap-2" disabled={busy}>
+        <Button variant="outline" onClick={handleDownloadPDF} className="gap-2" disabled={isRunning}>
           <Download className="h-4 w-4" />
-          {busy ? "Generating…" : "Download PDF"}
+          Download PDF
         </Button>
 
         <Button 
           variant="outline" 
           onClick={handlePrintPDF} 
           className="gap-2" 
-          disabled={busy}
+          disabled={isRunning}
         >
           <Printer className="h-4 w-4" />
           Print
@@ -972,7 +949,7 @@ export function InvoiceViewActions({
         <Button
           variant="outline"
           className="gap-2"
-          disabled={busy}
+          disabled={isRunning}
           onClick={() => setDuplicateConfirmOpen(true)}
         >
           <Copy className="h-4 w-4" />
@@ -982,7 +959,7 @@ export function InvoiceViewActions({
         <Button
           variant="outline"
           className="gap-2"
-          disabled={busy}
+          disabled={isRunning}
           onClick={() => setIsCustomerDialogOpen(true)}
         >
           <UserRound className="h-4 w-4" />
@@ -1002,7 +979,7 @@ export function InvoiceViewActions({
               setIsPaymentDialogOpen(true);
             }} 
             className="gap-2" 
-            disabled={busy}
+            disabled={isRunning}
           >
             <Edit className="h-4 w-4" />
             Update Payment
@@ -1022,7 +999,7 @@ export function InvoiceViewActions({
               }
             }}
             className="gap-2"
-            disabled={busy}
+            disabled={isRunning}
           >
             <CheckCircle2 className="h-4 w-4" />
             Mark as Paid
@@ -1034,7 +1011,7 @@ export function InvoiceViewActions({
             variant="outline"
             onClick={handleCancelInvoice}
             className="gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
-            disabled={busy}
+            disabled={isRunning}
           >
             <XCircle className="h-4 w-4" />
             Cancel Invoice
@@ -1171,12 +1148,12 @@ export function InvoiceViewActions({
             <Button
               variant="outline"
               onClick={() => setIsPaymentDialogOpen(false)}
-              disabled={busy}
+              disabled={isRunning}
             >
               Cancel
             </Button>
-            <Button onClick={handleUpdatePayment} disabled={busy}>
-              {busy ? "Updating..." : "Update Payment"}
+            <Button onClick={handleUpdatePayment} disabled={isRunning}>
+              Update Payment
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1193,9 +1170,9 @@ export function InvoiceViewActions({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={busy}
+              disabled={isRunning}
               onClick={() => {
                 setDuplicateConfirmOpen(false);
                 router.push(

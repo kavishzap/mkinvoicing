@@ -47,6 +47,9 @@ import {
 } from "@/lib/locations-service";
 import { replaceProductLocationStocks } from "@/lib/product-location-stocks-service";
 import { addProduct, type ProductPayload } from "@/lib/products-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { QtyInput } from "@/components/qty-input";
 
 const UNIT_OPTIONS = [
   "pcs",
@@ -240,7 +243,7 @@ export default function NewInventoryProductPage() {
   const [locationOptions, setLocationOptions] = useState<LocationOption[]>([]);
   const [nameError, setNameError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
   useEffect(() => {
@@ -301,8 +304,8 @@ export default function NewInventoryProductPage() {
     const stockPayload = parseStockLines(stockLines, toast);
     if (stockPayload === null) return;
 
-    try {
-      setSaving(true);
+    await runActionProgress("Creating product…", async () => {
+      try {
       const companyId = await getActiveCompanyId();
       if (!companyId) {
         toast({
@@ -322,16 +325,15 @@ export default function NewInventoryProductPage() {
             : "No per-location quantities (optional).",
       });
       router.push("/app/products");
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({
         title: "Save failed",
         description: msg,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -348,11 +350,11 @@ export default function NewInventoryProductPage() {
       actions={
         <Button
           onClick={requestSave}
-          disabled={saving || loading}
+          disabled={isRunning || loading}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Submit"}
+          "Submit"
         </Button>
       }
     >
@@ -558,15 +560,10 @@ export default function NewInventoryProductPage() {
                       <Label className={cn("text-xs", fieldLabelClass)}>
                         Quantity
                       </Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="any"
+                      <QtyInput
                         value={line.quantity}
-                        onChange={(e) =>
-                          updateStockLine(line.key, {
-                            quantity: e.target.value,
-                          })
+                        onValueChange={(value) =>
+                          updateStockLine(line.key, { quantity: value })
                         }
                       />
                     </div>
@@ -599,16 +596,16 @@ export default function NewInventoryProductPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Submit"}
+              "Submit"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

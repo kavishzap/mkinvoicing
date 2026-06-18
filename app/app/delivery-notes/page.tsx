@@ -13,7 +13,6 @@ import {
   Printer,
   PackageOpen,
   Search,
-  SlidersVertical,
   Truck,
   type LucideIcon,
 } from "lucide-react";
@@ -43,6 +42,15 @@ import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
 import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  DIRECTORY_LIST_PANEL_CLASS,
+  DirectoryFilterPanel,
+  DirectoryFilterToggleButton,
+  DirectoryListFrame,
+  DirectoryListSearchHeader,
+} from "@/components/directory-list-layout";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import { useToast } from "@/hooks/use-toast";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
@@ -62,8 +70,6 @@ import {
   type DeliveryNoteStatus,
 } from "@/lib/deliveries-service";
 import { drawMoLedgerExportPdfHeader } from "@/lib/mo-ledger-export-pdf";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 type DeliveryListStatusFilter = DeliveryNoteStatus | "all";
 
@@ -274,7 +280,7 @@ export default function DeliveryNotesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const listRequestGen = useRef(0);
   const prevListDepsRef = useRef({
@@ -537,6 +543,11 @@ export default function DeliveryNotesPage() {
         ]);
 
       const filterLabel = fmtScheduleDay(storeKeeperDateFilter);
+
+      const jsPDFModule = await import("jspdf");
+      const autoTableModule = await import("jspdf-autotable");
+      const jsPDF = jsPDFModule.default;
+      const autoTable = autoTableModule.default;
 
       const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "landscape" });
       const pageW = doc.internal.pageSize.getWidth();
@@ -811,7 +822,7 @@ export default function DeliveryNotesPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <ResponsivePageActions>
           <Button
             type="button"
             variant="outline"
@@ -832,27 +843,16 @@ export default function DeliveryNotesPage() {
               New delivery
             </Link>
           </Button>
-        </div>
+        </ResponsivePageActions>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-9 w-9 shrink-0 text-muted-foreground",
-              filtersOpen && "bg-primary/15 text-primary",
-            )}
-            aria-label={
-              filtersOpen ? "Hide delivery filters" : "Show delivery filters"
-            }
-            aria-expanded={filtersOpen}
-            aria-controls="delivery-notes-filter-panel"
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <SlidersVertical className="h-4 w-4" aria-hidden />
-          </Button>
+          <DirectoryFilterToggleButton
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="delivery-notes-filter-panel"
+            label="delivery filters"
+          />
         ) : null
       }
     >
@@ -870,56 +870,38 @@ export default function DeliveryNotesPage() {
       ) : null}
 
       {showDirectory ? (
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-            filtersOpen ? "gap-6" : "gap-0",
-          )}
-        >
-          <div
-            id="delivery-notes-filter-panel"
-            className={cn(
-              "shrink-0 overflow-hidden",
-              "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-              "motion-reduce:transition-none motion-reduce:duration-0",
-              filtersOpen
-                ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
-                : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
-            )}
-            aria-hidden={!filtersOpen}
+        <DirectoryListFrame filtersOpen={filtersOpen}>
+          <DirectoryFilterPanel
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="delivery-notes-filter-panel"
+            title="Delivery filters"
           >
-            <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
-              <DeliveryNotesFilterSidebar
-                facets={facets}
-                statusFilter={statusFilter}
-                onStatusChange={(v) => {
-                  setPage(1);
-                  setStatusFilter(v);
-                }}
+            <DeliveryNotesFilterSidebar
+              facets={facets}
+              statusFilter={statusFilter}
+              onStatusChange={(v) => {
+                setPage(1);
+                setStatusFilter(v);
+              }}
+            />
+          </DirectoryFilterPanel>
+          <div className={DIRECTORY_LIST_PANEL_CLASS}>
+            <DirectoryListSearchHeader trailing={listRangeLabel}>
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                aria-hidden
               />
-            </div>
-          </div>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50">
-            <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-              <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                  aria-hidden
-                />
-                <Input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by ID, driver, status, or date…"
-                  className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
-                  aria-label="Search delivery notes"
-                  autoComplete="off"
-                />
-              </div>
-              <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                {listRangeLabel}
-              </p>
-            </div>
+              <Input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by ID, driver, status, or date…"
+                className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                aria-label="Search delivery notes"
+                autoComplete="off"
+              />
+            </DirectoryListSearchHeader>
             <div
               className={cn(
                 "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
@@ -992,7 +974,7 @@ export default function DeliveryNotesPage() {
               />
             </div>
           </div>
-        </div>
+        </DirectoryListFrame>
       ) : null}
       <Dialog
         open={isStoreKeeperModalOpen}
@@ -1005,39 +987,41 @@ export default function DeliveryNotesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-4xl sm:max-w-[52rem]">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[min(92dvh,900px)] w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[90vh] sm:w-full sm:max-w-4xl sm:gap-4 sm:p-6 lg:max-w-[52rem]">
+          <DialogHeader className="shrink-0 space-y-2 border-b border-border/60 px-4 py-4 text-left sm:border-0 sm:px-0 sm:py-0">
             <DialogTitle>Prepare store keeper list</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-left">
               Choose a delivery date, select delivery notes, then print or
               download the product list grouped by driver.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <div className="flex flex-col gap-3 rounded-lg border border-border/60 bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between">
-              <div className="space-y-2">
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-0 sm:py-0">
+            <div className="flex flex-col gap-4 rounded-lg border border-border/60 bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+              <div className="min-w-0 space-y-2">
                 <Label htmlFor="store-keeper-date">Delivery date</Label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    id="store-keeper-date"
-                    type="date"
-                    value={storeKeeperDateFilter}
-                    onChange={(e) => setStoreKeeperDate(e.target.value)}
-                    className="w-[168px] bg-background"
-                  />
+                <Input
+                  id="store-keeper-date"
+                  type="date"
+                  value={storeKeeperDateFilter}
+                  onChange={(e) => setStoreKeeperDate(e.target.value)}
+                  className="w-full bg-background sm:w-[168px]"
+                />
+                <div className="flex items-center gap-2">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
+                    className="flex-1 sm:flex-none"
                     onClick={() => setStoreKeeperDate(toLocalDateStr(new Date()))}
                   >
                     Today
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="px-2"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
                     onClick={() => shiftStoreKeeperDate(-1)}
                     aria-label="Previous day"
                   >
@@ -1045,9 +1029,9 @@ export default function DeliveryNotesPage() {
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="px-2"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
                     onClick={() => shiftStoreKeeperDate(1)}
                     aria-label="Next day"
                   >
@@ -1055,112 +1039,154 @@ export default function DeliveryNotesPage() {
                   </Button>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <div className="flex flex-col gap-2 border-t border-border/50 pt-3 sm:border-0 sm:pt-0">
                 <span className="text-xs tabular-nums text-muted-foreground">
                   {selectedDeliveryIds.size} of {storeKeeperModalRows.length}{" "}
                   selected
                 </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={storeKeeperModalRows.length === 0}
-                  onClick={() => toggleSelectAllStoreKeeper(true)}
-                >
-                  Select all
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={selectedDeliveryIds.size === 0}
-                  onClick={() => toggleSelectAllStoreKeeper(false)}
-                >
-                  Clear
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 sm:flex-none"
+                    disabled={storeKeeperModalRows.length === 0}
+                    onClick={() => toggleSelectAllStoreKeeper(true)}
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="flex-1 sm:flex-none"
+                    disabled={selectedDeliveryIds.size === 0}
+                    onClick={() => toggleSelectAllStoreKeeper(false)}
+                  >
+                    Clear
+                  </Button>
+                </div>
               </div>
             </div>
-            <div className="max-h-[440px] overflow-auto rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">
+
+            {storeKeeperModalRows.length === 0 ? (
+              <div className="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                {rows.length === 0
+                  ? "No delivery notes available."
+                  : `No delivery notes scheduled for ${fmtScheduleDay(storeKeeperDateFilter)}.`}
+              </div>
+            ) : (
+              <>
+                <div className="divide-y rounded-md border md:hidden">
+                  {storeKeeperModalRows.map((r) => (
+                    <label
+                      key={`store-keeper-mobile-${r.id}`}
+                      className="flex cursor-pointer gap-3 px-3 py-3 active:bg-muted/30"
+                    >
                       <Checkbox
-                        checked={
-                          allStoreKeeperSelected
-                            ? true
-                            : someStoreKeeperSelected
-                              ? "indeterminate"
-                              : false
-                        }
+                        className="mt-0.5 shrink-0"
+                        checked={selectedDeliveryIds.has(r.id)}
                         onCheckedChange={(c) =>
-                          toggleSelectAllStoreKeeper(c === true)
+                          toggleDeliverySelection(r.id, c === true)
                         }
-                        aria-label="Select all delivery notes for this date"
-                        disabled={storeKeeperModalRows.length === 0}
+                        aria-label={`Select delivery ${shortDeliveryId(r.id)}`}
                       />
-                    </TableHead>
-                    <TableHead>Delivery note</TableHead>
-                    <TableHead>Delivery date</TableHead>
-                    <TableHead>Driver</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Orders</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {storeKeeperModalRows.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="py-8 text-center text-muted-foreground"
-                      >
-                        {rows.length === 0
-                          ? "No delivery notes available."
-                          : `No delivery notes scheduled for ${fmtScheduleDay(storeKeeperDateFilter)}.`}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    storeKeeperModalRows.map((r) => (
-                      <TableRow key={`store-keeper-${r.id}`}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedDeliveryIds.has(r.id)}
-                            onCheckedChange={(c) =>
-                              toggleDeliverySelection(r.id, c === true)
-                            }
-                            aria-label={`Select delivery ${shortDeliveryId(r.id)}`}
-                          />
-                        </TableCell>
-                        <TableCell className="font-medium">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
                           <Link
                             href={`/app/delivery-notes/${r.id}`}
-                            className="text-primary underline-offset-4 hover:underline"
+                            className="font-semibold text-primary underline-offset-4 hover:underline"
                             onClick={(e) => e.stopPropagation()}
                           >
                             {shortDeliveryId(r.id)}
                           </Link>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
-                          {fmtScheduleDay(r.deliveryDate)}
-                        </TableCell>
-                        <TableCell className="font-medium">{r.driverDisplay}</TableCell>
-                        <TableCell>
-                          <DeliveryNoteStatusBadge status={r.status} />
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {r.orderCount}
-                        </TableCell>
+                          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                            {r.orderCount} order{r.orderCount === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                        <p className="truncate text-sm font-medium">
+                          {r.driverDisplay}
+                        </p>
+                        <DeliveryNoteStatusBadge status={r.status} />
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="hidden max-h-[440px] overflow-auto rounded-md border md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10">
+                          <Checkbox
+                            checked={
+                              allStoreKeeperSelected
+                                ? true
+                                : someStoreKeeperSelected
+                                  ? "indeterminate"
+                                  : false
+                            }
+                            onCheckedChange={(c) =>
+                              toggleSelectAllStoreKeeper(c === true)
+                            }
+                            aria-label="Select all delivery notes for this date"
+                            disabled={storeKeeperModalRows.length === 0}
+                          />
+                        </TableHead>
+                        <TableHead>Delivery note</TableHead>
+                        <TableHead>Delivery date</TableHead>
+                        <TableHead>Driver</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Orders</TableHead>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {storeKeeperModalRows.map((r) => (
+                        <TableRow key={`store-keeper-${r.id}`}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedDeliveryIds.has(r.id)}
+                              onCheckedChange={(c) =>
+                                toggleDeliverySelection(r.id, c === true)
+                              }
+                              aria-label={`Select delivery ${shortDeliveryId(r.id)}`}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <Link
+                              href={`/app/delivery-notes/${r.id}`}
+                              className="text-primary underline-offset-4 hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {shortDeliveryId(r.id)}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
+                            {fmtScheduleDay(r.deliveryDate)}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {r.driverDisplay}
+                          </TableCell>
+                          <TableCell>
+                            <DeliveryNoteStatusBadge status={r.status} />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.orderCount}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
           </div>
-          <DialogFooter>
+
+          <DialogFooter className="shrink-0 gap-2 border-t border-border/60 px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
             <Button
               type="button"
               variant="outline"
+              className="w-full sm:w-auto"
               onClick={() => setIsStoreKeeperModalOpen(false)}
               disabled={generatingStoreKeeperList}
             >
@@ -1169,6 +1195,7 @@ export default function DeliveryNotesPage() {
             <Button
               type="button"
               variant="outline"
+              className="w-full sm:w-auto"
               onClick={() => generateStoreKeeperList("print")}
               disabled={
                 generatingStoreKeeperList || selectedDeliveryIds.size === 0
@@ -1179,6 +1206,7 @@ export default function DeliveryNotesPage() {
             </Button>
             <Button
               type="button"
+              className="w-full sm:w-auto"
               onClick={() => generateStoreKeeperList("download")}
               disabled={
                 generatingStoreKeeperList || selectedDeliveryIds.size === 0

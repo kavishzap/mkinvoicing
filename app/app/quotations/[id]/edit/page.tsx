@@ -60,6 +60,9 @@ import {
 } from "@/lib/quotations-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { QtyNumberInput } from "@/components/qty-input";
 
 type LineItem = {
   id: string;
@@ -116,7 +119,7 @@ export default function EditQuotationPage() {
   toastRef.current = toast;
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
@@ -425,8 +428,8 @@ export default function EditQuotationPage() {
       return;
     }
 
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       if (!preferences) throw new Error("Preferences not loaded");
       if (!profile) throw new Error("Profile not loaded");
 
@@ -481,16 +484,15 @@ export default function EditQuotationPage() {
         description: "Your changes were saved.",
       });
       router.push(`/app/quotations/${quotationId}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toastRef.current({
         title: "Failed to save quotation",
         description: msg,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
@@ -520,8 +522,8 @@ export default function EditQuotationPage() {
         </Link>
       }
       actions={
-        <Button onClick={saveQuotation} disabled={saving} size="sm">
-          {saving ? "Saving..." : "Save changes"}
+        <Button onClick={saveQuotation} disabled={isRunning} size="sm">
+          "Save changes"
         </Button>
       }
     >
@@ -916,16 +918,10 @@ export default function EditQuotationPage() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          min="1"
+                        <QtyNumberInput
                           value={item.quantity}
-                          onChange={(e) =>
-                            updateLineItem(
-                              item.id,
-                              "quantity",
-                              Number(e.target.value)
-                            )
+                          onValueChange={(value) =>
+                            updateLineItem(item.id, "quantity", value)
                           }
                           className={`h-9 ${
                             lineErrQty ? "border-destructive" : ""

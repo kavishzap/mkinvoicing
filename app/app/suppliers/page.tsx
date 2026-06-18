@@ -31,6 +31,7 @@ import {
   type SupplierRow,
 } from "@/lib/suppliers-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
 
 export default function SuppliersPage() {
   const { toast } = useToast();
@@ -103,12 +104,16 @@ export default function SuppliersPage() {
     <AppPageShell
       subtitle="Vendors you purchase from—add them here so purchase orders and bills stay consistent."
       actions={
-        <Button asChild className="gap-2">
-          <Link href="/app/suppliers/new">
-            <Plus className="h-4 w-4" />
-            Add supplier
-          </Link>
-        </Button>
+        <ResponsivePageActions>
+          <Button asChild size="sm" className="gap-1.5">
+            <Link href="/app/suppliers/new">
+              <Plus className="h-4 w-4" />
+              <span className="max-w-[8rem] truncate sm:max-w-none">
+                Add supplier
+              </span>
+            </Link>
+          </Button>
+        </ResponsivePageActions>
       }
     >
       {loading ? (

@@ -59,6 +59,7 @@ import {
   getActiveCompanyId,
 } from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
 
 function formatListCurrency(amount: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
@@ -415,19 +416,24 @@ export default function QuotationsPage() {
   const quotationSubtitle =
     "Send price proposals before you invoice—convert accepted quotes to orders or invoices when you’re ready.";
 
+  const createQuotationAction = (
+    <ResponsivePageActions>
+      <Button
+        size="sm"
+        className="gap-1.5"
+        onClick={() => router.push("/app/quotations/new")}
+      >
+        <Plus className="h-4 w-4" />
+        <span className="max-w-[8rem] truncate sm:max-w-none">New quote</span>
+      </Button>
+    </ResponsivePageActions>
+  );
+
   if (listLoading && rows.length === 0) {
     return (
       <AppPageShell
         subtitle={quotationSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/quotations/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Quotation
-          </Button>
-        }
+        actions={createQuotationAction}
       >
         <TableListPageSkeleton />
       </AppPageShell>
@@ -438,15 +444,7 @@ export default function QuotationsPage() {
     return (
       <AppPageShell
         subtitle={quotationSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/quotations/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Quotation
-          </Button>
-        }
+        actions={createQuotationAction}
       >
         <Card className="p-12 text-center text-muted-foreground">
           <p className="text-base font-medium text-foreground mb-2">
@@ -465,15 +463,7 @@ export default function QuotationsPage() {
   return (
     <AppPageShell
       subtitle={quotationSubtitle}
-      actions={
-        <Button
-          onClick={() => router.push("/app/quotations/new")}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Create Quotation
-        </Button>
-      }
+      actions={createQuotationAction}
     >
       <Card className="p-6">
         <DataTable

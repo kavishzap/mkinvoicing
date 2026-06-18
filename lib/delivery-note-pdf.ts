@@ -4,24 +4,11 @@ import {
   DELIVERY_NOTE_STATUS_LABELS,
   type DeliveryDetail,
 } from "@/lib/deliveries-service";
+import {
+  fetchDocumentBranding,
+  type DocumentBranding,
+} from "@/lib/branding-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
-
-type Branding = {
-  logoUrl?: string;
-  brandColor?: string;
-  companyName?: string;
-  email?: string;
-};
-
-async function fetchBranding(): Promise<Branding | undefined> {
-  try {
-    const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
-    if (!res.ok) return undefined;
-    return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
 
 async function imageUrlToDataURL(
   url: string
@@ -92,14 +79,14 @@ function fmtScheduleDay(yyyyMmDd: string | null) {
   }
 }
 
-function senderLabel(profile: Profile, branding: Branding): string {
+function senderLabel(profile: Profile, branding: DocumentBranding): string {
   if (branding.companyName?.trim()) return branding.companyName.trim();
   return profile.accountType === "company"
     ? (profile.companyName ?? "").trim() || "Your Company"
     : (profile.fullName ?? "").trim() || "Your Company";
 }
 
-function senderEmail(profile: Profile, branding: Branding): string {
+function senderEmail(profile: Profile, branding: DocumentBranding): string {
   return (
     branding.email?.trim() ||
     profile?.email?.trim() ||
@@ -130,7 +117,7 @@ function drawListFooter(
 async function buildDeliveryNotePdf(
   delivery: DeliveryDetail,
   profile: Profile,
-  branding: Branding
+  branding: DocumentBranding
 ): Promise<jsPDF> {
   const brandColor = branding.brandColor || "#0F172A";
   const resolvedLogo =
@@ -319,7 +306,7 @@ export async function renderDeliveryNotePdf(
 ): Promise<DeliveryNotePdfResult | void> {
   const [profile, brandingRaw] = await Promise.all([
     fetchProfile(),
-    fetchBranding(),
+    fetchDocumentBranding(),
   ]);
   const branding = brandingRaw ?? {};
   const doc = await buildDeliveryNotePdf(delivery, profile, branding);

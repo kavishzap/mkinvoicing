@@ -14,6 +14,8 @@ import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { stripDataUrlPrefix } from "@/lib/products-service";
 import { addCataloguePost } from "@/lib/whatsapp-catalogue-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
@@ -29,7 +31,7 @@ export default function NewWhatsAppCataloguePostPage() {
   const [desc, setDesc] = useState("");
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const previewUrl =
     imageBase64 && imageMime ? `data:${imageMime};base64,${imageBase64}` : null;
@@ -67,8 +69,8 @@ export default function NewWhatsAppCataloguePostPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    try {
-      setSaving(true);
+    await runActionProgress("Creating catalogue post…", async () => {
+      try {
       await addCataloguePost({
         description: desc,
         imageBase64,
@@ -76,15 +78,14 @@ export default function NewWhatsAppCataloguePostPage() {
       });
       toast({ title: "Post created" });
       router.push("/app/whatsapp?tab=catalogue");
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       toast({
         title: "Save failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -102,8 +103,8 @@ export default function NewWhatsAppCataloguePostPage() {
           <Button variant="outline" type="button" asChild>
             <Link href="/app/whatsapp?tab=catalogue">Cancel</Link>
           </Button>
-          <Button type="submit" form="wa-catalogue-new" disabled={saving}>
-            {saving ? "Saving…" : "Create post"}
+          <Button type="submit" form="wa-catalogue-new" disabled={isRunning}>
+            "Create post"
           </Button>
         </div>
       }

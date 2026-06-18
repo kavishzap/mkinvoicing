@@ -1677,11 +1677,12 @@ async function markLinkedSalesOrdersDeliveredToCustomer(
  * and align linked sales orders’ fulfillment when possible.
  *
  * Transition to **delivered_to_driver** runs the DB RPC `mark_delivery_delivered_to_driver`,
- * which transfers stock from the company primary warehouse to the driver’s location and
- * updates the delivery row (including `from_location_id` / `location_id`).
+ * which optionally transfers stock from the company primary warehouse to the driver’s location
+ * (`transferStock`, default true) and updates the delivery row (including `from_location_id` / `location_id`).
  */
 export async function advanceDeliveryNoteStatus(
-  deliveryId: string
+  deliveryId: string,
+  options?: { transferStock?: boolean }
 ): Promise<DeliveryDetail | null> {
   const companyId = await requireActiveCompanyId();
 
@@ -1725,19 +1726,25 @@ export async function advanceDeliveryNoteStatus(
     }
 
     const userId = await getCurrentUserId();
+    const transferStock = options?.transferStock !== false;
     const { error: rpcErr } = await supabase.rpc(
       "mark_delivery_delivered_to_driver",
       {
         p_delivery_id: deliveryId,
         p_user_id: userId,
+        p_transfer_stock: transferStock,
       }
     );
 
     if (rpcErr) {
       const raw =
         rpcErr.message ??
-        "Could not transfer stock for this delivery. Check primary warehouse stock and try again.";
-      const message = await humanizePrimaryWarehouseStockError(raw, companyId);
+        (transferStock
+          ? "Could not transfer stock for this delivery. Check primary warehouse stock and try again."
+          : "Could not update this delivery. Check warehouse and driver location setup, then try again.");
+      const message = transferStock
+        ? await humanizePrimaryWarehouseStockError(raw, companyId)
+        : raw;
       throw new Error(message);
     }
 
@@ -1757,7 +1764,11 @@ export async function advanceDeliveryNoteStatus(
 
       if (soErr) {
         throw new Error(
-          `${soErr.message ?? "Failed to update sales orders."} Inventory was already transferred for this delivery; if sales order statuses look wrong, update them manually or contact support.`
+          `${soErr.message ?? "Failed to update sales orders."}${
+            transferStock
+              ? " Inventory was already transferred for this delivery; if sales order statuses look wrong, update them manually or contact support."
+              : ""
+          }`
         );
       }
     }

@@ -20,7 +20,6 @@ import {
   Plus,
   Printer,
   Search,
-  SlidersVertical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,6 +35,15 @@ import {
   getActiveCompanyId,
 } from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  DIRECTORY_LIST_PANEL_CLASS,
+  DirectoryFilterPanel,
+  DirectoryFilterToggleButton,
+  DirectoryListFrame,
+  DirectoryListSearchHeader,
+} from "@/components/directory-list-layout";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import {
   fetchProductListFacets,
   getCachedProductList,
@@ -176,7 +184,7 @@ export default function ProductsPage() {
   });
 
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const [exportingCsv, setExportingCsv] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -574,10 +582,11 @@ export default function ProductsPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <ResponsivePageActions>
           <Button
             type="button"
             variant="outline"
+            size="sm"
             className="gap-2"
             disabled={
               companyReady !== true ||
@@ -593,6 +602,7 @@ export default function ProductsPage() {
           <Button
             type="button"
             variant="outline"
+            size="sm"
             className="gap-2"
             disabled={
               companyReady !== true ||
@@ -605,33 +615,22 @@ export default function ProductsPage() {
             <Printer className="h-4 w-4" />
             {printing ? "Preparing…" : "Print"}
           </Button>
-          <Button className="gap-2" disabled={companyReady !== true} asChild>
+          <Button className="gap-2" size="sm" disabled={companyReady !== true} asChild>
             <Link href="/app/products/new">
               <Plus className="h-4 w-4" />
               Add product
             </Link>
           </Button>
-        </div>
+        </ResponsivePageActions>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-9 w-9 shrink-0 text-muted-foreground",
-              filtersOpen && "bg-primary/15 text-primary",
-            )}
-            aria-label={
-              filtersOpen ? "Hide product filters" : "Show product filters"
-            }
-            aria-expanded={filtersOpen}
-            aria-controls="products-filter-panel"
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <SlidersVertical className="h-4 w-4" aria-hidden />
-          </Button>
+          <DirectoryFilterToggleButton
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="products-filter-panel"
+            label="product filters"
+          />
         ) : null
       }
     >
@@ -652,56 +651,38 @@ export default function ProductsPage() {
       ) : null}
 
       {showDirectory ? (
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-            filtersOpen ? "gap-6" : "gap-0",
-          )}
-        >
-          <div
-            id="products-filter-panel"
-            className={cn(
-              "shrink-0 overflow-hidden",
-              "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-              "motion-reduce:transition-none motion-reduce:duration-0",
-              filtersOpen
-                ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
-                : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
-            )}
-            aria-hidden={!filtersOpen}
+        <DirectoryListFrame filtersOpen={filtersOpen}>
+          <DirectoryFilterPanel
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="products-filter-panel"
+            title="Product filters"
           >
-            <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
-              <ProductsFilterSidebar
-                facets={facets}
-                statusFilter={statusFilter}
-                onStatusChange={(v) => {
-                  setPage(1);
-                  setStatusFilter(v);
-                }}
+            <ProductsFilterSidebar
+              facets={facets}
+              statusFilter={statusFilter}
+              onStatusChange={(v) => {
+                setPage(1);
+                setStatusFilter(v);
+              }}
+            />
+          </DirectoryFilterPanel>
+          <div className={DIRECTORY_LIST_PANEL_CLASS}>
+            <DirectoryListSearchHeader trailing={listRangeLabel}>
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                aria-hidden
               />
-            </div>
-          </div>
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50">
-            <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-              <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                  aria-hidden
-                />
-                <Input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by name, SKU, or description…"
-                  className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
-                  aria-label="Search products"
-                  autoComplete="off"
-                />
-              </div>
-              <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                {listRangeLabel}
-              </p>
-            </div>
+              <Input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, SKU, or description…"
+                className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                aria-label="Search products"
+                autoComplete="off"
+              />
+            </DirectoryListSearchHeader>
             <div
               className={cn(
                 "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
@@ -771,7 +752,7 @@ export default function ProductsPage() {
               />
             </div>
           </div>
-        </div>
+        </DirectoryListFrame>
       ) : null}
     </AppPageShell>
   );

@@ -35,7 +35,6 @@ import {
   Plus,
   Printer,
   Search,
-  SlidersVertical,
   StickyNote,
   Trash2,
   Truck,
@@ -101,6 +100,15 @@ import {
   getActiveCompanyId,
 } from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  DIRECTORY_LIST_PANEL_CLASS,
+  DirectoryFilterPanel,
+  DirectoryFilterToggleButton,
+  DirectoryListFrame,
+  DirectoryListSearchHeader,
+} from "@/components/directory-list-layout";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import { cn } from "@/lib/utils";
 
 const FULFILLMENT_FILTER_ICONS: Partial<
@@ -451,7 +459,7 @@ export default function SalesOrdersPage() {
   });
 
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -877,6 +885,10 @@ export default function SalesOrdersPage() {
             {row.original.number}
           </span>
         ),
+        meta: {
+          label: "Order #",
+          mobilePrimary: true,
+        },
       },
       {
         id: "notes",
@@ -900,8 +912,10 @@ export default function SalesOrdersPage() {
           <DataTableColumnHeader column={column} title="Customer" />
         ),
         meta: {
+          label: "Customer",
           stopRowClick: true,
-          tdClassName: "text-muted-foreground",
+          tdClassName: "text-muted-foreground hidden lg:table-cell",
+          thClassName: "hidden lg:table-cell",
         },
         cell: ({ row }) => {
           const { customerId, clientName } = row.original;
@@ -924,11 +938,15 @@ export default function SalesOrdersPage() {
           <DataTableColumnHeader column={column} title="Address" />
         ),
         cell: ({ row }) => (
-          <span className="max-w-[200px] truncate block">
+          <span className="max-w-[140px] truncate block sm:max-w-[200px]">
             {row.original.address || "—"}
           </span>
         ),
-        meta: { tdClassName: "text-muted-foreground max-w-[200px]" },
+        meta: {
+          label: "Address",
+          tdClassName: "text-muted-foreground max-w-[140px] hidden xl:table-cell",
+          thClassName: "hidden xl:table-cell",
+        },
       },
       {
         id: "city",
@@ -937,7 +955,11 @@ export default function SalesOrdersPage() {
           <DataTableColumnHeader column={column} title="City" />
         ),
         cell: ({ row }) => row.original.cityName || "—",
-        meta: { tdClassName: "text-muted-foreground" },
+        meta: {
+          label: "City",
+          tdClassName: "text-muted-foreground hidden md:table-cell",
+          thClassName: "hidden md:table-cell",
+        },
       },
       {
         id: "createdBy",
@@ -946,7 +968,11 @@ export default function SalesOrdersPage() {
           <DataTableColumnHeader column={column} title="Created by" />
         ),
         cell: ({ row }) => row.original.createdByName || "—",
-        meta: { tdClassName: "text-muted-foreground" },
+        meta: {
+          label: "Created by",
+          tdClassName: "text-muted-foreground hidden xl:table-cell",
+          thClassName: "hidden xl:table-cell",
+        },
       },
       {
         id: "deliveryDate",
@@ -959,7 +985,11 @@ export default function SalesOrdersPage() {
           row.original.deliveryDate
             ? formatListDate(row.original.deliveryDate)
             : "—",
-        meta: { tdClassName: "text-muted-foreground" },
+        meta: {
+          label: "Delivery date",
+          tdClassName: "text-muted-foreground hidden lg:table-cell",
+          thClassName: "hidden lg:table-cell",
+        },
       },
       {
         id: "fulfillmentStatus",
@@ -973,6 +1003,8 @@ export default function SalesOrdersPage() {
           />
         ),
         meta: {
+          label: "Fulfillment",
+          mobileInline: true,
           tdClassName: "text-muted-foreground",
           searchValue: (row: SalesOrderListRow) =>
             salesOrderFulfillmentFilterLabel(row.fulfillmentStatus),
@@ -987,6 +1019,10 @@ export default function SalesOrdersPage() {
         cell: ({ row }) => (
           <SalesOrderPaymentStatusBadge status={row.original.paymentStatus} />
         ),
+        meta: {
+          label: "Payment",
+          mobileInline: true,
+        },
       },
       {
         id: "total",
@@ -997,6 +1033,7 @@ export default function SalesOrdersPage() {
           </div>
         ),
         meta: {
+          label: "Total",
           thClassName: "text-right",
           tdClassName: "text-right font-medium tabular-nums",
         },
@@ -1123,11 +1160,12 @@ export default function SalesOrdersPage() {
       compact
       className="max-w-none w-full bg-muted/40 px-3 py-3 sm:bg-muted/35 sm:px-5 sm:py-4 md:px-6 dark:bg-background"
       actions={
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <ResponsivePageActions>
           <Button
             type="button"
             variant="outline"
-            className="gap-2"
+            size="sm"
+            className="gap-1.5"
             disabled={
               companyReady !== true ||
               exportingCsv ||
@@ -1137,12 +1175,15 @@ export default function SalesOrdersPage() {
             onClick={() => void handleExportCsv()}
           >
             <Download className="h-4 w-4" />
-            {exportingCsv ? "Exporting…" : "Export CSV"}
+            <span className="hidden sm:inline">
+              {exportingCsv ? "Exporting…" : "Export CSV"}
+            </span>
           </Button>
           <Button
             type="button"
             variant="outline"
-            className="gap-2"
+            size="sm"
+            className="gap-1.5"
             disabled={
               companyReady !== true ||
               printing ||
@@ -1152,35 +1193,33 @@ export default function SalesOrdersPage() {
             onClick={() => void handlePrint()}
           >
             <Printer className="h-4 w-4" />
-            {printing ? "Preparing…" : "Print"}
+            <span className="hidden sm:inline">
+              {printing ? "Preparing…" : "Print"}
+            </span>
           </Button>
-          <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
+          <Button
+            className="shrink-0 gap-1.5"
+            size="sm"
+            disabled={companyReady !== true}
+            asChild
+          >
             <Link href="/app/sales-orders/new">
               <Plus className="h-4 w-4" />
-              Create sales order
+              <span className="max-w-[7rem] truncate sm:max-w-none">
+                Create order
+              </span>
             </Link>
           </Button>
-        </div>
+        </ResponsivePageActions>
       }
       topbarTrailingBeforeTheme={
         showDirectory ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-9 w-9 shrink-0 text-muted-foreground",
-              filtersOpen && "bg-primary/15 text-primary",
-            )}
-            aria-label={
-              filtersOpen ? "Hide sales order filters" : "Show sales order filters"
-            }
-            aria-expanded={filtersOpen}
-            aria-controls="sales-orders-filter-panel"
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <SlidersVertical className="h-4 w-4" aria-hidden />
-          </Button>
+          <DirectoryFilterToggleButton
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="sales-orders-filter-panel"
+            label="sales order filters"
+          />
         ) : null
       }
     >
@@ -1202,67 +1241,49 @@ export default function SalesOrdersPage() {
       ) : null}
 
       {showDirectory && facets ? (
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-            filtersOpen ? "gap-6" : "gap-0",
-          )}
-        >
-          <div
-            id="sales-orders-filter-panel"
-            className={cn(
-              "shrink-0 overflow-hidden",
-              "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-              "motion-reduce:transition-none motion-reduce:duration-0",
-              filtersOpen
-                ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
-                : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
-            )}
-            aria-hidden={!filtersOpen}
+        <DirectoryListFrame filtersOpen={filtersOpen}>
+          <DirectoryFilterPanel
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="sales-orders-filter-panel"
+            title="Sales order filters"
           >
-            <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
-              <SalesOrdersFilterSidebar
-                facets={facets}
-                fulfillmentFilter={fulfillmentFilter}
-                onFulfillmentChange={(v) => {
-                  setPage(1);
-                  setFulfillmentFilter(v);
-                }}
-                paymentFilter={paymentFilter}
-                onPaymentChange={(v) => {
-                  setPage(1);
-                  setPaymentFilter(v);
-                }}
-                locationFilter={locationFilter}
-                onLocationChange={(v) => {
-                  setPage(1);
-                  setLocationFilter(v);
-                }}
-              />
-            </div>
-          </div>
+            <SalesOrdersFilterSidebar
+              facets={facets}
+              fulfillmentFilter={fulfillmentFilter}
+              onFulfillmentChange={(v) => {
+                setPage(1);
+                setFulfillmentFilter(v);
+              }}
+              paymentFilter={paymentFilter}
+              onPaymentChange={(v) => {
+                setPage(1);
+                setPaymentFilter(v);
+              }}
+              locationFilter={locationFilter}
+              onLocationChange={(v) => {
+                setPage(1);
+                setLocationFilter(v);
+              }}
+            />
+          </DirectoryFilterPanel>
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50">
-            <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-              <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                  aria-hidden
-                />
-                <Input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by order #, client, or phone…"
-                  className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
-                  aria-label="Search sales orders"
-                  autoComplete="off"
-                />
-              </div>
-              <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                {listRangeLabel}
-              </p>
-            </div>
+          <div className={DIRECTORY_LIST_PANEL_CLASS}>
+            <DirectoryListSearchHeader trailing={listRangeLabel}>
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                aria-hidden
+              />
+              <Input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by order #, client, or phone…"
+                className="h-9 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 sm:h-10 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                aria-label="Search sales orders"
+                autoComplete="off"
+              />
+            </DirectoryListSearchHeader>
 
             <div
               className={cn(
@@ -1341,7 +1362,7 @@ export default function SalesOrdersPage() {
               />
             </div>
           </div>
-        </div>
+        </DirectoryListFrame>
       ) : null}
 
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>

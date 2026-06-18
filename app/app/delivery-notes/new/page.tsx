@@ -73,6 +73,8 @@ import {
   type SalesOrderPickRow,
 } from "@/lib/deliveries-service";
 import type { TeamMemberRow } from "@/lib/company-team-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   getDriverZoneCityFilter,
   type DriverZoneCityFilter,
@@ -228,7 +230,7 @@ export default function NewDeliveryPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [orders, setOrders] = useState<SalesOrderPickRow[]>([]);
   const [drivers, setDrivers] = useState<TeamMemberRow[]>([]);
@@ -481,8 +483,8 @@ export default function NewDeliveryPage() {
   }
 
   async function performSave() {
-    try {
-      setSaving(true);
+    await runActionProgress("Creating delivery note…", async () => {
+      try {
       const id = await createDelivery({
         driverUserId: driverId,
         salesOrderIds: [...selected],
@@ -494,16 +496,15 @@ export default function NewDeliveryPage() {
         description: "Sales orders are now marked delivery note created.",
       });
       router.push(`/app/delivery-notes/${id}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const err = e as { message?: string };
       toast({
         title: "Could not save delivery",
         description: err?.message ?? "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   const orderColumns = useMemo<ColumnDef<SalesOrderPickRow>[]>(
@@ -866,11 +867,11 @@ export default function NewDeliveryPage() {
         <Button
           type="button"
           onClick={requestSave}
-          disabled={saving}
+          disabled={isRunning}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Save delivery"}
+          "Save delivery"
         </Button>
       }
     >
@@ -1035,16 +1036,16 @@ export default function NewDeliveryPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Save delivery"}
+              "Save delivery"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

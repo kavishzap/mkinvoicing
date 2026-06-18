@@ -48,6 +48,7 @@ import {
   type PurchaseInvoiceStatus,
 } from "@/lib/purchase-invoices-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
 
 export default function PurchaseInvoicesPage() {
   const router = useRouter();
@@ -295,19 +296,24 @@ export default function PurchaseInvoicesPage() {
   const purchaseInvoiceSubtitle =
     "Log supplier bills you receive—see what you owe and mark them paid when you settle up.";
 
+  const createInvoiceAction = (
+    <ResponsivePageActions>
+      <Button
+        size="sm"
+        className="gap-1.5"
+        onClick={() => router.push("/app/purchase-invoices/new")}
+      >
+        <Plus className="h-4 w-4" />
+        <span className="max-w-[8rem] truncate sm:max-w-none">New bill</span>
+      </Button>
+    </ResponsivePageActions>
+  );
+
   if (isLoading && rows.length === 0) {
     return (
       <AppPageShell
         subtitle={purchaseInvoiceSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/purchase-invoices/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Purchase Invoice
-          </Button>
-        }
+        actions={createInvoiceAction}
       >
         <TableListPageSkeleton />
       </AppPageShell>
@@ -318,15 +324,7 @@ export default function PurchaseInvoicesPage() {
     return (
       <AppPageShell
         subtitle={purchaseInvoiceSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/purchase-invoices/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Purchase Invoice
-          </Button>
-        }
+        actions={createInvoiceAction}
       >
         <Card className="p-12 text-center text-muted-foreground">
           <p className="text-base font-medium text-foreground mb-2">
@@ -345,15 +343,7 @@ export default function PurchaseInvoicesPage() {
   return (
     <AppPageShell
       subtitle={purchaseInvoiceSubtitle}
-      actions={
-        <Button
-          onClick={() => router.push("/app/purchase-invoices/new")}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Create Purchase Invoice
-        </Button>
-      }
+      actions={createInvoiceAction}
     >
       <Card className="p-6">
         <DataTable

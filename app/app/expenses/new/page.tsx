@@ -1,8 +1,10 @@
 "use client";
- export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
 
- import { useState } from "react";
- import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
  import { ArrowLeft, Plus, Trash2 } from "lucide-react";
  import { Button } from "@/components/ui/button";
  import { Input } from "@/components/ui/input";
@@ -23,6 +25,7 @@
  import { addExpense, type ExpenseLineItem, type ExpensePayload } from "@/lib/expenses-service";
  import Link from "next/link";
  import { AppPageShell } from "@/components/app-page-shell";
+ import { QtyNumberInput } from "@/components/qty-input";
 
  type LineItemRow = {
    id: string;
@@ -115,7 +118,7 @@
    const [description, setDescription] = useState("");
    const [notes, setNotes] = useState("");
    const [errors, setErrors] = useState<{ lineItems?: string }>({});
-   const [saving, setSaving] = useState(false);
+   const { isRunning } = useActionProgress();
    const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
 
    function addLineItem() {
@@ -170,8 +173,8 @@
    }
 
    async function performSave() {
-     try {
-       setSaving(true);
+     await runActionProgress("Creating expense…", async () => {
+      try {
        const payload = toPayload(
          lineItems,
          currency,
@@ -185,16 +188,15 @@
          description: "New expense has been added successfully.",
        });
        router.push("/app/expenses");
-     } catch (e: unknown) {
+      } catch (e: unknown) {
        const err = e as { message?: string };
        toast({
          title: "Save failed",
          description: err?.message ?? "Please try again.",
          variant: "destructive",
        });
-     } finally {
-       setSaving(false);
-     }
+      }
+    });
    }
 
    const totalAmount = lineItems.reduce((s, li) => {
@@ -222,13 +224,13 @@
             variant="outline"
             type="button"
             onClick={() => router.push("/app/expenses")}
-            disabled={saving}
+            disabled={isRunning}
             className="rounded-md font-semibold"
           >
             Cancel
           </Button>
-           <Button type="button" onClick={requestSave} disabled={saving} className="rounded-md font-semibold shadow-sm">
-             {saving ? "Saving..." : "Save expense"}
+           <Button type="button" onClick={requestSave} disabled={isRunning} className="rounded-md font-semibold shadow-sm">
+             "Save expense"
            </Button>
         </div>
       }
@@ -299,16 +301,10 @@
                          />
                        </td>
                        <td className="p-2">
-                         <Input
-                           type="number"
-                           min="1"
+                         <QtyNumberInput
                            value={li.quantity}
-                           onChange={(e) =>
-                             updateLineItem(
-                               li.id,
-                               "quantity",
-                               Number(e.target.value) || 0
-                             )
+                           onValueChange={(value) =>
+                             updateLineItem(li.id, "quantity", value)
                            }
                            className="h-9 text-right"
                          />
@@ -436,16 +432,16 @@
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Save expense"}
+              "Save expense"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

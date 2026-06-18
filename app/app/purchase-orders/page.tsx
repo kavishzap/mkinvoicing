@@ -50,6 +50,7 @@ import {
   type PurchaseOrderStatus,
 } from "@/lib/purchase-orders-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
@@ -298,19 +299,24 @@ export default function PurchaseOrdersPage() {
   const purchaseOrderSubtitle =
     "Record what you’re buying from suppliers—track approvals and match to bills later.";
 
+  const createPoAction = (
+    <ResponsivePageActions>
+      <Button
+        size="sm"
+        className="gap-1.5"
+        onClick={() => router.push("/app/purchase-orders/new")}
+      >
+        <Plus className="h-4 w-4" />
+        <span className="max-w-[8rem] truncate sm:max-w-none">Create PO</span>
+      </Button>
+    </ResponsivePageActions>
+  );
+
   if (isLoading && rows.length === 0) {
     return (
       <AppPageShell
         subtitle={purchaseOrderSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/purchase-orders/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Purchase Order
-          </Button>
-        }
+        actions={createPoAction}
       >
         <TableListPageSkeleton />
       </AppPageShell>
@@ -321,15 +327,7 @@ export default function PurchaseOrdersPage() {
     return (
       <AppPageShell
         subtitle={purchaseOrderSubtitle}
-        actions={
-          <Button
-            onClick={() => router.push("/app/purchase-orders/new")}
-            className="gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Create Purchase Order
-          </Button>
-        }
+        actions={createPoAction}
       >
         <Card className="p-12 text-center text-muted-foreground">
           <p className="text-base font-medium text-foreground mb-2">
@@ -348,15 +346,7 @@ export default function PurchaseOrdersPage() {
   return (
     <AppPageShell
       subtitle={purchaseOrderSubtitle}
-      actions={
-        <Button
-          onClick={() => router.push("/app/purchase-orders/new")}
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Create Purchase Order
-        </Button>
-      }
+      actions={createPoAction}
     >
       <Card className="p-6">
         <DataTable

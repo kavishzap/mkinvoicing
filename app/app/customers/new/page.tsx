@@ -30,6 +30,8 @@ import {
   validateCustomerDirectoryForm,
   type CustomerDirectoryFormData,
 } from "@/components/customer-directory-form-fields";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   listDeliveryCities,
   type DeliveryCityRow,
@@ -87,7 +89,7 @@ function NewCustomerForm() {
   const [errors, setErrors] = useState<
     Partial<Record<keyof CustomerDirectoryFormData, string>>
   >({});
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
 
@@ -124,8 +126,8 @@ function NewCustomerForm() {
   }
 
   async function performSave() {
-    try {
-      setSaving(true);
+    await runActionProgress("Creating customer…", async () => {
+      try {
       const created = await addCustomer(customerDirectoryFormToPayload(formData));
       toastRef.current({
         title: "Customer added",
@@ -136,15 +138,14 @@ function NewCustomerForm() {
       } else {
         router.push(returnTo);
       }
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       toastRef.current({
         title: "Could not save",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -170,11 +171,11 @@ function NewCustomerForm() {
           <Button
             type="button"
             onClick={requestSave}
-            disabled={saving}
+            disabled={isRunning}
             className="gap-2 rounded font-semibold shadow-sm"
           >
             <Save className="size-3.5 shrink-0" aria-hidden />
-            {saving ? "Saving…" : "Save customer"}
+            "Save customer"
           </Button>
         </div>
       }
@@ -246,16 +247,16 @@ function NewCustomerForm() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Save customer"}
+              "Save customer"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -239,15 +239,13 @@ async function fetchDashboardDataLegacy(
   companyId: string,
   year: number,
 ): Promise<DashboardData> {
-  const companyOr = `company_id.eq.${companyId},company_id.is.null`;
-
   const [invoices, expenses, custRes, prodRes, purchases, drvSettlements, drvCreditSetRes] =
     await Promise.all([
       fetchAllRowsParallel<RawInvoice>((from, to, withCount) =>
         supabase
           .from("invoices")
           .select("status, issue_date, due_date, currency, total", withCount ? { count: "exact" } : undefined)
-          .or(companyOr)
+          .eq("company_id", companyId)
           .order("id", { ascending: true })
           .range(from, to),
       ),

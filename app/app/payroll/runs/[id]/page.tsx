@@ -47,6 +47,8 @@ import { fetchProfile } from "@/lib/settings-service";
 import { generatePayslipPDF } from "@/lib/payslip-pdf";
 import { useToast } from "@/hooks/use-toast";
 import { AppPageShell } from "@/components/app-page-shell";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "MUR" }).format(amount);
@@ -72,7 +74,7 @@ export default function PayrollRunDetailPage() {
   const [paymentMethod, setPaymentMethod] = useState<"Cash" | "Card Payment" | "Bank Transfer">("Bank Transfer");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [creatingExpense, setCreatingExpense] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -104,8 +106,8 @@ export default function PayrollRunDetailPage() {
 
   async function handleMarkPaid() {
     if (!markingPaidPayslip || !data) return;
-    try {
-      setSaving(true);
+    await runActionProgress("Marking payslip as paid…", async () => {
+      try {
       await markPayslipPaid(markingPaidPayslip.id, {
         payment_method: paymentMethod,
         payment_date: paymentDate,
@@ -117,15 +119,14 @@ export default function PayrollRunDetailPage() {
       });
       setMarkingPaidPayslip(null);
       await reload();
-    } catch (e) {
+      } catch (e) {
       toast({
         title: "Failed to mark paid",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   async function handleDownloadPayslip(ps: PayslipWithEmployee) {
@@ -332,8 +333,8 @@ export default function PayrollRunDetailPage() {
             <Button variant="outline" onClick={() => setMarkingPaidPayslip(null)}>
               Cancel
             </Button>
-            <Button onClick={handleMarkPaid} disabled={saving}>
-              {saving ? "Saving…" : "Mark paid"}
+            <Button onClick={handleMarkPaid} disabled={isRunning}>
+              "Mark paid"
             </Button>
           </DialogFooter>
         </DialogContent>

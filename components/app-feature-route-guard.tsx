@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { DirectoryListPageSkeleton } from "@/components/page-skeletons";
+import {
+  DashboardPageSkeleton,
+  DirectoryListPageSkeleton,
+} from "@/components/page-skeletons";
 import { useAppFeatures } from "@/contexts/app-features-context";
 import {
   APP_NAV_ITEMS,
@@ -56,6 +59,12 @@ export function AppFeatureRouteGuard({
   }, [status]);
 
   useEffect(() => {
+    if (status !== "unauthenticated") return;
+    const returnTo = encodeURIComponent(pathname);
+    router.replace(`/auth/login?returnTo=${returnTo}`);
+  }, [status, pathname, router]);
+
+  useEffect(() => {
     if (status !== "ready") return;
     if (hasAccess) return;
     const fallback = pickFallbackHref(allowed);
@@ -65,15 +74,23 @@ export function AppFeatureRouteGuard({
   }, [status, hasAccess, allowed, pathname, router]);
 
   if (status === "loading" && !hasEverBeenReady.current) {
+    const isDashboard =
+      pathname === "/app" || pathname === "/app/";
     return (
       <div className="mx-auto flex min-h-0 w-full max-w-none flex-1 flex-col px-4 py-6">
-        <DirectoryListPageSkeleton className="min-h-[360px] flex-1" showFilterPanel={false} />
+        {isDashboard ? (
+          <DashboardPageSkeleton />
+        ) : (
+          <DirectoryListPageSkeleton
+            className="min-h-[360px] flex-1"
+            showFilterPanel={false}
+          />
+        )}
       </div>
     );
   }
 
   if (status === "unauthenticated") {
-    // AuthRouteGuard elsewhere handles redirecting to login; render nothing.
     return null;
   }
 

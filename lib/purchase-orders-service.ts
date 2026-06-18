@@ -116,8 +116,7 @@ export async function expireStalePurchaseOrders(): Promise<void> {
     .eq("company_id", companyId);
 
   if (error) {
-    // eslint-disable-next-line no-console
-    console.warn("expireStalePurchaseOrders:", error.message);
+    return;
   }
 }
 

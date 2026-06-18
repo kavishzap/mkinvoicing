@@ -19,6 +19,8 @@ import {
   updateCataloguePost,
 } from "@/lib/whatsapp-catalogue-service";
 import { cn } from "@/lib/utils";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
@@ -97,7 +99,7 @@ export default function EditWhatsAppCataloguePostPage() {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
   const [initial, setInitial] = useState<InitialSnapshot | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const previewUrl =
     imageBase64 && imageMime ? `data:${imageMime};base64,${imageBase64}` : null;
@@ -179,8 +181,8 @@ export default function EditWhatsAppCataloguePostPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!id || !isDirty) return;
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateCataloguePost(id, {
         description: desc,
         imageBase64,
@@ -188,15 +190,14 @@ export default function EditWhatsAppCataloguePostPage() {
       });
       toast({ title: "Post updated" });
       router.push("/app/whatsapp?tab=catalogue");
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       toast({
         title: "Save failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   if (loading) {
@@ -226,10 +227,10 @@ export default function EditWhatsAppCataloguePostPage() {
           <Button
             type="submit"
             form="wa-catalogue-edit"
-            disabled={saving || !isDirty}
+            disabled={isRunning || !isDirty}
             className="font-semibold shadow-sm"
           >
-            {saving ? "Saving…" : "Save changes"}
+            "Save changes"
           </Button>
         </div>
       }

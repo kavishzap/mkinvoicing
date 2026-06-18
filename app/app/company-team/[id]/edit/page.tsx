@@ -36,6 +36,8 @@ import {
 } from "@/lib/location-zones-drivers-service";
 import { formatLocationTypeLabel } from "@/lib/locations-service";
 import { cn } from "@/lib/utils";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -105,7 +107,7 @@ export default function CompanyTeamEditMemberPage() {
   const [driverAssignments, setDriverAssignments] = useState<
     DriverLocationAssignmentRow[]
   >([]);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const load = useCallback(async () => {
     if (!membershipId) return;
@@ -190,8 +192,8 @@ export default function CompanyTeamEditMemberPage() {
       }
     }
 
-    setSaving(true);
-    try {
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateTeamMember(member.membershipId, {
         full_name: fullName.trim(),
         email: email.trim() || null,
@@ -202,15 +204,14 @@ export default function CompanyTeamEditMemberPage() {
       });
       toast({ title: "Saved", description: "Team member updated." });
       router.push("/app/company-team");
-    } catch (err) {
+      } catch (err) {
       toast({
         title: "Save failed",
         description: err instanceof Error ? err.message : "Try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -240,15 +241,15 @@ export default function CompanyTeamEditMemberPage() {
             <Button
               type="submit"
               form="company-team-edit-form"
-              disabled={saving}
+              disabled={isRunning}
               className="gap-2 rounded-md font-semibold shadow-sm"
             >
-              {saving ? (
+              {isRunning ? (
                 <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
               ) : (
                 <Save className="size-3.5 shrink-0" aria-hidden />
               )}
-              {saving ? "Saving…" : "Save"}
+              "Save"
             </Button>
           </div>
         ) : null

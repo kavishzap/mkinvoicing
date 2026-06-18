@@ -15,7 +15,6 @@ import {
   History,
   LayoutGrid,
   Search,
-  SlidersVertical,
   Warehouse,
   ChevronUp,
   ChevronDown,
@@ -59,7 +58,17 @@ import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
 import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  DIRECTORY_LIST_PANEL_CLASS,
+  DirectoryFilterPanel,
+  DirectoryFilterToggleButton,
+  DirectoryListFrame,
+  DirectoryListSearchHeader,
+} from "@/components/directory-list-layout";
+import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
   ACTIVE_COMPANY_ID_STORAGE_KEY,
@@ -69,7 +78,6 @@ import { listActiveLocationsForSelect, type LocationOption } from "@/lib/locatio
 import { listProducts, type ProductRow } from "@/lib/products-service";
 import {
   listStockBalances,
-  listStockBalancesForProduct,
   listStockBalancesForLocation,
   listInventoryMovements,
   recordInventoryTransfer,
@@ -78,6 +86,7 @@ import {
   type StockBalanceRow,
   type InventoryMovementRow,
 } from "@/lib/inventory-stock-service";
+import { QtyInput } from "@/components/qty-input";
 import { cn } from "@/lib/utils";
 
 const NONE = "__none__";
@@ -91,21 +100,18 @@ const EVENT_LABELS: Record<InventoryMovementRow["event_type"], string> = {
 
 type MovEventFilter = "all" | InventoryMovementRow["event_type"];
 
-type TransferLine = {
+type InventoryLine = {
   id: string;
   productId: string;
   productName: string;
   productSku: string;
-  maxQty: number;
+  maxQty?: number;
   qty: string;
 };
 
-function newTransferLineId() {
-  return `tl-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+function newInventoryLineId() {
+  return `inv-line-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
-
-const LIST_PANEL_CLASS =
-  "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50";
 
 const SEARCH_INPUT_CLASS =
   "h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background";
@@ -352,45 +358,30 @@ function InventoryFormPanel({
   title,
   description,
   children,
+  className,
 }: {
   title: string;
-  description: string;
+  description?: string;
   children: React.ReactNode;
-}) {
-  return (
-    <div className={LIST_PANEL_CLASS}>
-      <div className="shrink-0 border-b border-border/50 bg-muted/45 px-5 py-4 dark:bg-muted/25">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto p-5">{children}</div>
-    </div>
-  );
-}
-
-function FilterPanelShell({
-  open,
-  panelId,
-  children,
-}: {
-  open: boolean;
-  panelId: string;
-  children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <div
-      id={panelId}
       className={cn(
-        "shrink-0 overflow-hidden",
-        "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-        "motion-reduce:transition-none motion-reduce:duration-0",
-        open
-          ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
-          : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
+        DIRECTORY_LIST_PANEL_CLASS,
+        "flex min-h-0 min-w-0 flex-1 flex-col",
+        className,
       )}
-      aria-hidden={!open}
     >
-      <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
+      <div className="shrink-0 border-b border-border/50 bg-muted/45 px-4 py-3 sm:px-5 dark:bg-muted/25">
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        {description ? (
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto px-4 py-4 sm:px-5">
         {children}
       </div>
     </div>
@@ -400,10 +391,11 @@ function FilterPanelShell({
 export default function InventoryPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { isRunning } = useActionProgress();
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [tab, setTab] = useState("balances");
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [locations, setLocations] = useState<LocationOption[]>([]);
@@ -433,7 +425,7 @@ export default function InventoryPage() {
   const [transferFromId, setTransferFromId] = useState("");
   const [transferToId, setTransferToId] = useState("");
   const [transferNote, setTransferNote] = useState("");
-  const [transferLines, setTransferLines] = useState<TransferLine[]>([]);
+  const [transferLines, setTransferLines] = useState<InventoryLine[]>([]);
   const [transferStockAtFrom, setTransferStockAtFrom] = useState<StockBalanceRow[]>([]);
   const [transferStockLoading, setTransferStockLoading] = useState(false);
   const [transferPickerSelected, setTransferPickerSelected] = useState<Set<string>>(
@@ -443,22 +435,30 @@ export default function InventoryPage() {
     {},
   );
   const [transferPickerSearchQuery, setTransferPickerSearchQuery] = useState("");
-  const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [transferConfirmOpen, setTransferConfirmOpen] = useState(false);
 
-  const [refillProductId, setRefillProductId] = useState("");
   const [refillLocationId, setRefillLocationId] = useState("");
-  const [refillQty, setRefillQty] = useState("");
   const [refillNote, setRefillNote] = useState("");
-  const [refillSubmitting, setRefillSubmitting] = useState(false);
+  const [refillLines, setRefillLines] = useState<InventoryLine[]>([]);
+  const [refillPickerSelected, setRefillPickerSelected] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [refillPickerQtys, setRefillPickerQtys] = useState<Record<string, string>>(
+    {},
+  );
+  const [refillPickerSearchQuery, setRefillPickerSearchQuery] = useState("");
   const [refillConfirmOpen, setRefillConfirmOpen] = useState(false);
 
-  const [adjProductId, setAdjProductId] = useState("");
   const [adjFromId, setAdjFromId] = useState("");
-  const [adjQty, setAdjQty] = useState("");
   const [adjNote, setAdjNote] = useState("");
-  const [adjAtLoc, setAdjAtLoc] = useState<StockBalanceRow[]>([]);
-  const [adjSubmitting, setAdjSubmitting] = useState(false);
+  const [adjLines, setAdjLines] = useState<InventoryLine[]>([]);
+  const [adjStockAtFrom, setAdjStockAtFrom] = useState<StockBalanceRow[]>([]);
+  const [adjStockLoading, setAdjStockLoading] = useState(false);
+  const [adjPickerSelected, setAdjPickerSelected] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [adjPickerQtys, setAdjPickerQtys] = useState<Record<string, string>>({});
+  const [adjPickerSearchQuery, setAdjPickerSearchQuery] = useState("");
   const [adjustConfirmOpen, setAdjustConfirmOpen] = useState(false);
 
   useEffect(() => {
@@ -731,29 +731,54 @@ export default function InventoryPage() {
   }, [transferFromId]);
 
   useEffect(() => {
+    setRefillLines([]);
+    setRefillPickerSelected(new Set());
+    setRefillPickerQtys({});
+    setRefillPickerSearchQuery("");
+  }, [refillLocationId]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!adjProductId) {
-        setAdjAtLoc([]);
-        setAdjFromId("");
+      if (!adjFromId) {
+        setAdjStockAtFrom([]);
+        setAdjLines([]);
+        setAdjPickerSelected(new Set());
+        setAdjPickerQtys({});
+        setAdjPickerSearchQuery("");
         return;
       }
+      setAdjStockLoading(true);
       try {
-        const rows = await listStockBalancesForProduct(adjProductId);
+        const rows = await listStockBalancesForLocation(adjFromId);
         if (!cancelled) {
-          setAdjAtLoc(rows);
-          setAdjFromId((prev) =>
-            prev && rows.some((r) => r.location_id === prev) ? prev : "",
+          setAdjStockAtFrom(rows);
+          setAdjLines((prev) =>
+            prev.filter((line) =>
+              rows.some(
+                (r) => r.product_id === line.productId && r.quantity > 0,
+              ),
+            ),
           );
+          setAdjPickerSelected(new Set());
+          setAdjPickerQtys({});
+          setAdjPickerSearchQuery("");
         }
       } catch {
-        if (!cancelled) setAdjAtLoc([]);
+        if (!cancelled) {
+          setAdjStockAtFrom([]);
+          setAdjLines([]);
+          setAdjPickerQtys({});
+          setAdjPickerSearchQuery("");
+        }
+      } finally {
+        if (!cancelled) setAdjStockLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [adjProductId]);
+  }, [adjFromId]);
 
   const transferLineProductIds = useMemo(
     () => new Set(transferLines.map((l) => l.productId)),
@@ -782,11 +807,52 @@ export default function InventoryPage() {
     });
   }, [transferProductsAvailableToPick, transferPickerSearchNorm]);
 
-  const adjFromRow = useMemo(
-    () => adjAtLoc.find((r) => r.location_id === adjFromId),
-    [adjAtLoc, adjFromId],
+  const refillLineProductIds = useMemo(
+    () => new Set(refillLines.map((l) => l.productId)),
+    [refillLines],
   );
-  const maxAdjQty = adjFromRow?.quantity ?? 0;
+
+  const refillProductsAvailableToPick = useMemo(
+    () => products.filter((p) => !refillLineProductIds.has(p.id)),
+    [products, refillLineProductIds],
+  );
+
+  const refillPickerSearchNorm = refillPickerSearchQuery.trim().toLowerCase();
+
+  const refillProductsFilteredToPick = useMemo(() => {
+    if (!refillPickerSearchNorm) return refillProductsAvailableToPick;
+    return refillProductsAvailableToPick.filter((p) => {
+      const name = p.name.toLowerCase();
+      const sku = (p.sku ?? "").toLowerCase();
+      return name.includes(refillPickerSearchNorm) || sku.includes(refillPickerSearchNorm);
+    });
+  }, [refillProductsAvailableToPick, refillPickerSearchNorm]);
+
+  const adjLineProductIds = useMemo(
+    () => new Set(adjLines.map((l) => l.productId)),
+    [adjLines],
+  );
+
+  const adjProductsAvailableToPick = useMemo(
+    () =>
+      adjStockAtFrom.filter(
+        (r) => r.quantity > 0 && !adjLineProductIds.has(r.product_id),
+      ),
+    [adjStockAtFrom, adjLineProductIds],
+  );
+
+  const adjPickerSearchNorm = adjPickerSearchQuery.trim().toLowerCase();
+
+  const adjProductsFilteredToPick = useMemo(() => {
+    if (!adjPickerSearchNorm) return adjProductsAvailableToPick;
+    return adjProductsAvailableToPick.filter((r) => {
+      const name = r.product_name.toLowerCase();
+      const sku = (r.product_sku ?? "").toLowerCase();
+      return (
+        name.includes(adjPickerSearchNorm) || sku.includes(adjPickerSearchNorm)
+      );
+    });
+  }, [adjProductsAvailableToPick, adjPickerSearchNorm]);
 
   const toLocationOptions = useMemo(() => {
     if (!transferFromId) return locations;
@@ -852,7 +918,7 @@ export default function InventoryPage() {
         const raw = transferPickerQtys[r.product_id] ?? "1";
         const q = parseFloat(raw);
         return {
-          id: newTransferLineId(),
+          id: newInventoryLineId(),
           productId: r.product_id,
           productName: r.product_name,
           productSku: r.product_sku,
@@ -893,6 +959,157 @@ export default function InventoryPage() {
     });
   }
 
+  function toggleRefillPickerProduct(productId: string, checked: boolean) {
+    setRefillPickerSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(productId);
+      else next.delete(productId);
+      return next;
+    });
+    if (checked) {
+      setRefillPickerQtys((prev) => ({
+        ...prev,
+        [productId]: prev[productId]?.trim() ? prev[productId] : "1",
+      }));
+    }
+  }
+
+  function updateRefillPickerQty(productId: string, qty: string) {
+    setRefillPickerQtys((prev) => ({ ...prev, [productId]: qty }));
+    if (qty.trim()) {
+      setRefillPickerSelected((prev) => {
+        const next = new Set(prev);
+        next.add(productId);
+        return next;
+      });
+    }
+  }
+
+  function addSelectedProductsToRefillLines() {
+    const toAdd = products.filter((p) => refillPickerSelected.has(p.id));
+    if (toAdd.length === 0) return;
+
+    for (const p of toAdd) {
+      const raw = refillPickerQtys[p.id] ?? "1";
+      const q = parseFloat(raw);
+      if (Number.isNaN(q) || q <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: `Enter a quantity for “${p.name}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setRefillLines((prev) => [
+      ...prev,
+      ...toAdd.map((p) => {
+        const raw = refillPickerQtys[p.id] ?? "1";
+        const q = parseFloat(raw);
+        return {
+          id: newInventoryLineId(),
+          productId: p.id,
+          productName: p.name,
+          productSku: p.sku ?? "",
+          qty: String(q),
+        };
+      }),
+    ]);
+    setRefillPickerSelected(new Set());
+    setRefillPickerQtys({});
+  }
+
+  function updateRefillLineQty(lineId: string, qty: string) {
+    setRefillLines((prev) =>
+      prev.map((l) => (l.id === lineId ? { ...l, qty } : l)),
+    );
+  }
+
+  function removeRefillLine(lineId: string) {
+    setRefillLines((prev) => prev.filter((l) => l.id !== lineId));
+  }
+
+  function toggleAdjPickerProduct(productId: string, checked: boolean) {
+    setAdjPickerSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(productId);
+      else next.delete(productId);
+      return next;
+    });
+    if (checked) {
+      setAdjPickerQtys((prev) => ({
+        ...prev,
+        [productId]: prev[productId]?.trim() ? prev[productId] : "1",
+      }));
+    }
+  }
+
+  function updateAdjPickerQty(productId: string, qty: string) {
+    setAdjPickerQtys((prev) => ({ ...prev, [productId]: qty }));
+    if (qty.trim()) {
+      setAdjPickerSelected((prev) => {
+        const next = new Set(prev);
+        next.add(productId);
+        return next;
+      });
+    }
+  }
+
+  function addSelectedProductsToAdjLines() {
+    const toAdd = adjStockAtFrom.filter((r) => adjPickerSelected.has(r.product_id));
+    if (toAdd.length === 0) return;
+
+    for (const r of toAdd) {
+      const raw = adjPickerQtys[r.product_id] ?? "1";
+      const q = parseFloat(raw);
+      if (Number.isNaN(q) || q <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: `Enter a quantity for “${r.product_name}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (q > r.quantity) {
+        toast({
+          title: "Not enough stock",
+          description: `Only ${formatQty(r.quantity)} available for “${r.product_name}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setAdjLines((prev) => [
+      ...prev,
+      ...toAdd.map((r) => {
+        const raw = adjPickerQtys[r.product_id] ?? "1";
+        const q = parseFloat(raw);
+        return {
+          id: newInventoryLineId(),
+          productId: r.product_id,
+          productName: r.product_name,
+          productSku: r.product_sku,
+          maxQty: r.quantity,
+          qty: String(q),
+        };
+      }),
+    ]);
+    setAdjPickerSelected(new Set());
+    setAdjPickerQtys({});
+  }
+
+  function updateAdjLineQty(lineId: string, qty: string) {
+    setAdjLines((prev) =>
+      prev.map((l) => (l.id === lineId ? { ...l, qty } : l)),
+    );
+  }
+
+  function removeAdjLine(lineId: string) {
+    setAdjLines((prev) => prev.filter((l) => l.id !== lineId));
+  }
+
   function requestTransfer(e: React.FormEvent) {
     e.preventDefault();
     if (!transferFromId || !transferToId) {
@@ -930,7 +1147,7 @@ export default function InventoryPage() {
         });
         return;
       }
-      if (q > line.maxQty) {
+      if (line.maxQty != null && q > line.maxQty) {
         toast({
           title: "Not enough stock",
           description: `Only ${formatQty(line.maxQty)} available for “${line.productName}” at the source.`,
@@ -944,143 +1161,197 @@ export default function InventoryPage() {
   }
 
   async function performTransfer() {
-    try {
-      setTransferSubmitting(true);
-      const note = transferNote.trim() || null;
-      for (const line of transferLines) {
-        await recordInventoryTransfer({
-          productId: line.productId,
-          fromLocationId: transferFromId,
-          toLocationId: transferToId,
-          quantity: parseFloat(line.qty),
-          note,
+    await runActionProgress("Recording transfer…", async () => {
+      try {
+        const note = transferNote.trim() || null;
+        for (const line of transferLines) {
+          await recordInventoryTransfer({
+            productId: line.productId,
+            fromLocationId: transferFromId,
+            toLocationId: transferToId,
+            quantity: parseFloat(line.qty),
+            note,
+          });
+        }
+        const n = transferLines.length;
+        toast({
+          title: n === 1 ? "Transfer recorded" : "Transfers recorded",
+          description:
+            n === 1
+              ? "Balances and history were updated."
+              : `${n} products transferred. Balances and history were updated.`,
+        });
+        setTransferLines([]);
+        setTransferPickerSelected(new Set());
+        setTransferPickerQtys({});
+        setTransferNote("");
+        await Promise.all([refreshBalances(), refreshMovements()]);
+        if (transferFromId) {
+          const rows = await listStockBalancesForLocation(transferFromId);
+          setTransferStockAtFrom(rows);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Please try again.";
+        toast({
+          title: "Transfer failed",
+          description: msg,
+          variant: "destructive",
         });
       }
-      const n = transferLines.length;
-      toast({
-        title: n === 1 ? "Transfer recorded" : "Transfers recorded",
-        description:
-          n === 1
-            ? "Balances and history were updated."
-            : `${n} products transferred. Balances and history were updated.`,
-      });
-      setTransferLines([]);
-      setTransferPickerSelected(new Set());
-      setTransferPickerQtys({});
-      setTransferNote("");
-      await Promise.all([refreshBalances(), refreshMovements()]);
-      if (transferFromId) {
-        const rows = await listStockBalancesForLocation(transferFromId);
-        setTransferStockAtFrom(rows);
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Please try again.";
-      toast({
-        title: "Transfer failed",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setTransferSubmitting(false);
-    }
+    });
   }
 
   function requestRefill(e: React.FormEvent) {
     e.preventDefault();
-    if (!refillProductId || !refillLocationId) {
+    if (!refillLocationId) {
       toast({
-        title: "Missing fields",
-        description: "Choose product and location.",
+        title: "Missing location",
+        description: "Choose where stock arrives.",
         variant: "destructive",
       });
       return;
     }
-    const q = parseFloat(refillQty);
-    if (Number.isNaN(q) || q <= 0) {
-      toast({ title: "Invalid quantity", variant: "destructive" });
+    if (refillLines.length === 0) {
+      toast({
+        title: "No products",
+        description: "Add at least one product to refill.",
+        variant: "destructive",
+      });
       return;
     }
+
+    for (const line of refillLines) {
+      const q = parseFloat(line.qty);
+      if (Number.isNaN(q) || q <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: `Enter a quantity for “${line.productName}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setRefillConfirmOpen(true);
   }
 
   async function performRefill() {
-    const q = parseFloat(refillQty);
-    try {
-      setRefillSubmitting(true);
-      await recordInventoryRefill({
-        productId: refillProductId,
-        toLocationId: refillLocationId,
-        quantity: q,
-        note: refillNote || null,
-      });
-      toast({ title: "Refill recorded", description: "Stock increased at that location." });
-      setRefillQty("");
-      setRefillNote("");
-      await Promise.all([refreshBalances(), refreshMovements()]);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Please try again.";
-      toast({ title: "Refill failed", description: msg, variant: "destructive" });
-    } finally {
-      setRefillSubmitting(false);
-    }
+    await runActionProgress("Recording refill…", async () => {
+      try {
+        const note = refillNote.trim() || null;
+        for (const line of refillLines) {
+          await recordInventoryRefill({
+            productId: line.productId,
+            toLocationId: refillLocationId,
+            quantity: parseFloat(line.qty),
+            note,
+          });
+        }
+        const n = refillLines.length;
+        toast({
+          title: n === 1 ? "Refill recorded" : "Refills recorded",
+          description:
+            n === 1
+              ? "Stock increased at that location."
+              : `${n} products refilled at that location.`,
+        });
+        setRefillLines([]);
+        setRefillPickerSelected(new Set());
+        setRefillPickerQtys({});
+        setRefillNote("");
+        await Promise.all([refreshBalances(), refreshMovements()]);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Please try again.";
+        toast({ title: "Refill failed", description: msg, variant: "destructive" });
+      }
+    });
   }
 
   function requestAdjustOut(e: React.FormEvent) {
     e.preventDefault();
-    if (!adjProductId || !adjFromId) {
+    if (!adjFromId) {
       toast({
-        title: "Missing fields",
-        description: "Choose product and location.",
+        title: "Missing location",
+        description: "Choose where to reduce stock.",
         variant: "destructive",
       });
       return;
     }
-    const q = parseFloat(adjQty);
-    if (Number.isNaN(q) || q <= 0) {
-      toast({ title: "Invalid quantity", variant: "destructive" });
-      return;
-    }
-    if (q > maxAdjQty) {
+    if (adjLines.length === 0) {
       toast({
-        title: "Not enough stock",
-        description: `Only ${maxAdjQty} available at that location.`,
+        title: "No products",
+        description: "Add at least one product to remove.",
         variant: "destructive",
       });
       return;
     }
+
+    for (const line of adjLines) {
+      const q = parseFloat(line.qty);
+      if (Number.isNaN(q) || q <= 0) {
+        toast({
+          title: "Invalid quantity",
+          description: `Enter a quantity for “${line.productName}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (line.maxQty != null && q > line.maxQty) {
+        toast({
+          title: "Not enough stock",
+          description: `Only ${formatQty(line.maxQty)} available for “${line.productName}”.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setAdjustConfirmOpen(true);
   }
 
   async function performAdjustOut() {
-    const q = parseFloat(adjQty);
-    try {
-      setAdjSubmitting(true);
-      await recordInventoryAdjustmentOut({
-        productId: adjProductId,
-        fromLocationId: adjFromId,
-        quantity: q,
-        note: adjNote || null,
-      });
-      toast({ title: "Stock out recorded", description: "Quantity was reduced at that location." });
-      setAdjQty("");
-      setAdjNote("");
-      await Promise.all([refreshBalances(), refreshMovements()]);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Please try again.";
-      toast({ title: "Operation failed", description: msg, variant: "destructive" });
-    } finally {
-      setAdjSubmitting(false);
-    }
+    await runActionProgress("Recording stock out…", async () => {
+      try {
+        const note = adjNote.trim() || null;
+        for (const line of adjLines) {
+          await recordInventoryAdjustmentOut({
+            productId: line.productId,
+            fromLocationId: adjFromId,
+            quantity: parseFloat(line.qty),
+            note,
+          });
+        }
+        const n = adjLines.length;
+        toast({
+          title: n === 1 ? "Stock out recorded" : "Stock outs recorded",
+          description:
+            n === 1
+              ? "Quantity was reduced at that location."
+              : `${n} products removed at that location.`,
+        });
+        setAdjLines([]);
+        setAdjPickerSelected(new Set());
+        setAdjPickerQtys({});
+        setAdjNote("");
+        await Promise.all([refreshBalances(), refreshMovements()]);
+        if (adjFromId) {
+          const rows = await listStockBalancesForLocation(adjFromId);
+          setAdjStockAtFrom(rows);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Please try again.";
+        toast({
+          title: "Stock out failed",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   const locationLabel = useCallback(
     (id: string) => locations.find((l) => l.id === id)?.name ?? "location",
     [locations],
-  );
-
-  const productLabel = useCallback(
-    (id: string) => products.find((p) => p.id === id)?.name ?? "product",
-    [products],
   );
 
   const transferConfirmSummary = useMemo(() => {
@@ -1092,6 +1363,20 @@ export default function InventoryPage() {
         : `${transferLines.length} products`;
     return { from, to, lineSummary };
   }, [transferFromId, transferToId, transferLines, locationLabel]);
+
+  const refillConfirmSummary = useMemo(() => {
+    const loc = locationLabel(refillLocationId);
+    const lineSummary =
+      refillLines.length === 1 ? "1 product" : `${refillLines.length} products`;
+    return { loc, lineSummary };
+  }, [refillLocationId, refillLines.length, locationLabel]);
+
+  const adjustConfirmSummary = useMemo(() => {
+    const loc = locationLabel(adjFromId);
+    const lineSummary =
+      adjLines.length === 1 ? "1 product" : `${adjLines.length} products`;
+    return { loc, lineSummary };
+  }, [adjFromId, adjLines.length, locationLabel]);
 
   const balanceColumns = useMemo<ColumnDef<StockBalanceRow>[]>(
     () => [
@@ -1351,9 +1636,9 @@ export default function InventoryPage() {
           type="submit"
           form="inventory-form-transfer"
           className="shrink-0 gap-2"
-          disabled={disabled || transferSubmitting}
+          disabled={disabled || isRunning}
         >
-          {transferSubmitting ? "Saving…" : "Record transfers"}
+          Record transfers
         </Button>
       );
     }
@@ -1363,9 +1648,9 @@ export default function InventoryPage() {
           type="submit"
           form="inventory-form-refill"
           className="shrink-0 gap-2"
-          disabled={disabled || refillSubmitting}
+          disabled={disabled || isRunning}
         >
-          {refillSubmitting ? "Saving…" : "Record fill"}
+          Record refill
         </Button>
       );
     }
@@ -1375,9 +1660,9 @@ export default function InventoryPage() {
           type="submit"
           form="inventory-form-adjust"
           className="shrink-0 gap-2"
-          disabled={disabled || adjSubmitting}
+          disabled={disabled || isRunning}
         >
-          {adjSubmitting ? "Saving…" : "Record stock out"}
+          Record stock out
         </Button>
       );
     }
@@ -1401,9 +1686,7 @@ export default function InventoryPage() {
     companyReady,
     balanceLoading,
     refreshBalances,
-    transferSubmitting,
-    refillSubmitting,
-    adjSubmitting,
+    isRunning,
     movLoading,
     refreshMovements,
   ]);
@@ -1419,23 +1702,12 @@ export default function InventoryPage() {
       actions={shellActions}
       topbarTrailingBeforeTheme={
         showListChrome && showDirectory ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-9 w-9 shrink-0 text-muted-foreground",
-              filtersOpen && "bg-primary/15 text-primary",
-            )}
-            aria-label={
-              filtersOpen ? "Hide inventory filters" : "Show inventory filters"
-            }
-            aria-expanded={filtersOpen}
-            aria-controls={filterPanelId}
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <SlidersVertical className="h-4 w-4" aria-hidden />
-          </Button>
+          <DirectoryFilterToggleButton
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId={filterPanelId}
+            label="inventory filters"
+          />
         ) : null
       }
     >
@@ -1484,13 +1756,13 @@ export default function InventoryPage() {
             value="balances"
             className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-                filtersOpen ? "gap-6" : "gap-0",
-              )}
-            >
-              <FilterPanelShell open={filtersOpen} panelId={filterPanelId}>
+            <DirectoryListFrame filtersOpen={filtersOpen}>
+              <DirectoryFilterPanel
+                open={filtersOpen}
+                onOpenChange={setFiltersOpen}
+                panelId={filterPanelId}
+                title="Inventory filters"
+              >
                 <InventoryLocationFilterSidebar
                   locations={locations}
                   locationFilter={balanceLocationId || LOCATION_ALL}
@@ -1499,28 +1771,23 @@ export default function InventoryPage() {
                     setBalanceLocationId(id);
                   }}
                 />
-              </FilterPanelShell>
-              <div className={LIST_PANEL_CLASS}>
-                <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-                  <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-                    <Search
-                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                      aria-hidden
-                    />
-                    <Input
-                      type="search"
-                      value={balanceSearchQuery}
-                      onChange={(e) => setBalanceSearchQuery(e.target.value)}
-                      placeholder="Search product, SKU, or location…"
-                      className={SEARCH_INPUT_CLASS}
-                      aria-label="Search stock balances"
-                      autoComplete="off"
-                    />
-                  </div>
-                  <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                    {balanceRangeLabel}
-                  </p>
-                </div>
+              </DirectoryFilterPanel>
+              <div className={DIRECTORY_LIST_PANEL_CLASS}>
+                <DirectoryListSearchHeader trailing={balanceRangeLabel}>
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                    aria-hidden
+                  />
+                  <Input
+                    type="search"
+                    value={balanceSearchQuery}
+                    onChange={(e) => setBalanceSearchQuery(e.target.value)}
+                    placeholder="Search product, SKU, or location…"
+                    className={SEARCH_INPUT_CLASS}
+                    aria-label="Search stock balances"
+                    autoComplete="off"
+                  />
+                </DirectoryListSearchHeader>
                 <div
                   className={cn(
                     "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
@@ -1584,7 +1851,7 @@ export default function InventoryPage() {
                   />
                 </div>
               </div>
-            </div>
+            </DirectoryListFrame>
           </TabsContent>
 
           <TabsContent
@@ -1593,16 +1860,18 @@ export default function InventoryPage() {
           >
             <InventoryFormPanel
               title="Transfer between locations"
-              description="Choose source and destination, add one or more products, set quantities, and reorder lines. Each line is recorded as a transfer in history."
+              description="Move stock from one location to another. Each line is saved in history."
             >
               <form
                 id="inventory-form-transfer"
                 onSubmit={requestTransfer}
-                className="w-full max-w-4xl space-y-4"
+                className="flex min-h-0 flex-1 flex-col gap-4"
               >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>From location</Label>
+                <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>From location</Label>
                     <Select
                       value={transferFromId || NONE}
                       onValueChange={(v) => {
@@ -1625,7 +1894,7 @@ export default function InventoryPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <Label>To location</Label>
                     <Select
                       value={transferToId || NONE}
@@ -1646,10 +1915,23 @@ export default function InventoryPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="t-note">Note (optional)</Label>
+                      <Textarea
+                        id="t-note"
+                        rows={2}
+                        value={transferNote}
+                        onChange={(e) => setTransferNote(e.target.value)}
+                        placeholder="e.g. Picked for branch display"
+                        className="min-h-[4.5rem] resize-y"
+                      />
+                    </div>
+                  </div>
 
+                  <div className="flex min-h-[14rem] flex-col lg:min-h-0">
                 {transferFromId ? (
-                  <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <div className="flex h-full min-h-0 flex-col space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
                     <p className="text-sm font-medium text-foreground">Add products</p>
                     {transferStockLoading ? (
                       <p className="text-sm text-muted-foreground">Loading stock at source…</p>
@@ -1690,7 +1972,7 @@ export default function InventoryPage() {
                           <span>Product</span>
                           <span className="text-right">Quantity</span>
                         </div>
-                        <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+                        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                           {transferProductsFilteredToPick.map((r) => {
                             const selected = transferPickerSelected.has(r.product_id);
                             return (
@@ -1731,21 +2013,14 @@ export default function InventoryPage() {
                                     {formatQty(r.quantity)} on hand
                                   </span>
                                 </label>
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  max={r.quantity}
-                                  step="any"
-                                  className="h-8 tabular-nums"
+                                <QtyInput
+                                  className="h-8"
                                   value={
                                     transferPickerQtys[r.product_id] ??
                                     (selected ? "1" : "")
                                   }
-                                  onChange={(e) =>
-                                    updateTransferPickerQty(
-                                      r.product_id,
-                                      e.target.value,
-                                    )
+                                  onValueChange={(value) =>
+                                    updateTransferPickerQty(r.product_id, value)
                                   }
                                   placeholder={selected ? "Qty" : "—"}
                                   aria-label={`Quantity for ${r.product_name}`}
@@ -1774,7 +2049,13 @@ export default function InventoryPage() {
                       </>
                     )}
                   </div>
-                ) : null}
+                ) : (
+                  <div className="flex h-full min-h-[14rem] items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground lg:min-h-0">
+                    Choose a source location to pick products.
+                  </div>
+                )}
+                  </div>
+                </div>
 
                 {transferLines.length > 0 ? (
                   <div className="space-y-2">
@@ -1833,7 +2114,7 @@ export default function InventoryPage() {
                               </TableCell>
                               <TableCell className="align-top text-right tabular-nums text-muted-foreground">
                                 <span className="inline-block pt-1.5">
-                                  {formatQty(line.maxQty)}
+                                  {line.maxQty != null ? formatQty(line.maxQty) : "—"}
                                 </span>
                               </TableCell>
                               <TableCell className="align-top">
@@ -1843,18 +2124,18 @@ export default function InventoryPage() {
                                 >
                                   Quantity for {line.productName}
                                 </Label>
-                                <Input
+                                <QtyInput
                                   id={`t-line-qty-${line.id}`}
-                                  type="number"
-                                  min={0}
-                                  max={line.maxQty}
-                                  step="any"
                                   value={line.qty}
-                                  onChange={(e) =>
-                                    updateTransferLineQty(line.id, e.target.value)
+                                  onValueChange={(value) =>
+                                    updateTransferLineQty(line.id, value)
                                   }
-                                  placeholder={`Max ${formatQty(line.maxQty)}`}
-                                  className="h-9 min-w-[5.5rem] tabular-nums"
+                                  placeholder={
+                                    line.maxQty != null
+                                      ? `Max ${formatQty(line.maxQty)}`
+                                      : "0"
+                                  }
+                                  className="h-9 min-w-[5.5rem]"
                                   required
                                 />
                               </TableCell>
@@ -1877,21 +2158,10 @@ export default function InventoryPage() {
                     </div>
                   </div>
                 ) : transferFromId && !transferStockLoading ? (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Select products above to build your transfer list.
                   </p>
                 ) : null}
-
-                <div className="space-y-2">
-                  <Label htmlFor="t-note">Note (optional)</Label>
-                  <Textarea
-                    id="t-note"
-                    rows={2}
-                    value={transferNote}
-                    onChange={(e) => setTransferNote(e.target.value)}
-                    placeholder="e.g. Picked for branch display"
-                  />
-                </div>
               </form>
             </InventoryFormPanel>
           </TabsContent>
@@ -1902,75 +2172,225 @@ export default function InventoryPage() {
           >
             <InventoryFormPanel
               title="Refill / inbound stock"
-              description="Increase quantity at a location (new delivery, production, etc.)."
+              description="Add one or more products to a location."
             >
               <form
                 id="inventory-form-refill"
                 onSubmit={requestRefill}
-                className="max-w-xl space-y-4"
+                className="flex min-h-0 flex-1 flex-col gap-4"
               >
-                <div className="space-y-2">
-                  <Label>Product</Label>
-                  <Select
-                    value={refillProductId || NONE}
-                    onValueChange={(v) => setRefillProductId(v === NONE ? "" : v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>Choose product</SelectItem>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                          {p.sku ? ` — ${p.sku}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label>Location</Label>
+                      <Select
+                        value={refillLocationId || NONE}
+                        onValueChange={(v) =>
+                          setRefillLocationId(v === NONE ? "" : v)
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Where stock arrives" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NONE}>Choose location</SelectItem>
+                          {locations.map((l) => (
+                            <SelectItem key={l.id} value={l.id}>
+                              {l.name}
+                              {l.code ? ` (${l.code})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="r-note">Note (optional)</Label>
+                      <Textarea
+                        id="r-note"
+                        rows={2}
+                        value={refillNote}
+                        onChange={(e) => setRefillNote(e.target.value)}
+                        placeholder="e.g. PO #12345 delivery"
+                        className="min-h-[4.5rem] resize-y"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex min-h-[14rem] flex-col lg:min-h-0">
+                    {refillLocationId ? (
+                      <div className="flex h-full min-h-0 flex-col space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                        <p className="text-sm font-medium text-foreground">
+                          Add products
+                        </p>
+                        {refillProductsAvailableToPick.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            All products are already on the list.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="relative">
+                              <Search
+                                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                                aria-hidden
+                              />
+                              <Input
+                                type="search"
+                                value={refillPickerSearchQuery}
+                                onChange={(e) =>
+                                  setRefillPickerSearchQuery(e.target.value)
+                                }
+                                placeholder="Search product or SKU…"
+                                className={SEARCH_INPUT_CLASS}
+                                aria-label="Search products to refill"
+                                autoComplete="off"
+                              />
+                            </div>
+                            {refillProductsFilteredToPick.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">
+                                No products match &ldquo;
+                                {refillPickerSearchQuery.trim()}&rdquo;.
+                              </p>
+                            ) : (
+                              <>
+                                <div className="mb-1 grid grid-cols-[auto_1fr_7rem] gap-x-2 px-1 text-xs font-medium text-muted-foreground">
+                                  <span className="w-4" aria-hidden />
+                                  <span>Product</span>
+                                  <span className="text-right">Quantity</span>
+                                </div>
+                                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                                  {refillProductsFilteredToPick.map((p) => {
+                                    const selected = refillPickerSelected.has(p.id);
+                                    return (
+                                      <div
+                                        key={p.id}
+                                        className={cn(
+                                          "grid grid-cols-[auto_1fr_7rem] items-center gap-x-2 rounded-md px-1 py-1.5 text-sm",
+                                          selected && "bg-muted/50",
+                                        )}
+                                      >
+                                        <Checkbox
+                                          checked={selected}
+                                          onCheckedChange={(c) =>
+                                            toggleRefillPickerProduct(p.id, c === true)
+                                          }
+                                          aria-label={`Select ${p.name}`}
+                                        />
+                                        <label
+                                          className="min-w-0 cursor-pointer"
+                                          onClick={() =>
+                                            toggleRefillPickerProduct(p.id, !selected)
+                                          }
+                                        >
+                                          <span className="font-medium">{p.name}</span>
+                                          {p.sku ? (
+                                            <span className="text-muted-foreground">
+                                              {" "}
+                                              · {p.sku}
+                                            </span>
+                                          ) : null}
+                                        </label>
+                                        <QtyInput
+                                          className="h-8"
+                                          value={
+                                            refillPickerQtys[p.id] ??
+                                            (selected ? "1" : "")
+                                          }
+                                          onValueChange={(value) =>
+                                            updateRefillPickerQty(p.id, value)
+                                          }
+                                          placeholder={selected ? "Qty" : "—"}
+                                          aria-label={`Quantity for ${p.name}`}
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  disabled={refillPickerSelected.size === 0}
+                                  onClick={addSelectedProductsToRefillLines}
+                                >
+                                  <Plus className="h-4 w-4" aria-hidden />
+                                  Add{" "}
+                                  {refillPickerSelected.size > 0
+                                    ? `${refillPickerSelected.size} `
+                                    : ""}
+                                  to list
+                                </Button>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex h-full min-h-[14rem] items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground lg:min-h-0">
+                        Choose a location to add products.
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Location</Label>
-                  <Select
-                    value={refillLocationId || NONE}
-                    onValueChange={(v) => setRefillLocationId(v === NONE ? "" : v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Where stock arrives" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>Choose location</SelectItem>
-                      {locations.map((l) => (
-                        <SelectItem key={l.id} value={l.id}>
-                          {l.name}
-                          {l.code ? ` (${l.code})` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="r-qty">Quantity to add</Label>
-                  <Input
-                    id="r-qty"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={refillQty}
-                    onChange={(e) => setRefillQty(e.target.value)}
-                    placeholder="0"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="r-note">Note (optional)</Label>
-                  <Textarea
-                    id="r-note"
-                    rows={2}
-                    value={refillNote}
-                    onChange={(e) => setRefillNote(e.target.value)}
-                    placeholder="e.g. PO #12345 delivery"
-                  />
-                </div>
+
+                {refillLines.length > 0 ? (
+                  <div className="space-y-2">
+                    <Label>Refill lines ({refillLines.length})</Label>
+                    <div className="overflow-x-auto rounded-lg border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Product</TableHead>
+                            <TableHead className="w-[120px]">Quantity</TableHead>
+                            <TableHead className="w-[50px]" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {refillLines.map((line) => (
+                            <TableRow key={line.id}>
+                              <TableCell className="align-top">
+                                <div className="pt-1.5 text-sm font-medium">
+                                  {line.productName}
+                                </div>
+                                {line.productSku ? (
+                                  <div className="text-xs text-muted-foreground">
+                                    {line.productSku}
+                                  </div>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <QtyInput
+                                  value={line.qty}
+                                  onValueChange={(value) =>
+                                    updateRefillLineQty(line.id, value)
+                                  }
+                                  className="h-9 min-w-[5.5rem]"
+                                  required
+                                />
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeRefillLine(line.id)}
+                                  aria-label={`Remove ${line.productName}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ) : refillLocationId ? (
+                  <p className="text-xs text-muted-foreground">
+                    Select products above to build your refill list.
+                  </p>
+                ) : null}
               </form>
             </InventoryFormPanel>
           </TabsContent>
@@ -1981,75 +2401,253 @@ export default function InventoryPage() {
           >
             <InventoryFormPanel
               title="Stock out / adjustment"
-              description="Reduce quantity at one location (damage, shrinkage, samples). Does not move stock to another location."
+              description="Remove one or more products from a location."
             >
               <form
                 id="inventory-form-adjust"
                 onSubmit={requestAdjustOut}
-                className="max-w-xl space-y-4"
+                className="flex min-h-0 flex-1 flex-col gap-4"
               >
-                <div className="space-y-2">
-                  <Label>Product</Label>
-                  <Select
-                    value={adjProductId || NONE}
-                    onValueChange={(v) => setAdjProductId(v === NONE ? "" : v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>Choose product</SelectItem>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                          {p.sku ? ` — ${p.sku}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-2">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label>From location</Label>
+                      <Select
+                        value={adjFromId || NONE}
+                        onValueChange={(v) => setAdjFromId(v === NONE ? "" : v)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Where to reduce stock" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NONE}>Choose location</SelectItem>
+                          {locations.map((l) => (
+                            <SelectItem key={l.id} value={l.id}>
+                              {l.name}
+                              {l.code ? ` (${l.code})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="a-note">Note (optional)</Label>
+                      <Textarea
+                        id="a-note"
+                        rows={2}
+                        value={adjNote}
+                        onChange={(e) => setAdjNote(e.target.value)}
+                        placeholder="e.g. Damaged in handling"
+                        className="min-h-[4.5rem] resize-y"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex min-h-[14rem] flex-col lg:min-h-0">
+                    {adjFromId ? (
+                      <div className="flex h-full min-h-0 flex-col space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+                        <p className="text-sm font-medium text-foreground">
+                          Add products
+                        </p>
+                        {adjStockLoading ? (
+                          <p className="text-sm text-muted-foreground">
+                            Loading stock at location…
+                          </p>
+                        ) : adjProductsAvailableToPick.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            {adjStockAtFrom.length === 0
+                              ? "No stock at this location."
+                              : "All products with stock here are already on the list."}
+                          </p>
+                        ) : (
+                          <>
+                            <div className="relative">
+                              <Search
+                                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                                aria-hidden
+                              />
+                              <Input
+                                type="search"
+                                value={adjPickerSearchQuery}
+                                onChange={(e) =>
+                                  setAdjPickerSearchQuery(e.target.value)
+                                }
+                                placeholder="Search product or SKU…"
+                                className={SEARCH_INPUT_CLASS}
+                                aria-label="Search products to remove"
+                                autoComplete="off"
+                              />
+                            </div>
+                            {adjProductsFilteredToPick.length === 0 ? (
+                              <p className="text-sm text-muted-foreground">
+                                No products match &ldquo;
+                                {adjPickerSearchQuery.trim()}&rdquo;.
+                              </p>
+                            ) : (
+                              <>
+                                <div className="mb-1 grid grid-cols-[auto_1fr_7rem] gap-x-2 px-1 text-xs font-medium text-muted-foreground">
+                                  <span className="w-4" aria-hidden />
+                                  <span>Product</span>
+                                  <span className="text-right">Quantity</span>
+                                </div>
+                                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                                  {adjProductsFilteredToPick.map((r) => {
+                                    const selected = adjPickerSelected.has(r.product_id);
+                                    return (
+                                      <div
+                                        key={r.product_id}
+                                        className={cn(
+                                          "grid grid-cols-[auto_1fr_7rem] items-center gap-x-2 rounded-md px-1 py-1.5 text-sm",
+                                          selected && "bg-muted/50",
+                                        )}
+                                      >
+                                        <Checkbox
+                                          checked={selected}
+                                          onCheckedChange={(c) =>
+                                            toggleAdjPickerProduct(
+                                              r.product_id,
+                                              c === true,
+                                            )
+                                          }
+                                          aria-label={`Select ${r.product_name}`}
+                                        />
+                                        <label
+                                          className="min-w-0 cursor-pointer"
+                                          onClick={() =>
+                                            toggleAdjPickerProduct(
+                                              r.product_id,
+                                              !selected,
+                                            )
+                                          }
+                                        >
+                                          <span className="font-medium">
+                                            {r.product_name}
+                                          </span>
+                                          {r.product_sku ? (
+                                            <span className="text-muted-foreground">
+                                              {" "}
+                                              · {r.product_sku}
+                                            </span>
+                                          ) : null}
+                                          <span className="block text-xs text-muted-foreground tabular-nums">
+                                            {formatQty(r.quantity)} on hand
+                                          </span>
+                                        </label>
+                                        <QtyInput
+                                          className="h-8"
+                                          value={
+                                            adjPickerQtys[r.product_id] ??
+                                            (selected ? "1" : "")
+                                          }
+                                          onValueChange={(value) =>
+                                            updateAdjPickerQty(r.product_id, value)
+                                          }
+                                          placeholder={selected ? "Qty" : "—"}
+                                          aria-label={`Quantity for ${r.product_name}`}
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  disabled={adjPickerSelected.size === 0}
+                                  onClick={addSelectedProductsToAdjLines}
+                                >
+                                  <Plus className="h-4 w-4" aria-hidden />
+                                  Add{" "}
+                                  {adjPickerSelected.size > 0
+                                    ? `${adjPickerSelected.size} `
+                                    : ""}
+                                  to list
+                                </Button>
+                              </>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex h-full min-h-[14rem] items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/10 px-4 py-6 text-center text-sm text-muted-foreground lg:min-h-0">
+                        Choose a location to pick products.
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>From location</Label>
-                  <Select
-                    value={adjFromId || NONE}
-                    onValueChange={(v) => setAdjFromId(v === NONE ? "" : v)}
-                    disabled={!adjProductId || adjAtLoc.length === 0}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Where to reduce stock" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>Choose location</SelectItem>
-                      {adjAtLoc.map((r) => (
-                        <SelectItem key={r.location_id} value={r.location_id}>
-                          {r.location_name} ({r.quantity} on hand)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="a-qty">Quantity to remove</Label>
-                  <Input
-                    id="a-qty"
-                    type="number"
-                    min={0}
-                    step="any"
-                    value={adjQty}
-                    onChange={(e) => setAdjQty(e.target.value)}
-                    placeholder={adjFromRow ? `Max ${maxAdjQty}` : "0"}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="a-note">Note (optional)</Label>
-                  <Textarea
-                    id="a-note"
-                    rows={2}
-                    value={adjNote}
-                    onChange={(e) => setAdjNote(e.target.value)}
-                    placeholder="e.g. Damaged in handling"
-                  />
-                </div>
+
+                {adjLines.length > 0 ? (
+                  <div className="space-y-2">
+                    <Label>Stock out lines ({adjLines.length})</Label>
+                    <div className="overflow-x-auto rounded-lg border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Product</TableHead>
+                            <TableHead className="w-[100px] text-right tabular-nums">
+                              On hand
+                            </TableHead>
+                            <TableHead className="w-[120px]">Quantity</TableHead>
+                            <TableHead className="w-[50px]" />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {adjLines.map((line) => (
+                            <TableRow key={line.id}>
+                              <TableCell className="align-top">
+                                <div className="pt-1.5 text-sm font-medium">
+                                  {line.productName}
+                                </div>
+                                {line.productSku ? (
+                                  <div className="text-xs text-muted-foreground">
+                                    {line.productSku}
+                                  </div>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="align-top text-right tabular-nums text-muted-foreground">
+                                <span className="inline-block pt-1.5">
+                                  {line.maxQty != null ? formatQty(line.maxQty) : "—"}
+                                </span>
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <QtyInput
+                                  value={line.qty}
+                                  onValueChange={(value) =>
+                                    updateAdjLineQty(line.id, value)
+                                  }
+                                  placeholder={
+                                    line.maxQty != null
+                                      ? `Max ${formatQty(line.maxQty)}`
+                                      : "0"
+                                  }
+                                  className="h-9 min-w-[5.5rem]"
+                                  required
+                                />
+                              </TableCell>
+                              <TableCell className="align-top">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                  onClick={() => removeAdjLine(line.id)}
+                                  aria-label={`Remove ${line.productName}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ) : adjFromId && !adjStockLoading ? (
+                  <p className="text-xs text-muted-foreground">
+                    Select products above to build your stock out list.
+                  </p>
+                ) : null}
               </form>
             </InventoryFormPanel>
           </TabsContent>
@@ -2058,13 +2656,13 @@ export default function InventoryPage() {
             value="history"
             className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-                filtersOpen ? "gap-6" : "gap-0",
-              )}
-            >
-              <FilterPanelShell open={filtersOpen} panelId={filterPanelId}>
+            <DirectoryListFrame filtersOpen={filtersOpen}>
+              <DirectoryFilterPanel
+                open={filtersOpen}
+                onOpenChange={setFiltersOpen}
+                panelId={filterPanelId}
+                title="Inventory filters"
+              >
                 <InventoryHistoryFilterSidebar
                   locations={locations}
                   eventFilter={movEventFilter}
@@ -2078,28 +2676,23 @@ export default function InventoryPage() {
                     setMovLocationId(id);
                   }}
                 />
-              </FilterPanelShell>
-              <div className={LIST_PANEL_CLASS}>
-                <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-                  <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-                    <Search
-                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                      aria-hidden
-                    />
-                    <Input
-                      type="search"
-                      value={movSearchQuery}
-                      onChange={(e) => setMovSearchQuery(e.target.value)}
-                      placeholder="Search product, SKU, or note…"
-                      className={SEARCH_INPUT_CLASS}
-                      aria-label="Search movement history"
-                      autoComplete="off"
-                    />
-                  </div>
-                  <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                    {movRangeLabel}
-                  </p>
-                </div>
+              </DirectoryFilterPanel>
+              <div className={DIRECTORY_LIST_PANEL_CLASS}>
+                <DirectoryListSearchHeader trailing={movRangeLabel}>
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                    aria-hidden
+                  />
+                  <Input
+                    type="search"
+                    value={movSearchQuery}
+                    onChange={(e) => setMovSearchQuery(e.target.value)}
+                    placeholder="Search product, SKU, or note…"
+                    className={SEARCH_INPUT_CLASS}
+                    aria-label="Search movement history"
+                    autoComplete="off"
+                  />
+                </DirectoryListSearchHeader>
                 <div
                   className={cn(
                     "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
@@ -2161,7 +2754,7 @@ export default function InventoryPage() {
                   />
                 </div>
               </div>
-            </div>
+            </DirectoryListFrame>
           </TabsContent>
         </Tabs>
       )}
@@ -2177,16 +2770,16 @@ export default function InventoryPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={transferSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={transferSubmitting}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setTransferConfirmOpen(false);
                 void performTransfer();
               }}
             >
-              {transferSubmitting ? "Saving…" : "Record transfers"}
+              Record transfers
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2197,22 +2790,21 @@ export default function InventoryPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Record refill?</AlertDialogTitle>
             <AlertDialogDescription>
-              Add {formatQty(parseFloat(refillQty || "0"))} of{" "}
-              {productLabel(refillProductId)} at {locationLabel(refillLocationId)}.
-              Stock at that location will increase.
+              Add {refillConfirmSummary.lineSummary} at{" "}
+              {refillConfirmSummary.loc}. Stock at that location will increase.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={refillSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={refillSubmitting}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setRefillConfirmOpen(false);
                 void performRefill();
               }}
             >
-              {refillSubmitting ? "Saving…" : "Record fill"}
+              Record fill
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2223,22 +2815,21 @@ export default function InventoryPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Record stock out?</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove {formatQty(parseFloat(adjQty || "0"))} of{" "}
-              {productLabel(adjProductId)} from {locationLabel(adjFromId)}. Stock at
-              that location will be reduced.
+              Remove {adjustConfirmSummary.lineSummary} from{" "}
+              {adjustConfirmSummary.loc}. Stock at that location will be reduced.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={adjSubmitting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={adjSubmitting}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setAdjustConfirmOpen(false);
                 void performAdjustOut();
               }}
             >
-              {adjSubmitting ? "Saving…" : "Record stock out"}
+              Record stock out
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

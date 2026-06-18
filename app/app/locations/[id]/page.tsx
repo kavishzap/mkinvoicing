@@ -52,6 +52,8 @@ import { AppPageShell } from "@/components/app-page-shell";
 import { cn } from "@/lib/utils";
 import { LocationRoutingTab } from "./location-routing-tab";
 import { LocationProductsLineTab } from "./location-products-line-tab";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -143,7 +145,7 @@ export default function LocationDetailPage() {
 
   const [loc, setLoc] = useState<LocationRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [nameError, setNameError] = useState("");
   const [tab, setTab] = useState(() => {
@@ -322,8 +324,8 @@ export default function LocationDetailPage() {
 
   async function performSave() {
     if (!id) return;
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       const updated = await updateLocation(id, {
         ...formToPayload(form),
         is_active: isActive,
@@ -343,15 +345,14 @@ export default function LocationDetailPage() {
       setIsPrimaryWarehouse(updated.isPrimaryWarehouse);
       setIsEditing(false);
       router.replace(`/app/locations/${id}`, { scroll: false });
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       toast({
         title: "Save failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   if (loading || !loc) {
@@ -383,7 +384,7 @@ export default function LocationDetailPage() {
                 type="button"
                 variant="outline"
                 onClick={handleCancelEdit}
-                disabled={saving}
+                disabled={isRunning}
                 className="rounded font-semibold"
               >
                 Cancel
@@ -392,14 +393,14 @@ export default function LocationDetailPage() {
                 type="button"
                 onClick={requestSave}
                 disabled={
-                  saving ||
+                  isRunning ||
                   locationTypesLoading ||
                   locationTypeOptions.length === 0
                 }
                 className="gap-2 rounded font-semibold shadow-sm"
               >
                 <Save className="size-3.5 shrink-0" aria-hidden />
-                {saving ? "Saving…" : "Save changes"}
+                "Save changes"
               </Button>
             </>
           ) : (
@@ -746,16 +747,16 @@ export default function LocationDetailPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Save changes"}
+              "Save changes"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

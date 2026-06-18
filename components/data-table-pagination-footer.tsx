@@ -65,7 +65,7 @@ export function DataTablePaginationFooter({
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              "whitespace-nowrap text-muted-foreground",
+              "whitespace-nowrap text-muted-foreground max-sm:sr-only",
               isMinimal ? "text-sm" : "text-xs",
             )}
           >
@@ -75,7 +75,7 @@ export function DataTablePaginationFooter({
             value={String(pageSize)}
             onValueChange={(v) => onPageSizeChange(Number(v))}
           >
-            <SelectTrigger className="h-8 w-[4.25rem] rounded-md border-border/70 bg-background text-xs shadow-none">
+            <SelectTrigger className="h-8 w-[4.25rem] rounded-md border-border/70 bg-background text-xs shadow-none max-sm:w-16">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

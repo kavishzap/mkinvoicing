@@ -462,7 +462,7 @@ function invoiceFacetPeriodStarts(): {
 
 /**
  * Parallel head counts for the invoice list filter sidebars.
- * Uses the same `company_id` / null-or rule as {@link listInvoices}.
+ * Scoped strictly to the active company.
  */
 export async function fetchInvoiceListFacets(): Promise<InvoiceListFacets> {
   const companyId = await requireActiveCompanyId();
@@ -501,13 +501,11 @@ export async function fetchInvoiceListFacets(): Promise<InvoiceListFacets> {
     return facets;
   }
 
-  const baseOr = `company_id.eq.${companyId},company_id.is.null`;
-
   const head = () =>
     supabase
       .from("invoices")
       .select("id", { count: "exact", head: true })
-      .or(baseOr);
+      .eq("company_id", companyId);
 
   const countOf = async (
     builder: ReturnType<typeof head>,
@@ -588,7 +586,7 @@ export async function listInvoices(opts?: {
       "id, number, issue_date, due_date, status, currency, bill_to_snapshot, created_at, subtotal, tax_total, customer_id, customers!invoices_customer_id_fkey(type, company_name, full_name, contact_name), created_from_sales_order_id, sales_orders!invoices_created_from_sales_order_id_fkey(number)",
       { count: "exact" },
     )
-    .or(`company_id.eq.${companyId},company_id.is.null`);
+    .eq("company_id", companyId);
 
   // Filters
   if (opts?.status && opts.status !== "all") {
@@ -721,7 +719,7 @@ export async function getInvoiceForSalesOrder(
     .from("invoices")
     .select("id, number, company_id")
     .eq("created_from_sales_order_id", salesOrderId)
-    .or(`company_id.eq.${companyId},company_id.is.null`)
+    .eq("company_id", companyId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

@@ -7,6 +7,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Check, Pencil, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,6 +21,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import { SalesOrderFulfillmentStatusBadge } from "@/components/sales-order-fulfillment-status-badge";
 import { DeliveryNoteStatusBadge } from "@/components/delivery-note-status-badge";
 import { DeliveryNoteViewActions } from "@/components/delivery-note-view-actions";
@@ -97,11 +101,12 @@ export default function DeliveryDetailPage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [pageData, setPageData] = useState<DeliveryDetailPageData | null>(null);
-  const [statusBusy, setStatusBusy] = useState(false);
+  const { isRunning } = useActionProgress();
   const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<DeliveryNoteStatus | null>(
     null,
   );
+  const [transferStock, setTransferStock] = useState(true);
 
   const reloadPageData = useCallback(async () => {
     if (!id) return null;
@@ -185,50 +190,65 @@ export default function DeliveryDetailPage() {
 
   const openStatusConfirm = (target: DeliveryNoteStatus) => {
     setPendingStatus(target);
+    if (target === "delivered_to_driver") {
+      setTransferStock(true);
+    }
     setStatusConfirmOpen(true);
   };
 
-  const applyStatusAdvance = async (target: DeliveryNoteStatus) => {
-    setStatusBusy(true);
-    try {
-      const updated = await advanceDeliveryNoteStatus(delivery.id);
-      if (updated) {
-        const stockReturn =
-          updated.driverSettlementStatus !== "pending"
-            ? null
-            : await getDriverStockReturnContext(updated.id, {
-                p_days: 0,
-                delivery: updated,
-              });
-        setPageData((prev) =>
-          prev
-            ? {
-                delivery: updated,
-                drivers: prev.drivers,
-                stockReturn,
-              }
-            : null,
-        );
-        const soMsg =
-          target === "delivered_to_driver"
-            ? " Stock was transferred from the primary warehouse to the driver's location. Linked sales orders (except cancelled or already delivered to customer) are set to Delivered to driver."
-            : target === "completed"
-              ? " Linked sales orders on this delivery are set to Delivered to customer where applicable."
-              : "";
+  const applyStatusAdvance = async (
+    target: DeliveryNoteStatus,
+    opts?: { transferStock?: boolean },
+  ) => {
+    const progressMessage =
+      target === "delivered_to_driver"
+        ? "Marking delivery as delivered to driver…"
+        : target === "completed"
+          ? "Marking delivery as completed…"
+          : "Updating delivery status…";
+    await runActionProgress(progressMessage, async () => {
+      try {
+        const updated = await advanceDeliveryNoteStatus(delivery.id, {
+          transferStock: opts?.transferStock,
+        });
+        if (updated) {
+          const stockReturn =
+            updated.driverSettlementStatus !== "pending"
+              ? null
+              : await getDriverStockReturnContext(updated.id, {
+                  p_days: 0,
+                  delivery: updated,
+                });
+          setPageData((prev) =>
+            prev
+              ? {
+                  delivery: updated,
+                  drivers: prev.drivers,
+                  stockReturn,
+                }
+              : null,
+          );
+          const soMsg =
+            target === "delivered_to_driver"
+              ? opts?.transferStock === false
+                ? " Linked sales orders were updated. No stock was transferred."
+                : " Stock was moved to the driver location and linked sales orders were updated."
+              : target === "completed"
+                ? " Linked sales orders were set to delivered to customer where applicable."
+                : "";
+          toast({
+            title: "Status updated",
+            description: `${DELIVERY_NOTE_STATUS_LABELS[target]}.${soMsg}`,
+          });
+        }
+      } catch (e: unknown) {
         toast({
-          title: "Status updated",
-          description: `${DELIVERY_NOTE_STATUS_LABELS[target]}.${soMsg}`,
+          title: "Could not update status",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
         });
       }
-    } catch (e: unknown) {
-      toast({
-        title: "Could not update status",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setStatusBusy(false);
-    }
+    });
   };
 
   return (
@@ -255,22 +275,22 @@ export default function DeliveryDetailPage() {
               <Button
                 type="button"
                 onClick={() => openStatusConfirm("delivered_to_driver")}
-                disabled={statusBusy || statusConfirmOpen}
+                disabled={isRunning || statusConfirmOpen}
                 className="gap-2 rounded font-semibold shadow-sm"
               >
                 <Truck className="size-3.5 shrink-0" aria-hidden />
-                {statusBusy ? "Updating…" : "Delivered to Driver"}
+                Delivered to Driver
               </Button>
             ) : null}
             {nextStatus === "completed" ? (
               <Button
                 type="button"
                 onClick={() => openStatusConfirm("completed")}
-                disabled={statusBusy || statusConfirmOpen}
+                disabled={isRunning || statusConfirmOpen}
                 className="gap-2 rounded font-semibold shadow-sm"
               >
                 <Check className="size-3.5 shrink-0" aria-hidden />
-                {statusBusy ? "Updating…" : "Completed"}
+                Completed
               </Button>
             ) : null}
             <DeliveryNoteViewActions deliveryId={id} delivery={delivery} />
@@ -452,61 +472,81 @@ export default function DeliveryDetailPage() {
         open={statusConfirmOpen}
         onOpenChange={(open) => {
           setStatusConfirmOpen(open);
-          if (!open) setPendingStatus(null);
+          if (!open) {
+            setPendingStatus(null);
+            setTransferStock(true);
+          }
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Change delivery status?</AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogTitle>
+              {pendingStatus === "delivered_to_driver"
+                ? "Delivered to driver"
+                : pendingStatus === "completed"
+                  ? "Mark as completed"
+                  : "Change delivery status"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
               {pendingStatus === "delivered_to_driver" ? (
-                <>
-                  Mark this delivery as{" "}
-                  <span className="font-medium text-foreground">
-                    Delivered to driver
-                  </span>
-                  ? Stock will move from the primary warehouse to the driver&apos;s
-                  location, and linked sales orders (except cancelled or already
-                  delivered to customer) will be set to Delivered to driver.
-                </>
+                <div className="space-y-4 text-sm text-muted-foreground">
+                  <p>
+                    Update this delivery to delivered to driver and sync linked
+                    sales orders.
+                  </p>
+                  <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-muted/30 p-3">
+                    <div className="space-y-1">
+                      <Label
+                        htmlFor="transfer-stock"
+                        className="text-sm font-medium text-foreground"
+                      >
+                        Transfer stock
+                      </Label>
+                      <p className="text-xs leading-relaxed">
+                        Move delivery items from the primary warehouse to the
+                        driver&apos;s location.
+                      </p>
+                    </div>
+                    <Switch
+                      id="transfer-stock"
+                      checked={transferStock}
+                      onCheckedChange={setTransferStock}
+                      disabled={isRunning}
+                      aria-label="Transfer stock"
+                    />
+                  </div>
+                </div>
               ) : pendingStatus === "completed" ? (
-                <>
-                  Mark this delivery as{" "}
-                  <span className="font-medium text-foreground">Completed</span>?
-                  Linked sales orders on this delivery will be set to Delivered to
-                  customer where applicable.
-                </>
-              ) : pendingStatus ? (
-                <>
-                  This will move the delivery from{" "}
-                  <span className="font-medium text-foreground">
-                    {DELIVERY_NOTE_STATUS_LABELS[delivery.status]}
-                  </span>{" "}
-                  to{" "}
-                  <span className="font-medium text-foreground">
-                    {DELIVERY_NOTE_STATUS_LABELS[pendingStatus]}
-                  </span>
-                  . This can update linked sales orders and stock.
-                </>
+                <p>
+                  Complete this delivery and update linked sales orders to
+                  delivered to customer where applicable.
+                </p>
               ) : (
-                "Confirm this status change."
+                <p>Confirm this status change.</p>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={statusBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={statusBusy || !pendingStatus}
+              disabled={isRunning || !pendingStatus}
               onClick={(e) => {
                 e.preventDefault();
                 if (!pendingStatus) return;
                 const target = pendingStatus;
+                const shouldTransferStock = transferStock;
                 setStatusConfirmOpen(false);
                 setPendingStatus(null);
-                void applyStatusAdvance(target);
+                setTransferStock(true);
+                void applyStatusAdvance(target, {
+                  transferStock:
+                    target === "delivered_to_driver"
+                      ? shouldTransferStock
+                      : undefined,
+                });
               }}
             >
-              {statusBusy ? "Updating…" : "Confirm"}
+              Confirm
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -2796,7 +2796,11 @@ export type Database = {
       }
       get_plans: { Args: never; Returns: Json }
       mark_delivery_delivered_to_driver: {
-        Args: { p_delivery_id: string; p_user_id: string }
+        Args: {
+          p_delivery_id: string
+          p_user_id: string
+          p_transfer_stock?: boolean
+        }
         Returns: undefined
       }
       get_product_for_company: {

@@ -110,6 +110,7 @@ function mapGroup(r: Record<string, unknown>): WhatsAppGroupRow {
 
 export async function listWhatsAppGroups(opts?: {
   search?: string;
+  status?: WhatsAppListStatus;
   includeInactive?: boolean;
   page?: number;
   pageSize?: number;
@@ -488,7 +489,6 @@ export async function fetchCustomerIdsWhoBoughtProductOnInvoice(
   ];
   if (invoiceIds.length === 0) return [];
 
-  const baseOr = `company_id.eq.${companyId},company_id.is.null`;
   const out = new Set<string>();
 
   for (let i = 0; i < invoiceIds.length; i += INVOICE_IDS_CHUNK) {
@@ -497,9 +497,9 @@ export async function fetchCustomerIdsWhoBoughtProductOnInvoice(
       .from("invoices")
       .select("customer_id, status")
       .in("id", chunk)
+      .eq("company_id", companyId)
       .not("customer_id", "is", null)
-      .neq("status", "cancelled")
-      .or(baseOr);
+      .neq("status", "cancelled");
 
     if (ie) throw new Error(ie.message);
     for (const r of invs ?? []) {

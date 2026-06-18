@@ -28,6 +28,8 @@ import {
   fetchCustomerIdsWhoBoughtProductOnInvoice,
 } from "@/lib/whatsapp-groups-service";
 import { cn } from "@/lib/utils";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const PRODUCT_NONE = "__none__";
 
@@ -48,7 +50,7 @@ export default function NewWhatsAppGroupPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [nameError, setNameError] = useState("");
 
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -213,8 +215,8 @@ export default function NewWhatsAppGroupPage() {
       return;
     }
     setNameError("");
-    try {
-      setSaving(true);
+    await runActionProgress("Creating WhatsApp group…", async () => {
+      try {
       await addWhatsAppGroup({
         name: name.trim(),
         description: description.trim() || null,
@@ -222,12 +224,11 @@ export default function NewWhatsAppGroupPage() {
       });
       toast({ title: "Group created" });
       router.push("/app/whatsapp?tab=groups");
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Please try again.";
       toast({ title: "Save failed", description: msg, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -292,8 +293,8 @@ export default function NewWhatsAppGroupPage() {
                 <Button type="button" variant="outline" asChild>
                   <Link href="/app/whatsapp?tab=groups">Cancel</Link>
                 </Button>
-                <Button type="submit" disabled={saving || companyReady !== true}>
-                  {saving ? "Saving…" : "Create group"}
+                <Button type="submit" disabled={isRunning || companyReady !== true}>
+                  "Create group"
                 </Button>
               </div>
             </form>

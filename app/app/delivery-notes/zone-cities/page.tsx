@@ -15,11 +15,19 @@ import {
   MapPinned,
   Plus,
   Search,
-  SlidersVertical,
   Truck,
   UserX,
 } from "lucide-react";
 import { AppPageShell } from "@/components/app-page-shell";
+import {
+  DIRECTORY_LIST_PANEL_CLASS,
+  DirectoryFilterPanel,
+  DirectoryFilterToggleButton,
+  DirectoryListFrame,
+  DirectoryListSearchHeader,
+} from "@/components/directory-list-layout";
+import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,6 +37,8 @@ import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
 import { FeatureEmptyState } from "@/components/feature-empty-state";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
   ACTIVE_COMPANY_ID_STORAGE_KEY,
@@ -237,17 +247,17 @@ function ZonesFilterSidebar({
 export default function DeliveryZoneCitiesPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { isRunning } = useActionProgress();
 
   const [companyReady, setCompanyReady] = useState<boolean | null>(null);
   const [activeCompanyScope, setActiveCompanyScope] = useState(0);
   const [zones, setZones] = useState<DeliveryZoneWithCityCount[]>([]);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
   const [cityName, setCityName] = useState("");
-  const [savingCity, setSavingCity] = useState(false);
 
   const [facets, setFacets] = useState<ZoneListFacets | null>(null);
   const [listLoading, setListLoading] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">(
     "all",
@@ -564,21 +574,20 @@ export default function DeliveryZoneCitiesPage() {
 
   async function handleCreateCity() {
     if (!cityName.trim()) return;
-    try {
-      setSavingCity(true);
-      await createDeliveryCity(cityName);
-      setCityName("");
-      await loadAll();
-      toast({ title: "City created" });
-    } catch (e: unknown) {
-      toast({
-        title: "Could not create city",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSavingCity(false);
-    }
+    await runActionProgress("Creating city…", async () => {
+      try {
+        await createDeliveryCity(cityName);
+        setCityName("");
+        await loadAll();
+        toast({ title: "City created" });
+      } catch (e: unknown) {
+        toast({
+          title: "Could not create city",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   const showSkeleton =
@@ -602,30 +611,23 @@ export default function DeliveryZoneCitiesPage() {
         </Button>
       }
       actions={
-        <Button className="shrink-0 gap-2" disabled={companyReady !== true} asChild>
-          <Link href="/app/delivery-notes/zone-cities/new">
-            <Plus className="h-4 w-4" />
-            Add zone
-          </Link>
-        </Button>
+        <ResponsivePageActions>
+          <Button className="shrink-0 gap-2" size="sm" disabled={companyReady !== true} asChild>
+            <Link href="/app/delivery-notes/zone-cities/new">
+              <Plus className="h-4 w-4" />
+              Add zone
+            </Link>
+          </Button>
+        </ResponsivePageActions>
       }
       topbarTrailingBeforeTheme={
         showDirectory && mainTab === "zones" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-9 w-9 shrink-0 text-muted-foreground",
-              filtersOpen && "bg-primary/15 text-primary",
-            )}
-            aria-label={filtersOpen ? "Hide zone filters" : "Show zone filters"}
-            aria-expanded={filtersOpen}
-            aria-controls="zones-filter-panel"
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            <SlidersVertical className="h-4 w-4" aria-hidden />
-          </Button>
+          <DirectoryFilterToggleButton
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            panelId="zones-filter-panel"
+            label="zone filters"
+          />
         ) : null
       }
     >
@@ -663,61 +665,48 @@ export default function DeliveryZoneCitiesPage() {
             value="zones"
             className="mt-0 flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
           >
-            <div
-              className={cn(
-                "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-                filtersOpen ? "gap-6" : "gap-0",
-              )}
-            >
-              <div
-                id="zones-filter-panel"
-                className={cn(
-                  "shrink-0 overflow-hidden",
-                  "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-                  "motion-reduce:transition-none motion-reduce:duration-0",
-                  filtersOpen
-                    ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
-                    : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
-                )}
-                aria-hidden={!filtersOpen}
+            <DirectoryListFrame filtersOpen={filtersOpen}>
+              <DirectoryFilterPanel
+                open={filtersOpen}
+                onOpenChange={setFiltersOpen}
+                panelId="zones-filter-panel"
+                title="Zone filters"
               >
-                <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
-                  <ZonesFilterSidebar
-                    facets={facets}
-                    statusFilter={statusFilter}
-                    onStatusChange={(v) => {
-                      setPage(1);
-                      setStatusFilter(v);
-                    }}
-                    driverFilter={driverFilter}
-                    onDriverChange={(v) => {
-                      setPage(1);
-                      setDriverFilter(v);
-                    }}
+                <ZonesFilterSidebar
+                  facets={facets}
+                  statusFilter={statusFilter}
+                  onStatusChange={(v) => {
+                    setPage(1);
+                    setStatusFilter(v);
+                  }}
+                  driverFilter={driverFilter}
+                  onDriverChange={(v) => {
+                    setPage(1);
+                    setDriverFilter(v);
+                  }}
+                />
+              </DirectoryFilterPanel>
+              <div
+                className={cn(
+                  DIRECTORY_LIST_PANEL_CLASS,
+                  "min-h-[280px] sm:min-h-[320px] lg:min-h-[360px]",
+                )}
+              >
+                <DirectoryListSearchHeader trailing={listRangeLabel}>
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+                    aria-hidden
                   />
-                </div>
-              </div>
-              <div className="flex min-h-[280px] min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50 sm:min-h-[320px] lg:min-h-[360px]">
-                <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-                  <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-                    <Search
-                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                      aria-hidden
-                    />
-                    <Input
-                      type="search"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search zones or drivers…"
-                      className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
-                      aria-label="Search zones"
-                      autoComplete="off"
-                    />
-                  </div>
-                  <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-                    {listRangeLabel}
-                  </p>
-                </div>
+                  <Input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search zones or drivers…"
+                    className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+                    aria-label="Search zones"
+                    autoComplete="off"
+                  />
+                </DirectoryListSearchHeader>
                 <div
                   className={cn(
                     "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
@@ -796,14 +785,19 @@ export default function DeliveryZoneCitiesPage() {
                   />
                 </div>
               </div>
-            </div>
+            </DirectoryListFrame>
           </TabsContent>
 
           <TabsContent
             value="cities"
             className="mt-0 flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
           >
-            <div className="flex min-h-[280px] min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50 sm:min-h-[320px] lg:min-h-[360px]">
+            <div
+              className={cn(
+                DIRECTORY_LIST_PANEL_CLASS,
+                "min-h-[280px] sm:min-h-[320px] lg:min-h-[360px]",
+              )}
+            >
               <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:px-5 dark:bg-muted/25">
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Cities are shared across zones. Assign them to a zone from
@@ -834,14 +828,14 @@ export default function DeliveryZoneCitiesPage() {
                     value={cityName}
                     onChange={(e) => setCityName(e.target.value)}
                     placeholder="New city name"
-                    disabled={savingCity}
+                    disabled={isRunning}
                     className="h-10"
                   />
                   <Button
                     type="button"
                     className="shrink-0 sm:justify-self-end"
                     onClick={() => void handleCreateCity()}
-                    disabled={savingCity || !cityName.trim()}
+                    disabled={isRunning || !cityName.trim()}
                   >
                     Add city
                   </Button>

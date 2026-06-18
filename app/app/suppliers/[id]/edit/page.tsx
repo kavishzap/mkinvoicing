@@ -19,6 +19,8 @@ import {
 } from "@/lib/supplier-form";
 import { getSupplier, updateSupplier } from "@/lib/suppliers-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 export default function EditSupplierPage() {
   const params = useParams<{ id: string }>();
@@ -34,7 +36,7 @@ export default function EditSupplierPage() {
   const [errors, setErrors] = useState<
     Partial<Record<keyof SupplierFormData, string>>
   >({});
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   useEffect(() => {
     if (!id) return;
@@ -81,20 +83,19 @@ export default function EditSupplierPage() {
       });
       return;
     }
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateSupplier(id, supplierFormToPayload(formData));
       toast({ title: "Supplier updated" });
       router.push("/app/suppliers");
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       toast({
         title: "Could not save",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   if (!id) {
@@ -154,8 +155,8 @@ export default function EditSupplierPage() {
           <Button variant="outline" type="button" asChild>
             <Link href="/app/suppliers">Cancel</Link>
           </Button>
-          <Button type="submit" form="supplier-edit-form" disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
+          <Button type="submit" form="supplier-edit-form" disabled={isRunning}>
+            "Save changes"
           </Button>
         </div>
       }

@@ -20,6 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { listCompanyRoles, type CompanyRole } from "@/lib/company-roles-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   createTeamMember,
   getCompanyTeamSeatUsage,
@@ -85,7 +87,7 @@ export default function CompanyTeamInvitePage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [roleId, setRoleId] = useState("");
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [seatUsage, setSeatUsage] = useState<CompanyTeamSeatUsage | null>(null);
   const [loadingSeats, setLoadingSeats] = useState(true);
 
@@ -154,8 +156,8 @@ export default function CompanyTeamInvitePage() {
       });
       return;
     }
-    setSaving(true);
-    try {
+    await runActionProgress("Adding team member…", async () => {
+      try {
       await createTeamMember({
         email: email.trim(),
         full_name: fullName.trim(),
@@ -168,15 +170,14 @@ export default function CompanyTeamInvitePage() {
           "They will receive an email to set their password and activate their account.",
       });
       router.push("/app/company-team");
-    } catch (err) {
+      } catch (err) {
       toast({
         title: "Could not send invite",
         description: err instanceof Error ? err.message : "Try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -195,7 +196,7 @@ export default function CompanyTeamInvitePage() {
           type="submit"
           form="company-team-invite-form"
           disabled={
-            saving ||
+            isRunning ||
             loadingRoles ||
             loadingSeats ||
             roles.length === 0 ||
@@ -203,12 +204,12 @@ export default function CompanyTeamInvitePage() {
           }
           className="gap-2 rounded-md font-semibold shadow-sm"
         >
-          {saving ? (
+          {isRunning ? (
             <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
           ) : (
             <Plus className="size-3.5 shrink-0" aria-hidden />
           )}
-          {saving ? "Sending…" : "Send invite"}
+          "Send invite"
         </Button>
       }
     >

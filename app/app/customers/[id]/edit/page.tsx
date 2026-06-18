@@ -39,6 +39,8 @@ import {
   type DeliveryCityRow,
 } from "@/lib/delivery-zones-service";
 import { CustomerRelatedDocuments } from "@/components/customer-related-documents";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 /** Bordered page shell; height follows inner content (no flex-1 / viewport min-height). */
 const primaryCardShellClass =
@@ -111,7 +113,7 @@ export default function EditCustomerPage() {
   const [errors, setErrors] = useState<
     Partial<Record<keyof CustomerDirectoryFormData, string>>
   >({});
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [cities, setCities] = useState<DeliveryCityRow[]>([]);
   const [relatedDocsReload, setRelatedDocsReload] = useState(0);
@@ -187,8 +189,8 @@ export default function EditCustomerPage() {
   }
 
   async function performSave() {
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       const updated = await updateCustomer(
         id,
         customerDirectoryFormToPayload(formData),
@@ -199,15 +201,14 @@ export default function EditCustomerPage() {
         title: "Customer saved",
         description: "Your changes have been saved.",
       });
-    } catch (err: unknown) {
+      } catch (err: unknown) {
       toastRef.current({
         title: "Could not save",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -244,11 +245,11 @@ export default function EditCustomerPage() {
         <Button
           type="button"
           onClick={requestSave}
-          disabled={saving}
+          disabled={isRunning}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Save changes"}
+          "Save changes"
         </Button>
       }
     >
@@ -303,16 +304,16 @@ export default function EditCustomerPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Save changes"}
+              "Save changes"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

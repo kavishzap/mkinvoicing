@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import { getSessionUser } from "@/lib/auth-session";
 import { supabase } from "@/lib/supabaseClient";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
@@ -16,6 +17,7 @@ import {
   clearActiveCompanyCache,
   getActiveCompanyId,
 } from "@/lib/active-company";
+import { clearAuthSessionCache } from "@/lib/auth-session";
 import { clearRoleFeaturesCache } from "@/lib/role-features-service";
 import {
   AlertDialog,
@@ -93,9 +95,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
   ]);
 
   const refreshAccount = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) {
       setUserChip(null);
       setSystemRoleLabel(null);
@@ -106,6 +106,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
     }
 
     const email = user.email ?? "";
+    const companyIdPromise = getActiveCompanyId();
     const { data: row } = await supabase
       .from("user_profiles")
       .select("full_name, avatar_url, email, system_role, is_active")
@@ -137,7 +138,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
     setSystemRoleLabel(sysLabel);
 
     let role: string | null = null;
-    const companyId = await getActiveCompanyId();
+    const companyId = await companyIdPromise;
     if (!companyId) {
       setCompanyName(null);
       setCompanyRoleLabel(null);
@@ -145,12 +146,21 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
       return;
     }
 
-    const { data: co } = await supabase
-      .from("companies")
-      .select("name, company_logo_url")
-      .eq("id", companyId)
-      .eq("is_active", true)
-      .maybeSingle();
+    const [{ data: co }, { data: mem }] = await Promise.all([
+      supabase
+        .from("companies")
+        .select("name, company_logo_url")
+        .eq("id", companyId)
+        .eq("is_active", true)
+        .maybeSingle(),
+      supabase
+        .from("company_users")
+        .select("is_owner, company_roles ( name )")
+        .eq("user_id", user.id)
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .maybeSingle(),
+    ]);
 
     setCompanyName(co?.name ? String(co.name).trim() || null : null);
     const logoRaw = co?.company_logo_url;
@@ -160,13 +170,6 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
         : null,
     );
 
-    const { data: mem } = await supabase
-      .from("company_users")
-      .select("is_owner, company_roles ( name )")
-      .eq("user_id", user.id)
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .maybeSingle();
     if (mem) {
       if (mem.is_owner) {
         role = "Owner";
@@ -200,6 +203,7 @@ export function AppAccountProvider({ children }: { children: React.ReactNode }) 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     clearActiveCompanyCache();
+    clearAuthSessionCache();
     clearRoleFeaturesCache();
     localStorage.clear();
     sessionStorage.clear();

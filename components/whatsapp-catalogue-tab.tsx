@@ -38,6 +38,12 @@ import { DataTable } from "@/components/data-table";
 import { DataTableColumnHeader } from "@/components/data-table-column-header";
 import { DataTablePaginationFooter } from "@/components/data-table-pagination-footer";
 import { FeatureEmptyState } from "@/components/feature-empty-state";
+import {
+  DIRECTORY_LIST_PANEL_CLASS,
+  DirectoryFilterPanel,
+  DirectoryListFrame,
+  DirectoryListSearchHeader,
+} from "@/components/directory-list-layout";
 import { WhatsAppStatusFilterSidebar } from "@/components/whatsapp-status-filter-sidebar";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -71,9 +77,14 @@ function defaultShareBody(description: string): string {
 type Props = {
   companyReady: boolean | null;
   filtersOpen: boolean;
+  onFiltersOpenChange: (open: boolean) => void;
 };
 
-export function WhatsAppCatalogueTab({ companyReady, filtersOpen }: Props) {
+export function WhatsAppCatalogueTab({
+  companyReady,
+  filtersOpen,
+  onFiltersOpenChange,
+}: Props) {
   const router = useRouter();
   const { toast } = useToast();
 
@@ -484,58 +495,40 @@ export function WhatsAppCatalogueTab({ companyReady, filtersOpen }: Props) {
 
   return (
     <>
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch lg:gap-0",
-          filtersOpen ? "gap-6" : "gap-0",
-        )}
-      >
-        <div
-          id="whatsapp-catalogue-filter-panel"
-          className={cn(
-            "shrink-0 overflow-hidden",
-            "transition-[width,margin-inline-end,max-height,opacity] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
-            "motion-reduce:transition-none motion-reduce:duration-0",
-            filtersOpen
-              ? "pointer-events-auto max-h-[2000px] opacity-100 lg:me-10 lg:w-56 xl:w-[15rem]"
-              : "pointer-events-none max-h-0 opacity-0 lg:pointer-events-none lg:max-h-none lg:w-0 lg:opacity-100 xl:w-0 lg:me-0",
-          )}
-          aria-hidden={!filtersOpen}
+      <DirectoryListFrame filtersOpen={filtersOpen}>
+        <DirectoryFilterPanel
+          open={filtersOpen}
+          onOpenChange={onFiltersOpenChange}
+          panelId="whatsapp-catalogue-filter-panel"
+          title="Catalogue filters"
         >
-          <div className="h-full min-w-0 w-full lg:min-w-[14rem] xl:min-w-[15rem]">
-            <WhatsAppStatusFilterSidebar
-              facets={facets}
-              statusFilter={statusFilter}
-              onStatusChange={(v) => {
-                setPage(1);
-                setStatusFilter(v);
-              }}
-              allLabel="All posts"
-              allIcon={ImageIcon}
+          <WhatsAppStatusFilterSidebar
+            facets={facets}
+            statusFilter={statusFilter}
+            onStatusChange={(v) => {
+              setPage(1);
+              setStatusFilter(v);
+            }}
+            allLabel="All posts"
+            allIcon={ImageIcon}
+          />
+        </DirectoryFilterPanel>
+        <div className={DIRECTORY_LIST_PANEL_CLASS}>
+          <DirectoryListSearchHeader trailing={listRangeLabel}>
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
+              aria-hidden
             />
-          </div>
-        </div>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border-2 border-border/50 bg-card text-card-foreground shadow-none outline outline-1 -outline-offset-1 outline-border/40 dark:border-border/60 dark:outline-border/50">
-          <div className="flex shrink-0 flex-col gap-3 border-b border-border/50 bg-muted/45 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 dark:bg-muted/25">
-            <div className="relative min-w-0 flex-1 sm:max-w-xl lg:max-w-2xl">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70"
-                aria-hidden
-              />
-              <Input
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by description…"
-                className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
-                aria-label="Search catalogue posts"
-                autoComplete="off"
-              />
-            </div>
-            <p className="shrink-0 text-sm tabular-nums text-muted-foreground sm:text-right">
-              {listRangeLabel}
-            </p>
-          </div>
+            <Input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by description…"
+              className="h-10 w-full rounded-md border border-border/75 bg-white pl-9 pr-3.5 text-sm shadow-sm placeholder:text-muted-foreground/55 focus-visible:border-primary/45 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-primary/15 dark:border-border dark:bg-background dark:focus-visible:bg-background"
+              aria-label="Search catalogue posts"
+              autoComplete="off"
+            />
+          </DirectoryListSearchHeader>
           <div
             className={cn(
               "relative flex min-h-0 flex-1 flex-col transition-opacity duration-150 ease-out",
@@ -605,7 +598,7 @@ export function WhatsAppCatalogueTab({ companyReady, filtersOpen }: Props) {
             />
           </div>
         </div>
-      </div>
+      </DirectoryListFrame>
 
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">

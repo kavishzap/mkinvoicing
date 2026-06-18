@@ -21,6 +21,8 @@ import { AppPageShell } from "@/components/app-page-shell";
 import { CompanyRoleFormFields } from "@/components/company-role-form-fields";
 import { clearRoleFeaturesCache } from "@/lib/role-features-service";
 import { requireActiveCompanyId } from "@/lib/active-company";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   getCompanyRoleById,
   getPlanAllowedFeatures,
@@ -45,7 +47,7 @@ export default function EditCompanyRolePage() {
   } = useAppFeatures();
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [role, setRole] = useState<CompanyRole | null>(null);
   const [planFeatures, setPlanFeatures] = useState<PlanAllowedFeature[]>([]);
   const [formName, setFormName] = useState("");
@@ -141,22 +143,21 @@ export default function EditCompanyRolePage() {
       payload.description = formDescription.trim() || null;
     }
 
-    setSaving(true);
-    try {
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateCompanyRole(roleId, payload);
       clearRoleFeaturesCache();
       await reloadAppFeatures();
       toast({ title: "Role updated", description: "Changes saved." });
       router.push("/app/settings?tab=roles");
-    } catch (err) {
+      } catch (err) {
       toast({
         title: "Save failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   };
 
   if (waitingOnPermissions) {
@@ -210,9 +211,9 @@ export default function EditCompanyRolePage() {
             size="sm"
             className="gap-2 rounded-md font-semibold shadow-sm"
             onClick={() => void handleSave()}
-            disabled={saving || isOwnerRole}
+            disabled={isRunning || isOwnerRole}
           >
-            {saving ? "Saving…" : "Save changes"}
+            "Save changes"
           </Button>
         </div>
       }

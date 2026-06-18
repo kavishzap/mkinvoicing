@@ -10,6 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { AppPageShell } from "@/components/app-page-shell";
 import { useToast } from "@/hooks/use-toast";
 import { addEmployee, type EmployeePayload } from "@/lib/employees-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   emptyPayrollEmployeeForm,
   PayrollEmployeeFormFields,
@@ -23,7 +25,7 @@ export default function NewPayrollEmployeePage() {
     emptyPayrollEmployeeForm(),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,8 +37,8 @@ export default function NewPayrollEmployeePage() {
     setErrors(next);
     if (Object.keys(next).length > 0) return;
 
-    try {
-      setSaving(true);
+    await runActionProgress("Creating employee…", async () => {
+      try {
       const payload: EmployeePayload = {
         full_name: formData.full_name.trim(),
         phone: formData.phone || undefined,
@@ -52,15 +54,14 @@ export default function NewPayrollEmployeePage() {
       await addEmployee(payload);
       toast({ title: "Employee added" });
       router.push("/app/payroll/employees");
-    } catch (err) {
+      } catch (err) {
       toast({
         title: "Save failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -87,8 +88,8 @@ export default function NewPayrollEmployeePage() {
               <Button type="button" variant="outline" asChild>
                 <Link href="/app/payroll/employees">Cancel</Link>
               </Button>
-              <Button type="submit" disabled={saving}>
-                {saving ? "Saving…" : "Add employee"}
+              <Button type="submit" disabled={isRunning}>
+                "Add employee"
               </Button>
             </div>
           </form>

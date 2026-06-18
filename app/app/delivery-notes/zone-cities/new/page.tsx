@@ -22,6 +22,8 @@ import { useToast } from "@/hooks/use-toast";
 import { getActiveCompanyId } from "@/lib/active-company";
 import { listTeamMembers, type TeamMemberRow } from "@/lib/company-team-service";
 import { createDeliveryZone } from "@/lib/delivery-zones-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -85,7 +87,7 @@ export default function NewDeliveryZonePage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [driverId, setDriverId] = useState("__none__");
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   useEffect(() => {
     let cancelled = false;
@@ -116,8 +118,8 @@ export default function NewDeliveryZonePage() {
       });
       return;
     }
-    try {
-      setSaving(true);
+    await runActionProgress("Creating delivery zone…", async () => {
+      try {
       const zoneId = await createDeliveryZone({
         name: clean,
         description: description.trim() || undefined,
@@ -126,15 +128,14 @@ export default function NewDeliveryZonePage() {
       });
       toast({ title: "Zone created" });
       router.replace(`/app/delivery-notes/zone-cities/${zoneId}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       toast({
         title: "Could not create zone",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -152,11 +153,11 @@ export default function NewDeliveryZonePage() {
         <Button
           type="button"
           className="gap-2 font-semibold shadow-sm"
-          disabled={saving || companyReady !== true}
+          disabled={isRunning || companyReady !== true}
           onClick={() => void handleSave()}
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Create zone"}
+          "Create zone"
         </Button>
       }
     >

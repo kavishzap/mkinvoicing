@@ -65,6 +65,9 @@ import {
   type InventoryMovementRow,
   type StockBalanceRow,
 } from "@/lib/inventory-stock-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { QtyInput } from "@/components/qty-input";
 import {
   getProduct,
   type ProductPayload,
@@ -259,23 +262,20 @@ export default function EditInventoryProductPage() {
   const [transferToId, setTransferToId] = useState("");
   const [transferQty, setTransferQty] = useState("");
   const [transferNote, setTransferNote] = useState("");
-  const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [stockMovTab, setStockMovTab] = useState("transfer");
   const [refillLocationId, setRefillLocationId] = useState("");
   const [refillQty, setRefillQty] = useState("");
   const [refillNote, setRefillNote] = useState("");
-  const [refillSubmitting, setRefillSubmitting] = useState(false);
   const [stockOutFromId, setStockOutFromId] = useState("");
   const [stockOutQty, setStockOutQty] = useState("");
   const [stockOutNote, setStockOutNote] = useState("");
-  const [stockOutSubmitting, setStockOutSubmitting] = useState(false);
   const [movements, setMovements] = useState<InventoryMovementRow[]>([]);
   const [movTotal, setMovTotal] = useState(0);
   const [movPage, setMovPage] = useState(1);
   const [movLoading, setMovLoading] = useState(false);
   const [nameError, setNameError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [productIsActive, setProductIsActive] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -409,23 +409,22 @@ export default function EditInventoryProductPage() {
 
   async function performSave() {
     if (!productId) return;
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateProduct(productId, {
         ...formToPayload(form),
         is_active: productIsActive,
       });
       toast({ title: "Product updated", description: "Your changes have been saved." });
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({
         title: "Save failed",
         description: msg,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   const transferFromRow = transferAtLoc.find((r) => r.location_id === transferFromId);
@@ -454,32 +453,31 @@ export default function EditInventoryProductPage() {
       toast({ title: "Invalid quantity", variant: "destructive" });
       return;
     }
-    try {
-      setRefillSubmitting(true);
-      await recordInventoryRefill({
-        productId,
-        toLocationId: refillLocationId,
-        quantity: q,
-        note: refillNote.trim() || null,
-      });
-      toast({
-        title: "Refill recorded",
-        description: "Stock increased at that location.",
-      });
-      setRefillQty("");
-      setRefillNote("");
-      await refreshStockViews(productId, activeLocationOptions);
-      await refreshMovementHistory();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
-        title: "Refill failed",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setRefillSubmitting(false);
-    }
+    await runActionProgress("Recording refill…", async () => {
+      try {
+        await recordInventoryRefill({
+          productId,
+          toLocationId: refillLocationId,
+          quantity: q,
+          note: refillNote.trim() || null,
+        });
+        toast({
+          title: "Refill recorded",
+          description: "Stock increased at that location.",
+        });
+        setRefillQty("");
+        setRefillNote("");
+        await refreshStockViews(productId, activeLocationOptions);
+        await refreshMovementHistory();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Refill failed",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   async function handleStockOut(e: React.FormEvent) {
@@ -506,32 +504,31 @@ export default function EditInventoryProductPage() {
       });
       return;
     }
-    try {
-      setStockOutSubmitting(true);
-      await recordInventoryAdjustmentOut({
-        productId,
-        fromLocationId: stockOutFromId,
-        quantity: q,
-        note: stockOutNote.trim() || null,
-      });
-      toast({
-        title: "Stock out recorded",
-        description: "Quantity was reduced at that location.",
-      });
-      setStockOutQty("");
-      setStockOutNote("");
-      await refreshStockViews(productId, activeLocationOptions);
-      await refreshMovementHistory();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
-        title: "Stock out failed",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setStockOutSubmitting(false);
-    }
+    await runActionProgress("Recording stock out…", async () => {
+      try {
+        await recordInventoryAdjustmentOut({
+          productId,
+          fromLocationId: stockOutFromId,
+          quantity: q,
+          note: stockOutNote.trim() || null,
+        });
+        toast({
+          title: "Stock out recorded",
+          description: "Quantity was reduced at that location.",
+        });
+        setStockOutQty("");
+        setStockOutNote("");
+        await refreshStockViews(productId, activeLocationOptions);
+        await refreshMovementHistory();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Stock out failed",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   async function handleTransfer(e: React.FormEvent) {
@@ -567,34 +564,33 @@ export default function EditInventoryProductPage() {
       return;
     }
 
-    try {
-      setTransferSubmitting(true);
-      await recordInventoryTransfer({
-        productId,
-        fromLocationId: transferFromId,
-        toLocationId: transferToId,
-        quantity: q,
-        note: transferNote.trim() || null,
-      });
-      toast({
-        title: "Transfer recorded",
-        description: "Stock balances were updated.",
-      });
-      setTransferQty("");
-      setTransferNote("");
-      setTransferToId("");
-      await refreshStockViews(productId, activeLocationOptions);
-      await refreshMovementHistory();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Please try again.";
-      toast({
-        title: "Transfer failed",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setTransferSubmitting(false);
-    }
+    await runActionProgress("Recording transfer…", async () => {
+      try {
+        await recordInventoryTransfer({
+          productId,
+          fromLocationId: transferFromId,
+          toLocationId: transferToId,
+          quantity: q,
+          note: transferNote.trim() || null,
+        });
+        toast({
+          title: "Transfer recorded",
+          description: "Stock balances were updated.",
+        });
+        setTransferQty("");
+        setTransferNote("");
+        setTransferToId("");
+        await refreshStockViews(productId, activeLocationOptions);
+        await refreshMovementHistory();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Please try again.";
+        toast({
+          title: "Transfer failed",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   return (
@@ -623,11 +619,11 @@ export default function EditInventoryProductPage() {
               type="button"
               size="sm"
               onClick={requestSave}
-              disabled={saving || loading}
+              disabled={isRunning || loading}
               className="shrink-0 gap-2 font-semibold shadow-sm"
             >
               <Save className="size-3.5 shrink-0" aria-hidden />
-              {saving ? "Saving…" : "Save changes"}
+              Save changes
             </Button>
           </div>
         )
@@ -659,14 +655,14 @@ export default function EditInventoryProductPage() {
                   id="product-active"
                   checked={productIsActive}
                   onCheckedChange={setProductIsActive}
-                  disabled={saving}
+                  disabled={isRunning}
                   aria-label="Product active"
                 />
                 <Label
                   htmlFor="product-active"
                   className={cn(
                     "cursor-pointer text-xs font-medium text-foreground",
-                    saving && "pointer-events-none opacity-60",
+                    isRunning && "pointer-events-none opacity-60",
                   )}
                 >
                   Active
@@ -923,7 +919,7 @@ export default function EditInventoryProductPage() {
                         <Select
                           value={transferFromId || NONE_LOC}
                           onValueChange={(v) => setTransferFromId(v === NONE_LOC ? "" : v)}
-                          disabled={transferAtLoc.length === 0 || transferSubmitting}
+                          disabled={transferAtLoc.length === 0 || isRunning}
                         >
                           <SelectTrigger className="h-8 w-full rounded-sm text-xs">
                             <SelectValue placeholder="Where stock is now" />
@@ -944,7 +940,7 @@ export default function EditInventoryProductPage() {
                           value={transferToId || NONE_LOC}
                           onValueChange={(v) => setTransferToId(v === NONE_LOC ? "" : v)}
                           disabled={
-                            transferSubmitting ||
+                            isRunning ||
                             !transferFromId ||
                             transferToOptions.length === 0
                           }
@@ -968,15 +964,12 @@ export default function EditInventoryProductPage() {
                       <Label htmlFor="transfer-qty" className={fieldLabelClass}>
                         Quantity
                       </Label>
-                      <Input
+                      <QtyInput
                         id="transfer-qty"
-                        type="number"
-                        min={0}
-                        step="any"
                         value={transferQty}
-                        onChange={(e) => setTransferQty(e.target.value)}
+                        onValueChange={setTransferQty}
                         placeholder={transferFromRow ? `Max ${maxTransferQty}` : "0"}
-                        disabled={transferSubmitting}
+                        disabled={isRunning}
                       />
                     </div>
                     <div className="space-y-2">
@@ -989,7 +982,7 @@ export default function EditInventoryProductPage() {
                         value={transferNote}
                         onChange={(e) => setTransferNote(e.target.value)}
                         placeholder="e.g. Rebalanced for branch display"
-                        disabled={transferSubmitting}
+                        disabled={isRunning}
                         className="min-h-[72px] resize-y rounded-sm py-2"
                       />
                     </div>
@@ -997,9 +990,9 @@ export default function EditInventoryProductPage() {
                       type="submit"
                       size="sm"
                       className="h-8 text-xs"
-                      disabled={transferSubmitting}
+                      disabled={isRunning}
                     >
-                      {transferSubmitting ? "Saving…" : "Record transfer"}
+                      Record transfer
                     </Button>
                   </form>
                 </TabsContent>
@@ -1018,7 +1011,7 @@ export default function EditInventoryProductPage() {
                             setRefillLocationId(v === NONE_LOC ? "" : v)
                           }
                           disabled={
-                            activeLocationOptions.length === 0 || refillSubmitting
+                            activeLocationOptions.length === 0 || isRunning
                           }
                         >
                           <SelectTrigger className="h-8 w-full rounded-sm text-xs">
@@ -1039,15 +1032,12 @@ export default function EditInventoryProductPage() {
                         <Label htmlFor="refill-qty" className={fieldLabelClass}>
                           Quantity to add
                         </Label>
-                        <Input
+                        <QtyInput
                           id="refill-qty"
-                          type="number"
-                          min={0}
-                          step="any"
                           value={refillQty}
-                          onChange={(e) => setRefillQty(e.target.value)}
+                          onValueChange={setRefillQty}
                           placeholder="0"
-                          disabled={refillSubmitting}
+                          disabled={isRunning}
                         />
                       </div>
                     </div>
@@ -1061,7 +1051,7 @@ export default function EditInventoryProductPage() {
                         value={refillNote}
                         onChange={(e) => setRefillNote(e.target.value)}
                         placeholder="e.g. Supplier delivery #1234"
-                        disabled={refillSubmitting}
+                        disabled={isRunning}
                         className="min-h-[72px] resize-y rounded-sm py-2"
                       />
                     </div>
@@ -1069,9 +1059,9 @@ export default function EditInventoryProductPage() {
                       type="submit"
                       size="sm"
                       className="h-8 text-xs"
-                      disabled={refillSubmitting || activeLocationOptions.length === 0}
+                      disabled={isRunning || activeLocationOptions.length === 0}
                     >
-                      {refillSubmitting ? "Saving…" : "Record refill"}
+                      Record refill
                     </Button>
                   </form>
                 </TabsContent>
@@ -1089,7 +1079,7 @@ export default function EditInventoryProductPage() {
                           onValueChange={(v) =>
                             setStockOutFromId(v === NONE_LOC ? "" : v)
                           }
-                          disabled={transferAtLoc.length === 0 || stockOutSubmitting}
+                          disabled={transferAtLoc.length === 0 || isRunning}
                         >
                           <SelectTrigger className="h-8 w-full rounded-sm text-xs">
                             <SelectValue placeholder="Where to reduce stock" />
@@ -1108,15 +1098,12 @@ export default function EditInventoryProductPage() {
                         <Label htmlFor="stock-out-qty" className={fieldLabelClass}>
                           Quantity to remove
                         </Label>
-                        <Input
+                        <QtyInput
                           id="stock-out-qty"
-                          type="number"
-                          min={0}
-                          step="any"
                           value={stockOutQty}
-                          onChange={(e) => setStockOutQty(e.target.value)}
+                          onValueChange={setStockOutQty}
                           placeholder={stockOutFromRow ? `Max ${maxStockOutQty}` : "0"}
-                          disabled={stockOutSubmitting}
+                          disabled={isRunning}
                         />
                       </div>
                     </div>
@@ -1130,7 +1117,7 @@ export default function EditInventoryProductPage() {
                         value={stockOutNote}
                         onChange={(e) => setStockOutNote(e.target.value)}
                         placeholder="e.g. Damaged, expired, or sold offline"
-                        disabled={stockOutSubmitting}
+                        disabled={isRunning}
                         className="min-h-[72px] resize-y rounded-sm py-2"
                       />
                     </div>
@@ -1138,9 +1125,9 @@ export default function EditInventoryProductPage() {
                       type="submit"
                       size="sm"
                       className="h-8 text-xs"
-                      disabled={stockOutSubmitting || transferAtLoc.length === 0}
+                      disabled={isRunning || transferAtLoc.length === 0}
                     >
-                      {stockOutSubmitting ? "Saving…" : "Record stock out"}
+                      Record stock out
                     </Button>
                   </form>
                 </TabsContent>
@@ -1284,16 +1271,16 @@ export default function EditInventoryProductPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Save changes"}
+              "Save changes"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

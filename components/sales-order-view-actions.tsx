@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { Copy, Download, Edit, PackageCheck, Printer, BadgeCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -19,6 +18,10 @@ import {
   updateSalesOrderFulfillmentStatus,
   type SalesOrderDetail,
 } from "@/lib/sales-orders-service";
+import {
+  fetchDocumentBranding,
+  type DocumentBranding,
+} from "@/lib/branding-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
 import {
   addPdfHeaderLogo,
@@ -28,33 +31,14 @@ import {
 } from "@/lib/pdf-image-for-jspdf";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-
-type Branding = {
-  logoUrl?: string;
-  brandColor?: string;
-  companyName?: string;
-  address1?: string;
-  address2?: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-};
-
-async function fetchBranding(): Promise<Branding | undefined> {
-  try {
-    const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
-    if (!res.ok) return undefined;
-    return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 
 function money(n: number, ccy: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(n);
 }
 
-function buildFromLines(so: SalesOrderDetail, prof: Profile | null | undefined, branding: Branding) {
+function buildFromLines(so: SalesOrderDetail, prof: Profile | null | undefined, branding: DocumentBranding) {
   const fromSnap = (so.from_snapshot ?? {}) as Record<string, unknown>;
   const acctType = prof?.accountType ?? "individual";
   const senderName =
@@ -119,7 +103,7 @@ export function SalesOrderViewActions({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const [busy, setBusy] = useState(false);
+  const { isRunning } = useActionProgress();
 
   async function refreshDetailFromServer() {
     const fresh = await getSalesOrder(salesOrderId, { mode: "view" });
@@ -127,62 +111,63 @@ export function SalesOrderViewActions({
   }
 
   const handleDuplicate = () => {
-    if (busy) return;
+    if (isRunning) return;
     router.push(
       `/app/sales-orders/new?duplicate=${encodeURIComponent(salesOrderId)}`
     );
   };
 
   const handleMarkAsPaid = async () => {
-    if (busy) return;
-    try {
-      setBusy(true);
-      await updateSalesOrderPaymentStatus(salesOrderId, "paid");
-      toast({
-        title: "Sales order updated",
-        description: "Payment status set to Paid.",
-      });
-      await refreshDetailFromServer();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Please try again.";
-      toast({
-        title: "Could not mark as paid",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
+    if (isRunning) return;
+    await runActionProgress("Marking sales order as paid…", async () => {
+      try {
+        await updateSalesOrderPaymentStatus(salesOrderId, "paid");
+        toast({
+          title: "Sales order updated",
+          description: "Payment status set to Paid.",
+        });
+        await refreshDetailFromServer();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Please try again.";
+        toast({
+          title: "Could not mark as paid",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const handleMarkDeliveredToCustomer = async () => {
-    if (busy) return;
-    try {
-      setBusy(true);
-      await updateSalesOrderFulfillmentStatus(
-        salesOrderId,
-        "delivered to customer"
-      );
-      toast({
-        title: "Sales order updated",
-        description: `Fulfillment set to ${SALES_ORDER_FULFILLMENT_LABELS["delivered to customer"]}.`,
-      });
-      await refreshDetailFromServer();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Please try again.";
-      toast({
-        title: "Could not update fulfillment",
-        description: msg,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
+    if (isRunning) return;
+    await runActionProgress("Marking as delivered to customer…", async () => {
+      try {
+        await updateSalesOrderFulfillmentStatus(
+          salesOrderId,
+          "delivered to customer"
+        );
+        toast({
+          title: "Sales order updated",
+          description: `Fulfillment set to ${SALES_ORDER_FULFILLMENT_LABELS["delivered to customer"]}.`,
+        });
+        await refreshDetailFromServer();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Please try again.";
+        toast({
+          title: "Could not update fulfillment",
+          description: msg,
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const fulfillmentNorm = salesOrder
     ? normalizeSalesOrderFulfillmentStatus(salesOrder.fulfillment_status)
     : null;
+  const fulfillmentRaw = salesOrder
+    ? String(salesOrder.fulfillment_status ?? "").trim().toLowerCase()
+    : "";
   const canEditSalesOrder =
     salesOrder != null &&
     salesOrderFulfillmentAllowsEditing(
@@ -196,18 +181,18 @@ export function SalesOrderViewActions({
     fulfillmentNorm !== "delivered to customer" &&
     fulfillmentNorm !== "completed" &&
     fulfillmentNorm !== "cancelled" &&
-    fulfillmentNorm !== "upselling";
+    fulfillmentRaw !== "upselling";
 
   const renderPdf = async (mode: "download" | "print") => {
-    if (busy) return;
-    setBusy(true);
+    if (isRunning) return;
+    await runActionProgress("Generating PDF…", async () => {
     try {
       const so =
         salesOrder ?? (await getSalesOrder(salesOrderId, { mode: "view" }));
       const prof = profile ?? (await fetchProfile());
       if (!so) throw new Error("Sales order not found.");
 
-      const branding = (await fetchBranding()) ?? {};
+      const branding = (await fetchDocumentBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A";
       const fromSnap = so.from_snapshot ?? {};
       const resolvedLogo = resolveDocumentPdfLogo({
@@ -491,9 +476,8 @@ export function SalesOrderViewActions({
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not generate PDF.";
       toast({ title: "PDF error", description: msg, variant: "destructive" });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   return (
@@ -508,12 +492,12 @@ export function SalesOrderViewActions({
         variant="outline"
         size="sm"
         className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
-        disabled={busy}
+        disabled={isRunning}
         onClick={() => renderPdf("download")}
       >
         <Download className="h-4 w-4 shrink-0" />
         <span className="whitespace-nowrap">
-          {busy ? "Generating…" : "Download PDF"}
+          Download PDF
         </span>
       </Button>
       <Button
@@ -521,7 +505,7 @@ export function SalesOrderViewActions({
         variant="outline"
         size="sm"
         className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
-        disabled={busy}
+        disabled={isRunning}
         onClick={() => renderPdf("print")}
       >
         <Printer className="h-4 w-4 shrink-0" />
@@ -532,7 +516,7 @@ export function SalesOrderViewActions({
         variant="outline"
         size="sm"
         className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
-        disabled={busy}
+        disabled={isRunning}
         onClick={handleDuplicate}
       >
         <Copy className="h-4 w-4 shrink-0" />
@@ -545,7 +529,7 @@ export function SalesOrderViewActions({
           size="sm"
           className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
           onClick={() => void handleMarkDeliveredToCustomer()}
-          disabled={busy}
+          disabled={isRunning}
           title="Set fulfillment to Delivered to customer"
         >
           <PackageCheck className="h-4 w-4 shrink-0" />
@@ -559,7 +543,7 @@ export function SalesOrderViewActions({
           size="sm"
           className="h-8 shrink-0 gap-1.5 px-2.5 sm:h-9 sm:gap-2 sm:px-3"
           onClick={() => void handleMarkAsPaid()}
-          disabled={busy}
+          disabled={isRunning}
           title="Mark as paid"
         >
           <BadgeCheck className="h-4 w-4 shrink-0" />

@@ -6,8 +6,11 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
+  type Cell,
+  type Column,
   type ColumnDef,
   type OnChangeFn,
+  type Row,
   type SortingState,
 } from "@tanstack/react-table";
 import { Search } from "lucide-react";
@@ -29,7 +32,207 @@ type ColMeta = {
   searchable?: boolean;
   /** When `onRowClick` is set, clicks on this column do not trigger row navigation. */
   stopRowClick?: boolean;
+  /** Human-readable label for mobile card rows. */
+  label?: string;
+  /** Column shown as the mobile card title. */
+  mobilePrimary?: boolean;
+  /** Badges/chips rendered inline under the title on mobile. */
+  mobileInline?: boolean;
+  /** Omit from the mobile card body. */
+  mobileHidden?: boolean;
 };
+
+const PRIMARY_COLUMN_IDS = new Set([
+  "number",
+  "name",
+  "title",
+  "code",
+  "reference",
+  "orderNumber",
+  "invoiceNumber",
+]);
+
+function humanizeColumnId(id: string): string {
+  return id
+    .replace(/([A-Z])/g, " $1")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+function getColumnLabel<TData>(column: Column<TData, unknown>): string {
+  const meta = column.columnDef.meta as ColMeta | undefined;
+  if (meta?.label) return meta.label;
+  return humanizeColumnId(column.id);
+}
+
+function isInlineColumn<TData>(column: Column<TData, unknown>): boolean {
+  const meta = column.columnDef.meta as ColMeta | undefined;
+  if (meta?.mobileInline) return true;
+  if (meta?.mobilePrimary || meta?.mobileHidden) return false;
+  const id = column.id.toLowerCase();
+  return (
+    id.includes("status") ||
+    id.includes("badge") ||
+    id.includes("payment") ||
+    id.includes("fulfillment") ||
+    id.endsWith("state") ||
+    id.endsWith("type")
+  );
+}
+
+function isAccessoryColumn<TData>(column: Column<TData, unknown>): boolean {
+  if (column.id === "notes") return true;
+  const meta = column.columnDef.meta as ColMeta | undefined;
+  return Boolean(meta?.stopRowClick && meta?.searchable === false && column.id !== "actions");
+}
+
+function categorizeRowCells<TData>(cells: Cell<TData, unknown>[]) {
+  let actions: Cell<TData, unknown> | undefined;
+  let accessory: Cell<TData, unknown> | undefined;
+  const candidates: Cell<TData, unknown>[] = [];
+
+  for (const cell of cells) {
+    const meta = cell.column.columnDef.meta as ColMeta | undefined;
+    if (cell.column.id === "actions") {
+      actions = cell;
+      continue;
+    }
+    if (isAccessoryColumn(cell.column)) {
+      accessory = cell;
+      continue;
+    }
+    if (meta?.mobileHidden) continue;
+    candidates.push(cell);
+  }
+
+  let primary =
+    candidates.find(
+      (cell) => (cell.column.columnDef.meta as ColMeta | undefined)?.mobilePrimary,
+    ) ??
+    candidates.find((cell) => PRIMARY_COLUMN_IDS.has(cell.column.id)) ??
+    candidates.find((cell) => !isInlineColumn(cell.column)) ??
+    candidates[0];
+
+  const inline: Cell<TData, unknown>[] = [];
+  const fields: Cell<TData, unknown>[] = [];
+
+  for (const cell of candidates) {
+    if (cell === primary) continue;
+    if (isInlineColumn(cell.column)) {
+      inline.push(cell);
+    } else {
+      fields.push(cell);
+    }
+  }
+
+  return { primary, actions, accessory, inline, fields };
+}
+
+function DataTableMobileCards<TData>({
+  rows,
+  onRowClick,
+  emptyMessage,
+}: {
+  rows: Row<TData>[];
+  onRowClick?: (row: TData) => void;
+  emptyMessage: React.ReactNode;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="flex min-h-[14rem] items-center justify-center px-4 py-10 text-center text-muted-foreground">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-border/50">
+      {rows.map((row) => {
+        const { primary, actions, accessory, inline, fields } = categorizeRowCells(
+          row.getVisibleCells(),
+        );
+
+        return (
+          <div
+            key={row.id}
+            className={cn(
+              "px-3 py-3 transition-colors sm:px-4",
+              onRowClick && "cursor-pointer active:bg-muted/30",
+            )}
+            onClick={
+              onRowClick
+                ? () => {
+                    onRowClick(row.original);
+                  }
+                : undefined
+            }
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1 text-sm font-semibold leading-snug text-foreground">
+                {primary
+                  ? flexRender(
+                      primary.column.columnDef.cell,
+                      primary.getContext(),
+                    )
+                  : null}
+              </div>
+              <div
+                className="flex shrink-0 items-center gap-0.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {accessory
+                  ? flexRender(
+                      accessory.column.columnDef.cell,
+                      accessory.getContext(),
+                    )
+                  : null}
+                {actions
+                  ? flexRender(
+                      actions.column.columnDef.cell,
+                      actions.getContext(),
+                    )
+                  : null}
+              </div>
+            </div>
+
+            {inline.length > 0 ? (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {inline.map((cell) => (
+                  <div key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</div>
+                ))}
+              </div>
+            ) : null}
+
+            {fields.length > 0 ? (
+              <dl className="mt-2 space-y-1.5">
+                {fields.map((cell) => {
+                  const meta = cell.column.columnDef.meta as ColMeta | undefined;
+                  const stopRow =
+                    Boolean(meta?.stopRowClick) || cell.column.id === "actions";
+                  return (
+                    <div
+                      key={cell.id}
+                      className="flex items-start justify-between gap-3 text-xs leading-snug"
+                      onClick={stopRow ? (e) => e.stopPropagation() : undefined}
+                    >
+                      <dt className="shrink-0 text-muted-foreground">
+                        {getColumnLabel(cell.column)}
+                      </dt>
+                      <dd className="min-w-0 text-right text-foreground">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function buildRowSearchString<TData>(
   row: TData,
@@ -81,6 +284,8 @@ export type DataTableProps<TData> = {
    * `default` — card chrome with muted toolbar/header bands.
    */
   variant?: "default" | "minimal";
+  /** Stack rows as cards below the `md` breakpoint (no horizontal scroll). */
+  enableMobileCards?: boolean;
 };
 
 export function DataTable<TData>({
@@ -104,6 +309,7 @@ export function DataTable<TData>({
   sorting: controlledSorting,
   onSortingChange,
   variant = "default",
+  enableMobileCards = true,
 }: DataTableProps<TData>) {
   const isMinimal = variant === "minimal";
   const [uncontrolledSearch, setUncontrolledSearch] =
@@ -198,7 +404,9 @@ export function DataTable<TData>({
 
       <div
         className={cn(
-          "min-h-0 overflow-x-auto bg-card [&_[data-slot=table-container]]:overflow-visible",
+          "min-h-0 bg-card",
+          enableMobileCards ? "hidden md:block md:overflow-x-auto" : "overflow-x-auto",
+          "[&_[data-slot=table-container]]:overflow-visible",
           tableContainerClassName,
         )}
       >
@@ -232,7 +440,7 @@ export function DataTable<TData>({
                     <TableHead
                       key={header.id}
                       className={cn(
-                        "h-11 px-4 py-3 text-left align-middle text-xs leading-none",
+                        "h-11 whitespace-nowrap px-3 py-3 text-left align-middle text-xs leading-none sm:px-4",
                         isMinimal
                           ? "font-semibold text-foreground/85"
                           : "font-medium text-muted-foreground",
@@ -293,8 +501,8 @@ export function DataTable<TData>({
                       <TableCell
                         key={cell.id}
                         className={cn(
-                          "border-0 px-4 align-middle text-sm text-foreground",
-                          isMinimal ? "py-4" : "py-3.5",
+                          "border-0 px-3 align-middle text-sm text-foreground sm:px-4",
+                          isMinimal ? "py-3 sm:py-4" : "py-3 sm:py-3.5",
                           meta?.tdClassName,
                         )}
                         onClick={stopRow ? (e) => e.stopPropagation() : undefined}
@@ -312,6 +520,21 @@ export function DataTable<TData>({
           </TableBody>
         </Table>
       </div>
+
+      {enableMobileCards ? (
+        <div
+          className={cn(
+            "min-h-0 overflow-y-auto md:hidden",
+            tableContainerClassName,
+          )}
+        >
+          <DataTableMobileCards
+            rows={rows}
+            onRowClick={onRowClick}
+            emptyMessage={emptyMessage}
+          />
+        </div>
+      ) : null}
 
       {footer ? (
         <div

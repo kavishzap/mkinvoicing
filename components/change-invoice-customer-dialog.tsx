@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import {
   CustomerDirectoryFormFields,
   customerDirectoryFormToPayload,
@@ -69,7 +71,7 @@ export function ChangeInvoiceCustomerDialog({
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
 
   const [newForm, setNewForm] = useState<CustomerDirectoryFormData>(() =>
     emptyCustomerDirectoryForm("company"),
@@ -145,24 +147,23 @@ export function ChangeInvoiceCustomerDialog({
       });
       return;
     }
-    try {
-      setSaving(true);
-      await applyCustomer(c);
-      toast({
-        title: "Customer updated",
-        description: `Bill-to is now ${customerDisplayName(c)}.`,
-      });
-      onOpenChange(false);
-      onSaved?.();
-    } catch (e: unknown) {
-      toast({
-        title: "Could not update customer",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+    await runActionProgress("Updating invoice customer…", async () => {
+      try {
+        await applyCustomer(c);
+        toast({
+          title: "Customer updated",
+          description: `Bill-to is now ${customerDisplayName(c)}.`,
+        });
+        onOpenChange(false);
+        onSaved?.();
+      } catch (e: unknown) {
+        toast({
+          title: "Could not update customer",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   async function handleSaveNew() {
@@ -176,25 +177,24 @@ export function ChangeInvoiceCustomerDialog({
       });
       return;
     }
-    try {
-      setSaving(true);
-      const created = await addCustomer(customerDirectoryFormToPayload(newForm));
-      await applyCustomer(created);
-      toast({
-        title: "Customer updated",
-        description: `Invoice is now billed to ${customerDisplayName(created)}.`,
-      });
-      onOpenChange(false);
-      onSaved?.();
-    } catch (e: unknown) {
-      toast({
-        title: "Could not save customer",
-        description: e instanceof Error ? e.message : "Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
+    await runActionProgress("Creating customer…", async () => {
+      try {
+        const created = await addCustomer(customerDirectoryFormToPayload(newForm));
+        await applyCustomer(created);
+        toast({
+          title: "Customer updated",
+          description: `Invoice is now billed to ${customerDisplayName(created)}.`,
+        });
+        onOpenChange(false);
+        onSaved?.();
+      } catch (e: unknown) {
+        toast({
+          title: "Could not save customer",
+          description: e instanceof Error ? e.message : "Please try again.",
+          variant: "destructive",
+        });
+      }
+    });
   }
 
   return (
@@ -332,16 +332,16 @@ export function ChangeInvoiceCustomerDialog({
             type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={saving}
+            disabled={isRunning}
           >
             Cancel
           </Button>
           <Button
             type="button"
             onClick={tab === "new" ? handleSaveNew : handleSaveExisting}
-            disabled={saving}
+            disabled={isRunning}
           >
-            {saving ? "Saving…" : "Save"}
+            Save
           </Button>
         </DialogFooter>
       </DialogContent>

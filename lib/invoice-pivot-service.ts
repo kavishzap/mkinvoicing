@@ -157,7 +157,6 @@ async function fetchAllInvoicesForPivot(
   companyId: string,
   filters: InvoicePivotFilters,
 ): Promise<PivotInvoiceRow[]> {
-  const companyOr = `company_id.eq.${companyId},company_id.is.null`;
   const select = `
     id, currency,
     invoice_items ( item, quantity, unit_price )
@@ -167,7 +166,7 @@ async function fetchAllInvoicesForPivot(
     supabase
       .from("invoices")
       .select(select, withCount ? { count: "exact" } : undefined)
-      .or(companyOr)
+      .eq("company_id", companyId)
       .neq("status", "cancelled")
       .gte("issue_date", filters.startDate)
       .lte("issue_date", filters.endDate)

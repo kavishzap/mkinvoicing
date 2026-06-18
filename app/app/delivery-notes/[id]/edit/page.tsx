@@ -64,6 +64,8 @@ import {
   type SalesOrderPickRow,
 } from "@/lib/deliveries-service";
 import type { TeamMemberRow } from "@/lib/company-team-service";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   getDriverZoneCityFilter,
   type DriverZoneCityFilter,
@@ -221,7 +223,7 @@ export default function EditDeliveryPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [orders, setOrders] = useState<SalesOrderPickRow[]>([]);
   const [drivers, setDrivers] = useState<TeamMemberRow[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -500,8 +502,8 @@ export default function EditDeliveryPage() {
 
     if (!deliveryId) return;
 
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateDelivery(deliveryId, {
         driverUserId: driverId,
         salesOrderIds: [...selected],
@@ -513,16 +515,15 @@ export default function EditDeliveryPage() {
         description: "Changes to this delivery note were saved.",
       });
       router.push(`/app/delivery-notes/${deliveryId}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const err = e as { message?: string };
       toast({
         title: "Could not save delivery",
         description: err?.message ?? "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   const orderColumns = useMemo<ColumnDef<SalesOrderPickRow>[]>(
@@ -905,11 +906,11 @@ export default function EditDeliveryPage() {
         <Button
           type="button"
           onClick={() => void handleSave()}
-          disabled={saving || !deliveryId}
+          disabled={isRunning || !deliveryId}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving…" : "Save changes"}
+          "Save changes"
         </Button>
       }
     >

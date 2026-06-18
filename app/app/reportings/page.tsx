@@ -1,16 +1,40 @@
 "use client";
 
+import nextDynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BarChart3, FileDown, Loader2, Receipt, TrendingUp, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppPageShell } from "@/components/app-page-shell";
-import { DriverSettlementReportTab } from "@/components/driver-settlement-report-tab";
-import { ExpenseReportTab } from "@/components/expense-report-tab";
-import { PnlReportTab } from "@/components/pnl-report-tab";
-import { SalesReportTab } from "@/components/sales-report-tab";
 import type { ReportTabExportApi } from "@/components/report-tab-export";
+
+const tabLoading = () => (
+  <div className="min-h-[320px] animate-pulse rounded-lg bg-muted/50" />
+);
+
+const PnlReportTab = nextDynamic(
+  () =>
+    import("@/components/pnl-report-tab").then((m) => m.PnlReportTab),
+  { ssr: false, loading: tabLoading },
+);
+const SalesReportTab = nextDynamic(
+  () =>
+    import("@/components/sales-report-tab").then((m) => m.SalesReportTab),
+  { ssr: false, loading: tabLoading },
+);
+const DriverSettlementReportTab = nextDynamic(
+  () =>
+    import("@/components/driver-settlement-report-tab").then(
+      (m) => m.DriverSettlementReportTab,
+    ),
+  { ssr: false, loading: tabLoading },
+);
+const ExpenseReportTab = nextDynamic(
+  () =>
+    import("@/components/expense-report-tab").then((m) => m.ExpenseReportTab),
+  { ssr: false, loading: tabLoading },
+);
 
 type ReportTab = "pnl" | "sales" | "driver-settlement" | "expense";
 
@@ -103,25 +127,31 @@ export default function ReportingsPage() {
           value="pnl"
           className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
         >
-          <PnlReportTab onExportReady={setPnlExport} />
+          {mainTab === "pnl" ? <PnlReportTab onExportReady={setPnlExport} /> : null}
         </TabsContent>
         <TabsContent
           value="sales"
           className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
         >
-          <SalesReportTab onExportReady={setSalesExport} />
+          {mainTab === "sales" ? (
+            <SalesReportTab onExportReady={setSalesExport} />
+          ) : null}
         </TabsContent>
         <TabsContent
           value="driver-settlement"
           className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
         >
-          <DriverSettlementReportTab onExportReady={setDriverSettlementExport} />
+          {mainTab === "driver-settlement" ? (
+            <DriverSettlementReportTab onExportReady={setDriverSettlementExport} />
+          ) : null}
         </TabsContent>
         <TabsContent
           value="expense"
           className="mt-0 min-h-0 flex-1 outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
         >
-          <ExpenseReportTab onExportReady={setExpenseExport} />
+          {mainTab === "expense" ? (
+            <ExpenseReportTab onExportReady={setExpenseExport} />
+          ) : null}
         </TabsContent>
       </Tabs>
     </AppPageShell>

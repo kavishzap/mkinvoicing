@@ -21,6 +21,8 @@ import { AppPageShell } from "@/components/app-page-shell";
 import { CompanyRoleFormFields } from "@/components/company-role-form-fields";
 import { clearRoleFeaturesCache } from "@/lib/role-features-service";
 import { requireActiveCompanyId } from "@/lib/active-company";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 import {
   createCompanyRole,
   getPlanAllowedFeatures,
@@ -37,7 +39,7 @@ export default function NewCompanyRolePage() {
   } = useAppFeatures();
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [planFeatures, setPlanFeatures] = useState<PlanAllowedFeature[]>([]);
   const [formName, setFormName] = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -103,8 +105,8 @@ export default function NewCompanyRolePage() {
     }
 
     const featureIds = Array.from(selectedFeatureIds);
-    setSaving(true);
-    try {
+    await runActionProgress("Creating role…", async () => {
+      try {
       await createCompanyRole({
         name,
         description: formDescription.trim() || null,
@@ -114,15 +116,14 @@ export default function NewCompanyRolePage() {
       clearRoleFeaturesCache();
       await reloadAppFeatures();
       router.push("/app/settings?tab=roles");
-    } catch (err) {
+      } catch (err) {
       toast({
         title: "Save failed",
         description: err instanceof Error ? err.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   };
 
   if (waitingOnPermissions) {
@@ -176,9 +177,9 @@ export default function NewCompanyRolePage() {
             size="sm"
             className="gap-2 rounded-md font-semibold shadow-sm"
             onClick={() => void handleSave()}
-            disabled={saving}
+            disabled={isRunning}
           >
-            {saving ? "Saving…" : "Save role"}
+            "Save role"
           </Button>
         </div>
       }

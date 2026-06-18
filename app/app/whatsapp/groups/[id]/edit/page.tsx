@@ -23,6 +23,8 @@ import {
   updateWhatsAppGroup,
 } from "@/lib/whatsapp-groups-service";
 import { cn } from "@/lib/utils";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 type InitialSnapshot = {
   name: string;
@@ -112,7 +114,7 @@ export default function EditWhatsAppGroupPage() {
     new Set(),
   );
   const [initial, setInitial] = useState<InitialSnapshot | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [nameError, setNameError] = useState("");
 
   useEffect(() => {
@@ -239,8 +241,8 @@ export default function EditWhatsAppGroupPage() {
       return;
     }
     setNameError("");
-    try {
-      setSaving(true);
+    await runActionProgress("Saving changes…", async () => {
+      try {
       await updateWhatsAppGroup(groupId, {
         name: name.trim(),
         description: description.trim() || null,
@@ -248,12 +250,11 @@ export default function EditWhatsAppGroupPage() {
       await setGroupMembers(groupId, [...selectedCustomerIds]);
       toast({ title: "Group updated" });
       router.push("/app/whatsapp?tab=groups");
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({ title: "Save failed", description: msg, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   if (loading || companyReady === null) {
@@ -283,10 +284,10 @@ export default function EditWhatsAppGroupPage() {
           <Button
             type="submit"
             form="wa-group-edit"
-            disabled={saving || companyReady !== true || !isDirty}
+            disabled={isRunning || companyReady !== true || !isDirty}
             className="font-semibold shadow-sm"
           >
-            {saving ? "Saving…" : "Save changes"}
+            "Save changes"
           </Button>
         </div>
       }

@@ -63,6 +63,9 @@ import {
 } from "@/lib/purchase-orders-service";
 import { AppPageShell, APP_PAGE_SHELL_CLASS } from "@/components/app-page-shell";
 import { DiscountTypeToggle } from "@/components/discount-type-toggle";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { QtyNumberInput } from "@/components/qty-input";
 
 type LineItem = {
   id: string;
@@ -110,7 +113,7 @@ function NewPurchaseOrderPageContent() {
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
 
@@ -424,8 +427,8 @@ function NewPurchaseOrderPageContent() {
       return;
     }
 
-    try {
-      setSaving(true);
+    await runActionProgress("Creating purchase order…", async () => {
+      try {
       if (!preferences) throw new Error("Preferences not loaded");
       if (!profile) throw new Error("Profile not loaded");
 
@@ -480,16 +483,15 @@ function NewPurchaseOrderPageContent() {
         description: "Your purchase order was saved.",
       });
       router.push(`/app/purchase-orders/${id}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({
         title: "Failed to create purchase order",
         description: msg,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   const err = (k: keyof FieldErrors) => (errors[k] ? "border-destructive" : "");
@@ -519,8 +521,8 @@ function NewPurchaseOrderPageContent() {
         </Link>
       }
       actions={
-        <Button onClick={doCreatePurchaseOrder} disabled={saving} size="sm">
-          {saving ? "Saving..." : "Save & View"}
+        <Button onClick={doCreatePurchaseOrder} disabled={isRunning} size="sm">
+          "Save & View"
         </Button>
       }
     >
@@ -915,16 +917,10 @@ function NewPurchaseOrderPageContent() {
                         />
                       </TableCell>
                       <TableCell>
-                        <Input
-                          type="number"
-                          min="1"
+                        <QtyNumberInput
                           value={item.quantity}
-                          onChange={(e) =>
-                            updateLineItem(
-                              item.id,
-                              "quantity",
-                              Number(e.target.value)
-                            )
+                          onValueChange={(value) =>
+                            updateLineItem(item.id, "quantity", value)
                           }
                           className={`h-9 ${
                             lineErrQty ? "border-destructive" : ""

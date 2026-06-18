@@ -39,6 +39,8 @@ import {
   type LocationPayload,
 } from "@/lib/locations-service";
 import { AppPageShell } from "@/components/app-page-shell";
+import { runActionProgress } from "@/lib/action-progress-bridge";
+import { useActionProgress } from "@/contexts/action-progress-context";
 
 const fieldLabelClass =
   "text-xs font-medium text-neutral-600 dark:text-neutral-400";
@@ -134,7 +136,7 @@ export default function NewLocationPage() {
   const [locationTypeOptions, setLocationTypeOptions] = useState<string[]>([]);
   const [locationTypesLoading, setLocationTypesLoading] = useState(true);
   const [nameError, setNameError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const { isRunning } = useActionProgress();
   const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
   const [isPrimaryWarehouse, setIsPrimaryWarehouse] = useState(false);
 
@@ -191,8 +193,8 @@ export default function NewLocationPage() {
   }
 
   async function performSave() {
-    try {
-      setSaving(true);
+    await runActionProgress("Creating location…", async () => {
+      try {
       const companyId = await getActiveCompanyId();
       if (!companyId) {
         toast({
@@ -213,16 +215,15 @@ export default function NewLocationPage() {
         description: "Location saved.",
       });
       router.push(`/app/locations/${created.id}`);
-    } catch (e: unknown) {
+      } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Please try again.";
       toast({
         title: "Save failed",
         description: msg,
         variant: "destructive",
       });
-    } finally {
-      setSaving(false);
-    }
+      }
+    });
   }
 
   return (
@@ -239,11 +240,11 @@ export default function NewLocationPage() {
       actions={
         <Button
           onClick={requestSave}
-          disabled={saving || locationTypesLoading || locationTypeOptions.length === 0}
+          disabled={isRunning || locationTypesLoading || locationTypeOptions.length === 0}
           className="gap-2 rounded font-semibold shadow-sm"
         >
           <Save className="size-3.5 shrink-0" aria-hidden />
-          {saving ? "Saving..." : "Submit"}
+          "Submit"
         </Button>
       }
     >
@@ -447,16 +448,16 @@ export default function NewLocationPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isRunning}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={saving}
+              disabled={isRunning}
               onClick={(e) => {
                 e.preventDefault();
                 setSaveConfirmOpen(false);
                 void performSave();
               }}
             >
-              {saving ? "Saving…" : "Submit"}
+              "Submit"
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

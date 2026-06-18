@@ -22,6 +22,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useActionProgress } from "@/contexts/action-progress-context";
+import { runActionProgress } from "@/lib/action-progress-bridge";
 import jsPDF from "jspdf";
 import autoTable, { RowInput } from "jspdf-autotable";
 import {
@@ -31,28 +33,11 @@ import {
   cancelPurchaseInvoice,
   type PurchaseInvoiceDetail,
 } from "@/lib/purchase-invoices-service";
+import {
+  fetchDocumentBranding,
+  type DocumentBranding,
+} from "@/lib/branding-service";
 import { fetchProfile, type Profile } from "@/lib/settings-service";
-
-type Branding = {
-  logoUrl?: string;
-  brandColor?: string;
-  companyName?: string;
-  address1?: string;
-  address2?: string;
-  website?: string;
-  phone?: string;
-  email?: string;
-};
-
-async function fetchBranding(): Promise<Branding | undefined> {
-  try {
-    const res = await fetch("/api/branding", { method: "GET", cache: "no-store" });
-    if (!res.ok) return undefined;
-    return (await res.json()) as Branding;
-  } catch {
-    return undefined;
-  }
-}
 
 async function imageUrlToDataURL(
   url: string
@@ -78,7 +63,7 @@ function money(n: number, ccy: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: ccy }).format(n);
 }
 
-function buildFromLines(inv: PurchaseInvoiceDetail, prof: Profile | null | undefined, branding: Branding) {
+function buildFromLines(inv: PurchaseInvoiceDetail, prof: Profile | null | undefined, branding: DocumentBranding) {
   const fromSnap = (inv.from_snapshot ?? {}) as Record<string, unknown>;
   const acctType = prof?.accountType ?? "individual";
   const senderName =
@@ -136,7 +121,7 @@ export function PurchaseInvoiceViewActions({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const [busy, setBusy] = useState(false);
+  const { isRunning } = useActionProgress();
   const [payOpen, setPayOpen] = useState(false);
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<
@@ -156,7 +141,7 @@ export function PurchaseInvoiceViewActions({
   }, [purchaseInvoice]);
 
   const handleDuplicate = () => {
-    if (busy) return;
+    if (isRunning) return;
     router.push(
       `/app/purchase-invoices/new?duplicate=${encodeURIComponent(purchaseInvoiceId)}`
     );
@@ -167,54 +152,52 @@ export function PurchaseInvoiceViewActions({
     const total = totals.total;
     const paid = Math.min(Math.max(0, amountPaid), total);
     const due = Math.max(0, total - paid);
-    try {
-      setBusy(true);
-      await updatePurchaseInvoicePayment(purchaseInvoiceId, {
-        amount_paid: paid,
-        amount_due: due,
-        payment_method: paymentMethod,
-      });
-      toast({ title: "Payment updated" });
-      setPayOpen(false);
-      onRefresh?.();
-    } catch (e: unknown) {
-      toast({
-        title: "Update failed",
-        description: e instanceof Error ? e.message : "Try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
+    await runActionProgress("Updating payment…", async () => {
+      try {
+        await updatePurchaseInvoicePayment(purchaseInvoiceId, {
+          amount_paid: paid,
+          amount_due: due,
+          payment_method: paymentMethod,
+        });
+        toast({ title: "Payment updated" });
+        setPayOpen(false);
+        onRefresh?.();
+      } catch (e: unknown) {
+        toast({
+          title: "Update failed",
+          description: e instanceof Error ? e.message : "Try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const handleCancel = async () => {
     if (!window.confirm("Cancel this purchase invoice? This sets balance to zero.")) return;
-    try {
-      setBusy(true);
-      await cancelPurchaseInvoice(purchaseInvoiceId);
-      toast({ title: "Purchase invoice cancelled" });
-      onRefresh?.();
-    } catch (e: unknown) {
-      toast({
-        title: "Cancel failed",
-        description: e instanceof Error ? e.message : "Try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
+    await runActionProgress("Cancelling purchase invoice…", async () => {
+      try {
+        await cancelPurchaseInvoice(purchaseInvoiceId);
+        toast({ title: "Purchase invoice cancelled" });
+        onRefresh?.();
+      } catch (e: unknown) {
+        toast({
+          title: "Cancel failed",
+          description: e instanceof Error ? e.message : "Try again.",
+          variant: "destructive",
+        });
+      }
+    });
   };
 
   const renderPdf = async (mode: "download" | "print") => {
-    if (busy) return;
-    setBusy(true);
+    if (isRunning) return;
+    await runActionProgress("Generating PDF…", async () => {
     try {
       const inv = purchaseInvoice ?? (await getPurchaseInvoice(purchaseInvoiceId));
       const prof = profile ?? (await fetchProfile());
       if (!inv) throw new Error("Purchase invoice not found.");
 
-      const branding = (await fetchBranding()) ?? {};
+      const branding = (await fetchDocumentBranding()) ?? {};
       const brandColor = branding.brandColor || "#0F172A";
       const resolvedLogo = branding.logoUrl || logoSrc || (prof as { logoUrl?: string })?.logoUrl || "/kredence.png";
 
@@ -500,9 +483,8 @@ export function PurchaseInvoiceViewActions({
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Could not generate PDF.";
       toast({ title: "PDF error", description: msg, variant: "destructive" });
-    } finally {
-      setBusy(false);
     }
+    });
   };
 
   const canPay = purchaseInvoice && purchaseInvoice.status !== "cancelled" && purchaseInvoice.status !== "paid";
@@ -518,17 +500,17 @@ export function PurchaseInvoiceViewActions({
           type="button"
           variant="outline"
           className="gap-2"
-          disabled={busy}
+          disabled={isRunning}
           onClick={() => renderPdf("download")}
         >
           <Download className="h-4 w-4" />
-          {busy ? "Generating…" : "Download PDF"}
+          Download PDF
         </Button>
         <Button
           type="button"
           variant="outline"
           className="gap-2"
-          disabled={busy}
+          disabled={isRunning}
           onClick={() => renderPdf("print")}
         >
           <Printer className="h-4 w-4" />
@@ -538,7 +520,7 @@ export function PurchaseInvoiceViewActions({
           type="button"
           variant="outline"
           className="gap-2"
-          disabled={busy}
+          disabled={isRunning}
           onClick={handleDuplicate}
         >
           <Copy className="h-4 w-4" />
@@ -557,7 +539,7 @@ export function PurchaseInvoiceViewActions({
             type="button"
             variant="outline"
             className="gap-2"
-            disabled={busy}
+            disabled={isRunning}
             onClick={() => setPayOpen(true)}
           >
             <Wallet className="h-4 w-4" />
@@ -569,7 +551,7 @@ export function PurchaseInvoiceViewActions({
             type="button"
             variant="outline"
             className="gap-2 text-destructive"
-            disabled={busy}
+            disabled={isRunning}
             onClick={handleCancel}
           >
             <XCircle className="h-4 w-4" />
@@ -626,7 +608,7 @@ export function PurchaseInvoiceViewActions({
             <Button variant="outline" onClick={() => setPayOpen(false)}>
               Close
             </Button>
-            <Button onClick={savePayment} disabled={busy}>
+            <Button onClick={savePayment} disabled={isRunning}>
               Save
             </Button>
           </DialogFooter>

@@ -1,3 +1,4 @@
+import { getSessionUser } from "@/lib/auth-session";
 import { supabase } from "@/lib/supabaseClient";
 import { isUserSystemAdmin } from "@/lib/user-system-role";
 
@@ -224,9 +225,9 @@ export function clearActiveCompanyCache(): void {
 }
 
 async function resolveActiveCompanyId(): Promise<string | null> {
-  const { data: auth, error: authErr } = await supabase.auth.getUser();
-  if (authErr || !auth?.user?.id) return null;
-  const userId = auth.user.id;
+  const user = await getSessionUser();
+  if (!user?.id) return null;
+  const userId = user.id;
 
   if (cachedUserId && cachedUserId !== userId) {
     cachedCompanyId = null;
@@ -235,14 +236,9 @@ async function resolveActiveCompanyId(): Promise<string | null> {
 
   const session = readSessionCache();
   if (session.userId === userId && session.companyId) {
-    if (await userCanAccessCompany(userId, session.companyId)) {
-      cachedCompanyId = session.companyId;
-      cachedUserId = userId;
-      writeSessionCache(userId, session.companyId);
-      return session.companyId;
-    }
-    clearSessionTenant(userId);
-    cachedCompanyId = null;
+    cachedCompanyId = session.companyId;
+    cachedUserId = userId;
+    return session.companyId;
   }
 
   if (cachedUserId === userId && cachedCompanyId) {
@@ -254,13 +250,23 @@ async function resolveActiveCompanyId(): Promise<string | null> {
     cachedCompanyId = null;
   }
 
-  const { data: memberships, error: memErr } = await supabase
-    .from("company_users")
-    .select("company_id")
-    .eq("user_id", userId)
-    .eq("is_active", true);
+  const [
+    { data: memberships, error: memErr },
+    { data: ownedRows, error: ownErr },
+  ] = await Promise.all([
+    supabase
+      .from("company_users")
+      .select("company_id")
+      .eq("user_id", userId)
+      .eq("is_active", true),
+    supabase
+      .from("companies")
+      .select("id")
+      .eq("owner_user_id", userId)
+      .eq("is_active", true),
+  ]);
 
-  if (memErr) {
+  if (memErr || ownErr) {
     cachedUserId = userId;
     cachedCompanyId = null;
     clearSessionTenant(userId);
@@ -271,20 +277,6 @@ async function resolveActiveCompanyId(): Promise<string | null> {
   for (const m of memberships ?? []) {
     if (m.company_id) ids.add(m.company_id as string);
   }
-
-  const { data: ownedRows, error: ownErr } = await supabase
-    .from("companies")
-    .select("id")
-    .eq("owner_user_id", userId)
-    .eq("is_active", true);
-
-  if (ownErr) {
-    cachedUserId = userId;
-    cachedCompanyId = null;
-    clearSessionTenant(userId);
-    return null;
-  }
-
   for (const o of ownedRows ?? []) {
     if (o.id) ids.add(o.id as string);
   }
@@ -318,20 +310,12 @@ async function resolveActiveCompanyId(): Promise<string | null> {
  * then falls back to the sole accessible company when the user has exactly one tenant.
  */
 export async function getActiveCompanyId(): Promise<string | null> {
-  const { data: auth, error: authErr } = await supabase.auth.getUser();
-  if (authErr || !auth?.user?.id) return null;
-  const userId = auth.user.id;
-
-  if (cachedUserId && cachedUserId !== userId) {
-    cachedCompanyId = null;
-    cachedUserId = null;
-  }
-
-  if (cachedUserId === userId && cachedCompanyId) {
+  if (cachedUserId && cachedCompanyId) {
     return cachedCompanyId;
   }
 
   if (inFlight) return inFlight;
+
   inFlight = resolveActiveCompanyId().finally(() => {
     inFlight = null;
   });
