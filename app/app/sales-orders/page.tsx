@@ -108,6 +108,7 @@ import {
   DirectoryListSearchHeader,
 } from "@/components/directory-list-layout";
 import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import { cn } from "@/lib/utils";
 
@@ -462,7 +463,6 @@ export default function SalesOrdersPage() {
   const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [printing, setPrinting] = useState(false);
 
@@ -1110,21 +1110,22 @@ export default function SalesOrdersPage() {
 
   const confirmDelete = async () => {
     if (!deleteId) return;
-    setDeleting(true);
-    try {
-      await deleteSalesOrder(deleteId);
-      toastRef.current({ title: "Sales order deleted" });
-      setDeleteId(null);
-      await reload();
-    } catch (e: unknown) {
+    const id = deleteId;
+    await runConfirmDeleteAction(
+      "Deleting sales order…",
+      () => setDeleteId(null),
+      async () => {
+        await deleteSalesOrder(id);
+        toastRef.current({ title: "Sales order deleted" });
+        await reload();
+      },
+    ).catch((e: unknown) => {
       toastRef.current({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setDeleting(false);
-    }
+    });
   };
 
   const hasActiveFilters = useMemo(
@@ -1375,16 +1376,12 @@ export default function SalesOrdersPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void confirmDelete();
-              }}
-              disabled={deleting}
+              onClick={() => void confirmDelete()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting ? "Deleting…" : "Delete"}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

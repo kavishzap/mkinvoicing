@@ -66,6 +66,7 @@ import {
   type ExpenseRow,
 } from "@/lib/expenses-service";
 import { cn } from "@/lib/utils";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 function ExpensesFilterSidebar({
   facets,
@@ -354,24 +355,26 @@ export default function ExpensesPage() {
   ]);
 
   async function handleDelete(id: string) {
-    try {
-      await deleteExpense(id);
-      toast({
-        title: "Expense deleted",
-        description: "Expense has been removed successfully.",
-      });
-      if (rows.length === 1 && page > 1) setPage((p) => p - 1);
-      else await reload();
-    } catch (e: unknown) {
+    await runConfirmDeleteAction(
+      "Deleting expense…",
+      () => setConfirmDeleteId(null),
+      async () => {
+        await deleteExpense(id);
+        toast({
+          title: "Expense deleted",
+          description: "Expense has been removed successfully.",
+        });
+        if (rows.length === 1 && page > 1) setPage((p) => p - 1);
+        else await reload();
+      },
+    ).catch((e: unknown) => {
       const err = e as { message?: string };
       toast({
         title: "Delete failed",
         description: err?.message ?? "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setConfirmDeleteId(null);
-    }
+    });
   }
 
   const fetchExportRows = useCallback(

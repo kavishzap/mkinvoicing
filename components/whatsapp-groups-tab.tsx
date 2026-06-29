@@ -59,6 +59,7 @@ import {
   type WhatsAppListStatus,
 } from "@/lib/whatsapp-groups-service";
 import { cn } from "@/lib/utils";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 type Props = {
   companyReady: boolean | null;
@@ -242,31 +243,33 @@ export function WhatsAppGroupsTab({
   }
 
   async function handleDelete(id: string) {
-    try {
-      await deleteWhatsAppGroup(id);
-      toast({ title: "Group deleted" });
-    } catch (e: unknown) {
+    await runConfirmDeleteAction(
+      "Deleting group…",
+      () => setDeleteId(null),
+      async () => {
+        await deleteWhatsAppGroup(id);
+        toast({ title: "Group deleted" });
+        if (rows.length === 1 && page > 1) setPage((p) => Math.max(1, p - 1));
+        else {
+          const facetData = await fetchWhatsAppGroupListFacets();
+          setFacets(facetData);
+          const listRes = await listWhatsAppGroupsWithMemberCounts({
+            search: debouncedSearch || undefined,
+            status: statusFilter,
+            page,
+            pageSize,
+          });
+          setRows(listRes.rows);
+          setTotal(listRes.total);
+        }
+      },
+    ).catch((e: unknown) => {
       toast({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setDeleteId(null);
-      if (rows.length === 1 && page > 1) setPage((p) => Math.max(1, p - 1));
-      else {
-        const facetData = await fetchWhatsAppGroupListFacets();
-        setFacets(facetData);
-        const listRes = await listWhatsAppGroupsWithMemberCounts({
-          search: debouncedSearch || undefined,
-          status: statusFilter,
-          page,
-          pageSize,
-        });
-        setRows(listRes.rows);
-        setTotal(listRes.total);
-      }
-    }
+    });
   }
 
   const columns = useMemo<ColumnDef<WhatsAppGroupListRow>[]>(

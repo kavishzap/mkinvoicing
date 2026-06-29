@@ -734,6 +734,7 @@ export async function getInvoiceForSalesOrder(
 /* -------------------- Detail -------------------- */
 
 export type InvoiceItemRow = {
+  id?: string;
   company_id?: string | null;
   item: string;
   description: string | null;
@@ -801,7 +802,7 @@ const INVOICE_DETAIL_SELECT = `
       discount_type, discount_amount,
       notes, terms,
       payment_method, amount_paid, amount_due,
-      invoice_items ( company_id, item, description, quantity, unit_price, tax_percent, product_id )
+      invoice_items ( id, company_id, item, description, quantity, unit_price, tax_percent, product_id )
     `;
 
 export async function getInvoice(id: string): Promise<InvoiceDetail | null> {

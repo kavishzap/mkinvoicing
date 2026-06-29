@@ -107,6 +107,15 @@ export function createSecureSupabaseFetch(
       encryptedResponse,
     );
 
+    const nullBodyStatuses = new Set([204, 205, 304]);
+    if (nullBodyStatuses.has(decrypted.status)) {
+      return new Response(null, {
+        status: decrypted.status,
+        statusText: decrypted.statusText,
+        headers: decrypted.headers,
+      });
+    }
+
     return new Response(decrypted.body, {
       status: decrypted.status,
       statusText: decrypted.statusText,

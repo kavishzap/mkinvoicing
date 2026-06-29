@@ -1,5 +1,9 @@
 import { supabase } from "@/lib/supabaseClient";
 import { isUserSystemAdmin } from "@/lib/user-system-role";
+import {
+  getPlanAllowedFeatures,
+  type PlanAllowedFeature,
+} from "@/lib/company-roles-service";
 import type { Database } from "@/src/types/supabase";
 
 /** One row from `public.features` (matches `SELECT f.*` on the role join). */
@@ -15,7 +19,7 @@ export type RoleFeatureResult = {
 };
 
 /** Bumped when cached payload shape or source query changes (avoids stale feature lists). */
-const SESSION_KEY = "mkinv:role_features_v5";
+const SESSION_KEY = "mkinv:role_features_v6";
 const SESSION_USER_KEY = "mkinv:role_features_user_id";
 const SESSION_COMPANY_KEY = "mkinv:role_features_company_id";
 
@@ -145,6 +149,42 @@ function roleFeaturesFromCompanyUserRow(
   return { isOwner, features };
 }
 
+/** Company owners inherit every feature on the company plan (Owner role is not editable in UI). */
+function mergeRoleFeaturesWithPlan(
+  roleFeatures: RoleFeature[],
+  planFeatures: PlanAllowedFeature[],
+): RoleFeature[] {
+  const byId = new Map(roleFeatures.map((f) => [f.id, f] as const));
+  for (const p of planFeatures) {
+    if (byId.has(p.id)) continue;
+    byId.set(p.id, {
+      id: p.id,
+      code: p.code,
+      name: p.name,
+      description: p.description,
+      is_active: true,
+      created_at: roleFeatures[0]?.created_at ?? new Date(0).toISOString(),
+    });
+  }
+  return Array.from(byId.values());
+}
+
+async function withOwnerPlanFeatures(
+  companyId: string,
+  result: RoleFeatureResult,
+): Promise<RoleFeatureResult> {
+  if (!result.isOwner) return result;
+  try {
+    const planFeatures = await getPlanAllowedFeatures(companyId);
+    return {
+      isOwner: true,
+      features: mergeRoleFeaturesWithPlan(result.features, planFeatures),
+    };
+  } catch {
+    return result;
+  }
+}
+
 /**
  * Features from the **company owner’s** role for this tenant (`company_id`).
  * Same join as members, with `company_roles.company_id` matching `companyId`.
@@ -202,7 +242,7 @@ async function resolveRoleFeatures(
     return { isOwner: false, features: [] };
   }
 
-  return roleFeaturesFromCompanyUserRow(row);
+  return withOwnerPlanFeatures(companyId, roleFeaturesFromCompanyUserRow(row));
 }
 
 /**

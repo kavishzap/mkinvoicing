@@ -43,6 +43,7 @@ import {
   type EmployeeAdvanceRow,
 } from "@/lib/employee-advances-service";
 import { useToast } from "@/hooks/use-toast";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "MUR" }).format(amount);
@@ -106,19 +107,22 @@ export default function PayrollEmployeesPage() {
   useEffect(() => setPage(1), [searchQuery, includeInactive, pageSize]);
 
   async function handleDelete(id: string) {
-    try {
-      await deleteEmployee(id);
-      toast({ title: "Employee deleted" });
-      if (rows.length === 1 && page > 1) setPage((p) => p - 1);
-      else await reload();
-    } catch (e) {
+    await runConfirmDeleteAction(
+      "Deleting employee…",
+      () => setConfirmDeleteId(null),
+      async () => {
+        await deleteEmployee(id);
+        toast({ title: "Employee deleted" });
+        if (rows.length === 1 && page > 1) setPage((p) => p - 1);
+        else await reload();
+      },
+    ).catch((e) => {
       toast({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    }
-    setConfirmDeleteId(null);
+    });
   }
 
   async function openAdvancesDialog(emp: EmployeeRow) {

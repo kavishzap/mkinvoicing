@@ -56,6 +56,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useActionProgress } from "@/contexts/action-progress-context";
 import { runActionProgress } from "@/lib/action-progress-bridge";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 import {
   ACTIVE_COMPANY_CHANGED_EVENT,
   ACTIVE_COMPANY_ID_STORAGE_KEY,
@@ -541,21 +542,25 @@ export default function CompanyTeamPage() {
 
   const confirmDelete = async () => {
     if (!deleteRow) return;
-    try {
-      await removeTeamMember(deleteRow.membershipId);
-      toast({
-        title: "Removed",
-        description: "User removed from this company.",
-      });
-      setDeleteRow(null);
-      await reload();
-    } catch (err) {
+    const row = deleteRow;
+    await runConfirmDeleteAction(
+      "Removing team member…",
+      () => setDeleteRow(null),
+      async () => {
+        await removeTeamMember(row.membershipId);
+        toast({
+          title: "Removed",
+          description: "User removed from this company.",
+        });
+        await reload();
+      },
+    ).catch((err) => {
       toast({
         title: "Remove failed",
         description: err instanceof Error ? err.message : "Try again.",
         variant: "destructive",
       });
-    }
+    });
   };
 
   const saveRate = async () => {

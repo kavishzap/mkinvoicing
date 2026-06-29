@@ -8,7 +8,6 @@ import {
   FileText,
   LayoutDashboard,
   MapPin,
-  MessageCircle,
   Package,
   Package2,
   PackageOpen,
@@ -26,6 +25,7 @@ import {
 export const FEATURE_CODES = {
   dashboard: "dashboard",
   invoices: "invoices",
+  creditNotes: "credit_notes",
   quotations: "quotations",
   products: "products",
   salesOrders: "sales_orders",
@@ -108,6 +108,7 @@ export type AppNavItem = {
 export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app": "Dashboard",
   "/app/invoices": "Invoices",
+  "/app/credit-notes": "Credit Notes",
   "/app/quotations": "Quotations",
   "/app/sales-orders": "Sales Orders",
   "/app/purchase-orders": "Purchase Orders",
@@ -120,7 +121,6 @@ export const NAV_LABEL_FALLBACK_BY_HREF: Record<string, string> = {
   "/app/expenses": "Expenses",
   "/app/payroll": "Payroll",
   "/app/customer-credit": "Customer Credit",
-  "/app/whatsapp": "WhatsApp",
   "/app/reportings": "Reporting",
   "/app/accounting": "Accounting",
   "/app/company-team": "Company Team",
@@ -160,6 +160,12 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     requires: FEATURE_CODES.invoices,
     href: "/app/invoices",
     icon: FileText,
+    section: "sales",
+  },
+  {
+    requires: FEATURE_CODES.creditNotes,
+    href: "/app/credit-notes",
+    icon: ScrollText,
     section: "sales",
   },
   {
@@ -231,12 +237,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     icon: ScrollText,
     section: "operations",
     subsection: "Delivery",
-  },
-  {
-    requires: FEATURE_CODES.whatsappCatalog,
-    href: "/app/whatsapp",
-    icon: MessageCircle,
-    section: "marketing",
   },
   {
     requires: FEATURE_CODES.reporting,
@@ -344,6 +344,7 @@ export const ROUTE_FEATURE_MATCHERS: ReadonlyArray<{
   requires: FeatureCode;
 }> = [
   { prefix: "/app/invoices", requires: FEATURE_CODES.invoices },
+  { prefix: "/app/credit-notes", requires: FEATURE_CODES.creditNotes },
   { prefix: "/app/quotations", requires: FEATURE_CODES.quotations },
   { prefix: "/app/sales-orders", requires: FEATURE_CODES.salesOrders },
   { prefix: "/app/purchase-orders", requires: FEATURE_CODES.purchaseOrders },

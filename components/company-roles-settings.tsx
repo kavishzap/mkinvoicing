@@ -29,6 +29,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useActionProgress } from "@/contexts/action-progress-context";
 import { runActionProgress } from "@/lib/action-progress-bridge";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 import { useAppFeatures } from "@/contexts/app-features-context";
 import { requireActiveCompanyId } from "@/lib/active-company";
 import { clearRoleFeaturesCache } from "@/lib/role-features-service";
@@ -83,21 +84,23 @@ export function CompanyRolesSettings() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    await runActionProgress("Deleting role…", async () => {
-      try {
-        await deleteCompanyRole(deleteTarget.id);
+    const target = deleteTarget;
+    await runConfirmDeleteAction(
+      "Deleting role…",
+      () => setDeleteTarget(null),
+      async () => {
+        await deleteCompanyRole(target.id);
         toast({ title: "Role deleted", description: "The role was removed." });
-        setDeleteTarget(null);
         clearRoleFeaturesCache();
         await reloadAppFeatures();
         await load();
-      } catch (err) {
-        toast({
-          title: "Delete failed",
-          description: err instanceof Error ? err.message : "Please try again.",
-          variant: "destructive",
-        });
-      }
+      },
+    ).catch((err) => {
+      toast({
+        title: "Delete failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
     });
   };
 

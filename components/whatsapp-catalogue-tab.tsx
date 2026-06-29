@@ -67,6 +67,7 @@ import {
 } from "@/lib/whatsapp-groups-service";
 import { openWhatsAppChat, toWhatsAppDigits } from "@/lib/whatsapp-share";
 import { cn } from "@/lib/utils";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 const NONE = "__none__";
 
@@ -333,29 +334,31 @@ export function WhatsAppCatalogueTab({
   }
 
   async function handleDeletePost(id: string) {
-    try {
-      await deleteCataloguePost(id);
-      toast({ title: "Post deleted" });
-    } catch (e: unknown) {
+    await runConfirmDeleteAction(
+      "Deleting post…",
+      () => setDeleteId(null),
+      async () => {
+        await deleteCataloguePost(id);
+        toast({ title: "Post deleted" });
+        const facetData = await fetchWhatsAppCatalogueListFacets();
+        setFacets(facetData);
+        const listRes = await listCataloguePosts({
+          search: debouncedSearch || undefined,
+          status: statusFilter,
+          page: rows.length === 1 && page > 1 ? page - 1 : page,
+          pageSize,
+        });
+        setRows(listRes.rows);
+        setTotal(listRes.total);
+        if (rows.length === 1 && page > 1) setPage((p) => Math.max(1, p - 1));
+      },
+    ).catch((e: unknown) => {
       toast({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setDeleteId(null);
-      const facetData = await fetchWhatsAppCatalogueListFacets();
-      setFacets(facetData);
-      const listRes = await listCataloguePosts({
-        search: debouncedSearch || undefined,
-        status: statusFilter,
-        page: rows.length === 1 && page > 1 ? page - 1 : page,
-        pageSize,
-      });
-      setRows(listRes.rows);
-      setTotal(listRes.total);
-      if (rows.length === 1 && page > 1) setPage((p) => Math.max(1, p - 1));
-    }
+    });
   }
 
   const sharePreviewUrl =

@@ -49,6 +49,7 @@ import {
 } from "@/lib/purchase-invoices-service";
 import { AppPageShell } from "@/components/app-page-shell";
 import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 export default function PurchaseInvoicesPage() {
   const router = useRouter();
@@ -65,7 +66,6 @@ export default function PurchaseInvoicesPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   const hasActiveFilters = useMemo(
     () => searchQuery.trim() !== "" || statusFilter !== "all",
@@ -275,22 +275,23 @@ export default function PurchaseInvoicesPage() {
 
   const confirmDelete = async () => {
     if (!deleteId) return;
-    setDeleting(true);
-    try {
-      await deletePurchaseInvoice(deleteId);
-      toast({ title: "Purchase invoice deleted" });
-      setRows((r) => r.filter((x) => x.id !== deleteId));
-      setTotal((t) => Math.max(0, t - 1));
-      setDeleteId(null);
-    } catch (e: unknown) {
+    const id = deleteId;
+    await runConfirmDeleteAction(
+      "Deleting purchase invoice…",
+      () => setDeleteId(null),
+      async () => {
+        await deletePurchaseInvoice(id);
+        toast({ title: "Purchase invoice deleted" });
+        setRows((r) => r.filter((x) => x.id !== id));
+        setTotal((t) => Math.max(0, t - 1));
+      },
+    ).catch((e: unknown) => {
       toast({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setDeleting(false);
-    }
+    });
   };
 
   const purchaseInvoiceSubtitle =
@@ -454,16 +455,12 @@ export default function PurchaseInvoicesPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                confirmDelete();
-              }}
-              disabled={deleting}
+              onClick={() => void confirmDelete()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting ? "Deleting…" : "Delete"}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

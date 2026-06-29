@@ -60,6 +60,7 @@ import {
 } from "@/lib/active-company";
 import { AppPageShell } from "@/components/app-page-shell";
 import { ResponsivePageActions } from "@/components/responsive-page-actions";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 function formatListCurrency(amount: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(
@@ -103,7 +104,6 @@ export default function QuotationsPage() {
   });
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   const hasActiveFilters = useMemo(
     () => debouncedSearch !== "" || statusFilter !== "all",
@@ -395,22 +395,23 @@ export default function QuotationsPage() {
 
   const confirmDelete = async () => {
     if (!deleteId) return;
-    setDeleting(true);
-    try {
-      await deleteQuotation(deleteId);
-      toastRef.current({ title: "Quotation deleted" });
-      setRows((r) => r.filter((x) => x.id !== deleteId));
-      setTotal((t) => Math.max(0, t - 1));
-      setDeleteId(null);
-    } catch (e: unknown) {
+    const id = deleteId;
+    await runConfirmDeleteAction(
+      "Deleting quotation…",
+      () => setDeleteId(null),
+      async () => {
+        await deleteQuotation(id);
+        toastRef.current({ title: "Quotation deleted" });
+        setRows((r) => r.filter((x) => x.id !== id));
+        setTotal((t) => Math.max(0, t - 1));
+      },
+    ).catch((e: unknown) => {
       toastRef.current({
         title: "Delete failed",
         description: e instanceof Error ? e.message : "Please try again.",
         variant: "destructive",
       });
-    } finally {
-      setDeleting(false);
-    }
+    });
   };
 
   const quotationSubtitle =
@@ -571,16 +572,12 @@ export default function QuotationsPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                confirmDelete();
-              }}
-              disabled={deleting}
+              onClick={() => void confirmDelete()}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting ? "Deleting…" : "Delete"}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

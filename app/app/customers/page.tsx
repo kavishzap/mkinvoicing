@@ -80,6 +80,7 @@ import {
 import { ResponsivePageActions } from "@/components/responsive-page-actions";
 import { useDirectoryFiltersOpen } from "@/hooks/use-directory-filters-open";
 import { cn } from "@/lib/utils";
+import { runConfirmDeleteAction } from "@/lib/confirm-delete-action";
 
 function formatCity(c: CustomerRow): string {
   return c.cityName || c.city || "—";
@@ -213,7 +214,6 @@ export default function CustomersPage() {
   const [filtersOpen, setFiltersOpen] = useDirectoryFiltersOpen();
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [singleDeleting, setSingleDeleting] = useState(false);
 
   const [exportingCsv, setExportingCsv] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -443,31 +443,27 @@ export default function CustomersPage() {
 
   const handleDelete = useCallback(
     async (id: string) => {
-      let ok = false;
-      try {
-        setSingleDeleting(true);
-        await deleteCustomer(id);
-        ok = true;
-        toastRef.current({
-          title: "Customer deleted",
-          description: "Customer has been removed successfully.",
-        });
-      } catch (e: unknown) {
+      await runConfirmDeleteAction(
+        "Deleting customer…",
+        () => setConfirmDeleteId(null),
+        async () => {
+          await deleteCustomer(id);
+          toastRef.current({
+            title: "Customer deleted",
+            description: "Customer has been removed successfully.",
+          });
+          if (rows.length === 1 && page > 1) setPage((p) => p - 1);
+          else await reload();
+        },
+      ).catch((e: unknown) => {
         toastRef.current({
           title: "Delete failed",
           description: e instanceof Error ? e.message : "Please try again.",
           variant: "destructive",
         });
-      } finally {
-        setSingleDeleting(false);
-        setConfirmDeleteId(null);
-        if (ok) {
-          if (rows.length === 1 && page > 1) setPage((p) => p - 1);
-          else await reload();
-        }
-      }
+      });
     },
-    [rows.length, page, reload, toast],
+    [rows.length, page, reload],
   );
 
   const fetchExportRows = useCallback(
@@ -988,16 +984,14 @@ export default function CustomersPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={singleDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={singleDeleting}
-              onClick={(e) => {
-                e.preventDefault();
+              onClick={() => {
                 if (confirmDeleteId) void handleDelete(confirmDeleteId);
               }}
             >
-              {singleDeleting ? "Deleting…" : "Delete"}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

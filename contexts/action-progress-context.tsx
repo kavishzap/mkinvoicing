@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { ActionProgressDialog } from "@/components/action-progress-dialog";
 import { registerActionProgressRunner } from "@/lib/action-progress-bridge";
+import { queueReleaseDialogBodyLock } from "@/lib/release-dialog-body-lock";
 
 type ActionProgressContextValue = {
   isRunning: boolean;
@@ -38,6 +39,7 @@ export function ActionProgressProvider({
         return await fn();
       } finally {
         setState({ open: false, message: "" });
+        queueReleaseDialogBodyLock();
       }
     },
     [],

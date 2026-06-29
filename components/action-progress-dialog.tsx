@@ -11,8 +11,10 @@ type ActionProgressDialogProps = {
 };
 
 export function ActionProgressDialog({ open, message }: ActionProgressDialogProps) {
+  if (!open) return null;
+
   return (
-    <Dialog open={open}>
+    <Dialog open={open} modal>
       <DialogPortal>
         <DialogOverlay />
         <DialogPrimitive.Content
